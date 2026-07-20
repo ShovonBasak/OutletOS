@@ -1,0 +1,275 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: theme("colors.paper-dim");
+  color: theme("colors.ink");
+  font-family: theme("fontFamily.body");
+}
+
+@layer components {
+  /* Signature ticket / receipt card with torn-edge notches. */
+  .ticket {
+    @apply relative rounded border border-dashed border-ink-soft bg-[#fffdf7] p-4;
+  }
+  .ticket::before,
+  .ticket::after {
+    content: "";
+    @apply absolute -top-2 h-4 w-4 rounded-full bg-paper-dim;
+  }
+  .ticket::before {
+    left: -0.55rem;
+  }
+  .ticket::after {
+    right: -0.55rem;
+  }
+
+  .ticket-row {
+    @apply flex items-baseline justify-between border-b border-dotted border-[#d8cdb0] py-1 font-mono text-xs last:border-0;
+  }
+  .ticket-total {
+    @apply mt-1 flex justify-between border-t border-ink pt-2 font-mono text-sm font-semibold;
+  }
+
+  /* Rotated ink-stamp status badges. */
+  .stamp {
+    @apply inline-block -rotate-6 rounded-sm border-2 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-widest;
+  }
+  .stamp-draft {
+    @apply border-ink-soft text-ink-soft;
+  }
+  .stamp-pending {
+    @apply border-gold-deep text-gold-deep;
+  }
+  .stamp-approved {
+    @apply border-leaf-deep text-leaf-deep;
+  }
+  .stamp-rejected {
+    @apply border-red-deep text-red-deep;
+  }
+  .stamp-variance {
+    @apply border-chili-deep text-chili-deep;
+  }
+
+  .btn {
+    @apply cursor-pointer rounded px-3 py-3 text-center font-mono text-xs uppercase tracking-wider transition disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-action text-gold hover:bg-action-hover;
+  }
+  .btn-ghost {
+    @apply border border-ink bg-transparent text-ink hover:bg-paper-dim;
+  }
+  .btn-approve {
+    @apply bg-leaf text-white hover:brightness-110;
+  }
+  .btn-reject {
+    @apply border border-chili bg-transparent text-chili-deep hover:bg-paper-dim;
+  }
+
+  .field-label {
+    @apply text-[11px] text-ink-soft;
+  }
+  .field-input {
+    @apply w-full rounded border border-[#d8cdb0] bg-[#fffdf7] px-2.5 py-2 font-mono text-sm text-ink outline-none focus:border-chrome;
+  }
+  .num {
+    @apply font-mono;
+  }
+  .chip {
+    @apply cursor-pointer rounded-full border border-[#d8cdb0] px-3 py-1 font-mono text-[11px] uppercase tracking-wide;
+  }
+  .chip-active {
+    @apply border-chrome bg-chrome text-paper;
+  }
+
+  /* ===== Staff mobile — replicated from cp-five-star-full-sitemap.html ===== */
+  .tilegrid {
+    @apply grid grid-cols-2 gap-2.5;
+  }
+  .tile {
+    @apply flex cursor-pointer flex-col gap-1.5 rounded-lg border border-[#d8cdb0] bg-[#fffdf7] p-3.5 transition hover:border-chrome;
+  }
+  .tile .n {
+    @apply font-mono text-[17px] font-semibold;
+  }
+  .tile .l {
+    @apply text-[11px] text-ink-soft;
+  }
+  .listrow {
+    @apply flex items-center justify-between gap-2 rounded-md border border-[#d8cdb0] bg-[#fffdf7] px-3 py-2.5;
+  }
+  .listrow .title {
+    @apply text-xs font-medium;
+  }
+  .listrow .meta {
+    @apply font-mono text-[10px] text-ink-soft;
+  }
+
+  /* ===== Owner desktop — replicated from cp-five-star-full-sitemap.html ===== */
+
+  /* Desktop shell card: sidebar + main column inside one rounded, bordered card.
+     Stacks full-width on mobile; becomes the bordered card at md+. */
+  .desktop {
+    @apply flex w-full flex-1 flex-col overflow-hidden bg-paper md:min-h-[600px] md:flex-none md:flex-row md:rounded-2xl md:border md:border-[#d8cdb0];
+  }
+
+  /* Grouped sidebar. */
+  .sidebar {
+    @apply flex w-[180px] flex-shrink-0 flex-col bg-chrome text-paper;
+  }
+  .sidebrand {
+    @apply flex items-center gap-2 border-b border-white/[0.12] px-4 py-5;
+  }
+  .navgroup-label {
+    @apply px-4 pb-1 pt-3.5 font-mono text-[9px] uppercase tracking-[0.1em] text-white/[0.33];
+  }
+  .navitem {
+    @apply w-full cursor-pointer border-l-[3px] border-transparent bg-none px-4 py-[11px] text-left font-mono text-[11px] uppercase tracking-[0.03em] text-white/[0.6] transition hover:bg-white/[0.06];
+  }
+  .navitem.active {
+    @apply border-gold bg-white/[0.05] text-gold;
+  }
+  /* Collapsible group header + children (accordion), per the sitemap sidebar. */
+  .navparent {
+    @apply flex w-full cursor-pointer select-none items-center justify-between border-l-[3px] border-transparent px-4 py-[11px] text-left font-mono text-[11px] uppercase tracking-[0.03em] text-white/[0.72] transition hover:bg-white/[0.06];
+  }
+  .navchev {
+    @apply inline-block text-[10px] text-white/50 transition-transform duration-200;
+  }
+  .navchev.open {
+    @apply rotate-90 text-gold;
+  }
+  .navchildren {
+    @apply flex flex-col bg-black/10;
+  }
+
+  /* Desktop top bar. */
+  .desktoptop {
+    @apply flex items-center justify-between border-b border-dashed border-[#d8cdb0] px-6 py-4;
+  }
+  .desktoptop h1 {
+    @apply font-display text-base font-bold;
+  }
+  .desktoptop .date {
+    @apply font-mono text-[11px] text-ink-soft;
+  }
+
+  /* KPI cards. */
+  .kpigrid {
+    @apply grid grid-cols-2 gap-2.5 md:grid-cols-4;
+  }
+  .kpicard {
+    @apply rounded-md border border-[#d8cdb0] bg-[#fffdf7] px-3.5 py-3;
+  }
+  .kpicard .l {
+    @apply text-[10px] uppercase tracking-wide text-ink-soft;
+  }
+  .kpicard .n {
+    @apply mt-1 font-mono text-lg font-semibold;
+  }
+  .kpicard .d {
+    @apply mt-0.5 font-mono text-[10px];
+  }
+
+  /* Data tables. */
+  .datatable {
+    @apply w-full border-collapse text-xs;
+  }
+  .datatable th {
+    @apply border-b border-ink px-2 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft;
+  }
+  .datatable td {
+    @apply border-b border-dotted border-[#d8cdb0] px-2 py-2 font-mono text-[11.5px] align-middle;
+  }
+  .datatable tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Filter bar. */
+  .filterbar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .filterbar select,
+  .filterbar input {
+    @apply rounded border border-[#d8cdb0] bg-[#fffdf7] px-2.5 py-1.5 font-mono text-[11px];
+  }
+
+  /* Section heading + forms. */
+  .sec {
+    @apply font-display text-sm font-bold;
+  }
+  .formgrid {
+    @apply grid max-w-[480px] grid-cols-1 gap-3 sm:grid-cols-2;
+  }
+  .segmented {
+    @apply flex overflow-hidden rounded-md border border-ink;
+  }
+  .segmented button {
+    @apply flex-1 cursor-pointer bg-[#fffdf7] px-3 py-2 font-mono text-[11px] uppercase text-ink-soft;
+  }
+  .segmented button + button {
+    @apply border-l border-ink;
+  }
+  .segmented button.active {
+    @apply bg-action text-gold;
+  }
+  .togglerow {
+    @apply flex max-w-[480px] items-center justify-between py-2.5;
+  }
+  .comprow {
+    @apply mb-2 flex items-center gap-2;
+  }
+
+  /* Review-queue card. */
+  .queue-item {
+    @apply relative mb-2.5 rounded border border-dashed border-ink-soft bg-[#fffdf7] px-3.5 py-3;
+  }
+  .queue-item .qtop {
+    @apply mb-1.5 flex items-center justify-between text-xs font-medium;
+  }
+  .queue-item .qmeta {
+    @apply mb-2 font-mono text-[10px] text-ink-soft;
+  }
+  .qbtns {
+    @apply flex gap-2;
+  }
+  .qbtns button {
+    @apply flex-1 cursor-pointer rounded-sm px-2 py-1.5 font-mono text-[10px] uppercase tracking-wide transition disabled:opacity-50;
+  }
+  .qbtns .approve {
+    @apply border-0 bg-leaf text-white hover:brightness-110;
+  }
+  .qbtns .reject {
+    @apply border border-chili bg-transparent text-chili-deep hover:bg-paper-dim;
+  }
+
+  /* P&L ledger table. */
+  .ledger {
+    @apply w-full border-collapse font-mono text-xs;
+  }
+  .ledger td {
+    @apply border-b border-dotted border-[#d8cdb0] py-1.5;
+  }
+  .ledger td:last-child {
+    @apply text-right;
+  }
+  .ledger tr.subtotal td {
+    @apply border-b-0 border-t border-ink pt-2.5 font-semibold;
+  }
+  .ledger tr.net td {
+    @apply pt-3.5 text-sm font-bold;
+  }
+  .ledger tr.section td {
+    @apply pb-0.5 pt-3.5 font-body text-[10px] uppercase tracking-wide text-ink-soft;
+  }
+  .neg {
+    @apply text-chili-deep;
+  }
+  .pos {
+    @apply text-leaf-deep;
+  }
+}

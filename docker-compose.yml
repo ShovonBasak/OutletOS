@@ -1,0 +1,55 @@
+# CP Five Star — full stack. `docker compose up --build` brings up Postgres,
+# the Django API (migrated + seeded), and the Next.js frontend.
+#
+#   Frontend  → http://localhost:3000   (owner 01700000000/owner123, staff 01800000000/staff123)
+#   API/admin → http://localhost:8000   (/admin uses the owner superuser)
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cp_five_star
+      POSTGRES_USER: cp
+      POSTGRES_PASSWORD: cp
+    volumes:
+      - cpfs_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cp -d cp_five_star"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      SECRET_KEY: docker-dev-secret-change-me-not-for-production-32b+
+      DEBUG: "False"
+      ALLOWED_HOSTS: "*"
+      DATABASE_URL: postgres://cp:cp@db:5432/cp_five_star
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist uploaded delivery-slip images across container rebuilds.
+      - cpfs_media:/app/media
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser runs on the host, so it reaches the API via the published port.
+        NEXT_PUBLIC_API_BASE: http://localhost:8000/api
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  cpfs_pgdata:
+  cpfs_media:

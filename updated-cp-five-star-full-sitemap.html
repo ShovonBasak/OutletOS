@@ -1,0 +1,1866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CP Five Star — Full Sitemap v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1C1A19; --ink-soft:#5B5450;
+    --paper:#FBF9F4; --paper-dim:#EFEAE0;
+    --chrome:#7A2420; --chrome-soft:#8F332E;
+    --red:#DE2E27; --red-deep:#7A1712;
+    --gold:#F0C419; --gold-deep:#8A6A06;
+    --chili:#C9601C; --chili-deep:#7A3A10;
+    --leaf:#3F6B3F; --leaf-deep:#264A26;
+    --action:#241512; --action-hover:#3A211D;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-mono:'IBM Plex Mono',monospace;
+    --font-body:'Inter',sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{background:var(--paper-dim); font-family:var(--font-body); color:var(--ink); padding:28px 16px 60px; display:flex; flex-direction:column; align-items:center; gap:36px;}
+  .label{font-family:var(--font-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-soft); text-align:center; margin-bottom:12px;}
+  .modeswitch{display:flex; gap:8px; background:#fff; border:1px solid #d8cdb0; border-radius:8px; padding:4px;}
+  .modeswitch button{font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:8px 16px; border:none; background:none; border-radius:6px; cursor:pointer; color:var(--ink-soft);}
+  .modeswitch button.active{background:var(--action); color:var(--gold);}
+  .hidden{display:none !important;}
+
+  .ticket{background:#fffdf7; border:1px dashed var(--ink-soft); border-radius:4px; padding:16px; position:relative;}
+  .ticket::before, .ticket::after{content:""; position:absolute; top:-8px; width:16px; height:16px; background:var(--paper); border-radius:50%;}
+  .ticket::before{left:-9px;} .ticket::after{right:-9px;}
+  .ticket.locked{opacity:.6;}
+  .ticket-row{display:flex; justify-content:space-between; align-items:center; font-family:var(--font-mono); font-size:12px; padding:6px 0; border-bottom:1px dotted #d8cdb0; gap:8px;}
+  .ticket-row:last-child{border-bottom:0;}
+  .ticket-row .qty{color:var(--ink-soft);}
+  .ticket-row input{width:52px; font-family:var(--font-mono); font-size:12px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px 2px; background:#fff;}
+  .ticket-total{display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:13px; font-weight:600; padding-top:10px; margin-top:6px; border-top:1px solid var(--ink);}
+
+  .stamp{font-family:var(--font-mono); font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; padding:4px 10px; border:2px solid; border-radius:3px; display:inline-block;}
+  .stamp.pos-abs{position:absolute; top:12px; right:16px; transform:rotate(-6deg);}
+  .stamp.draft{color:var(--ink-soft); border-color:var(--ink-soft);}
+  .stamp.pending{color:var(--gold-deep); border-color:var(--gold-deep);}
+  .stamp.approved{color:var(--leaf-deep); border-color:var(--leaf-deep);}
+  .stamp.variance{color:var(--chili-deep); border-color:var(--chili-deep);}
+  .stamp.rejected{color:var(--red-deep); border-color:var(--red-deep);}
+
+  .chip{font-family:var(--font-mono); font-size:9px; text-transform:uppercase; letter-spacing:.05em; padding:2px 6px; border-radius:3px; border:1px solid; white-space:nowrap;}
+  .chip.slip{color:var(--gold-deep); border-color:var(--gold-deep);}
+  .chip.manual{color:var(--ink-soft); border-color:var(--ink-soft);}
+
+  .field{display:flex; flex-direction:column; gap:4px;}
+  .field label{font-size:11px; color:var(--ink-soft);}
+  .field input, .field select{font-family:var(--font-mono); font-size:13px; border:1px solid #d8cdb0; background:#fffdf7; border-radius:4px; padding:8px 10px; color:var(--ink);}
+  .field input:disabled, .field select:disabled{opacity:.55;}
+
+  .btn{font-family:var(--font-mono); font-size:12px; letter-spacing:.06em; text-transform:uppercase; text-align:center; padding:12px; border-radius:4px; border:none; cursor:pointer;}
+  .btn.primary{background:var(--action); color:var(--gold);}
+  .btn.ghost{background:none; border:1px solid var(--ink); color:var(--ink);}
+  .btn.sm{padding:8px; font-size:10px;}
+  .btn.block{width:100%; display:block;}
+  .btn:disabled{opacity:.4; cursor:default;}
+
+  .segmented{display:flex; border:1px solid var(--ink); border-radius:6px; overflow:hidden;}
+  .segmented button{flex:1; background:#fffdf7; border:none; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; padding:9px; cursor:pointer; color:var(--ink-soft);}
+  .segmented button.active{background:var(--action); color:var(--gold);}
+  .segmented button + button{border-left:1px solid var(--ink);}
+
+  .stockbadges{display:flex; gap:8px;}
+  .stockbadge{flex:1; background:var(--paper-dim); border-radius:4px; padding:8px 10px;}
+  .stockbadge .n{font-family:var(--font-mono); font-size:15px; font-weight:600;}
+  .stockbadge .l{font-size:10px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.06em;}
+
+  table.ledger{width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12px;}
+  table.ledger td{padding:7px 0; border-bottom:1px dotted #d8cdb0;}
+  table.ledger td:last-child{text-align:right;}
+  table.ledger tr.subtotal td{border-top:1px solid var(--ink); border-bottom:none; font-weight:600; padding-top:9px;}
+  table.ledger tr.net td{font-weight:700; font-size:14px; padding-top:14px;}
+  table.ledger tr.section td{color:var(--ink-soft); text-transform:uppercase; font-size:10px; letter-spacing:.06em; padding-top:14px; padding-bottom:2px;}
+  .neg{color:var(--chili-deep);} .pos{color:var(--leaf-deep);}
+
+  /* ============ PHONE FRAME (shared: staff + owner mobile) ============ */
+  .phone{width:360px; background:var(--chrome); border-radius:32px; padding:14px; box-shadow:0 20px 40px rgba(0,0,0,.2);}
+  .screen{background:var(--paper); border-radius:20px; overflow:hidden; min-height:660px; display:flex; flex-direction:column;}
+  .topbar{background:var(--chrome); color:var(--paper); padding:18px 18px 14px; display:flex; align-items:center; justify-content:space-between;}
+  .brand{font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:.02em; display:flex; align-items:center; gap:8px;}
+  .brand .dot{width:16px; height:16px; border-radius:50%; background:var(--red); flex-shrink:0;}
+  .brand span{color:var(--gold);}
+  .role{font-family:var(--font-mono); font-size:10px; color:#ffffff99; border:1px solid #ffffff33; padding:3px 8px; border-radius:20px;}
+  .backbtn{font-family:var(--font-mono); font-size:11px; color:var(--ink); background:none; border:none; cursor:pointer;}
+
+  .tabnav{display:flex; background:var(--chrome); border-top:1px solid #ffffff14;}
+  .tabnav button{flex:1; background:none; border:0; color:#ffffff66; font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; padding:12px 4px 14px; cursor:pointer;}
+  .tabnav button.active{color:var(--gold);}
+  .tabnav button.tab-locked{color:#ffffff44; cursor:default;}
+
+  .panel{flex:1; padding:18px; display:none; flex-direction:column; gap:14px; overflow-y:auto;}
+  .panel.active{display:flex;}
+  .panel h1{font-family:var(--font-display); font-weight:700; font-size:18px;}
+  .sub{font-size:12px; color:var(--ink-soft);}
+
+  .tilegrid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .tile{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:14px; cursor:pointer; display:flex; flex-direction:column; gap:6px;}
+  .tile .n{font-family:var(--font-mono); font-size:17px; font-weight:600;}
+  .tile .l{font-size:11px; color:var(--ink-soft);}
+
+  .listrow{display:flex; justify-content:space-between; align-items:center; background:#fffdf7; border:1px solid #d8cdb0; border-radius:6px; padding:10px 12px; gap:8px;}
+  .listrow .meta{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);}
+  .listrow .title{font-size:12px; font-weight:500;}
+
+  .loginbox{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:12px;}
+
+  .soldrow{background:#fffdf7; border:1px solid #d8cdb0; border-radius:6px; padding:9px 11px; display:flex; justify-content:space-between; align-items:center;}
+  .soldrow .title{font-size:12px; font-weight:500;}
+  .soldrow .breakdown{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);}
+  .soldrow .rm{background:none; border:none; color:var(--chili-deep); font-family:var(--font-mono); font-size:14px; cursor:pointer;}
+
+  .addform{background:var(--paper-dim); border:1px dashed var(--ink-soft); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:8px;}
+  .promohint{font-family:var(--font-mono); font-size:10px; color:var(--chili-deep);}
+  .promohint .strike{text-decoration:line-through; color:var(--ink-soft); margin-right:4px;}
+
+  .paysection{border:1px solid #d8cdb0; border-radius:6px; padding:12px;}
+  .paysection h3{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); margin-bottom:8px;}
+  .payinfo-row{display:flex; justify-content:space-between; font-size:12px; padding:5px 0; border-bottom:1px dotted #d8cdb0;}
+  .payinfo-row:last-child{border-bottom:none;}
+  .payinfo-row .amt{font-family:var(--font-mono);}
+  .reconcile{font-family:var(--font-mono); font-size:10px; margin-top:8px; padding-top:8px; border-top:1px solid var(--ink);}
+
+  /* ============ DESKTOP ============ */
+  .desktop{width:100%; max-width:960px; background:var(--paper); border-radius:16px; overflow:hidden; border:1px solid #d8cdb0; display:flex; min-height:600px;}
+  .sidebar{width:180px; background:var(--chrome); color:var(--paper); display:flex; flex-direction:column; flex-shrink:0;}
+  .sidebar .sidebrand{padding:20px 16px; display:flex; align-items:center; gap:8px; border-bottom:1px solid #ffffff1f;}
+  .sidebar .sidebrand .dot{width:14px; height:14px; border-radius:50%; background:var(--red); flex-shrink:0;}
+  .sidebar .sidebrand span{font-family:var(--font-display); font-weight:700; font-size:13px; color:var(--gold);}
+  .navitem{font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; text-transform:uppercase; color:#ffffff99; padding:10px 16px 10px 26px; cursor:pointer; border-left:3px solid transparent; text-align:left; background:none; border-top:none; border-right:none; border-bottom:none; width:100%;}
+  .navitem.active{color:var(--gold); border-left-color:var(--gold); background:#ffffff0c;}
+  .navparent{font-family:var(--font-mono); font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:#ffffff99; padding:13px 16px; cursor:pointer; background:none; border:none; width:100%; text-align:left; display:flex; justify-content:space-between; align-items:center;}
+  .navparent:hover{color:#fff;}
+  .navchev{font-size:9px; transition:transform .15s ease;}
+  .navparent.expanded .navchev{transform:rotate(90deg);}
+  .navchildren{display:none;}
+  .navchildren.expanded{display:block;}
+  .maincol{flex:1; display:flex; flex-direction:column; min-width:0;}
+  .desktoptop{padding:16px 26px; border-bottom:1px dashed #d8cdb0; display:flex; justify-content:space-between; align-items:center;}
+  .desktoptop h1{font-family:var(--font-display); font-weight:700; font-size:16px;}
+  .desktoptop .date{font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);}
+  .ownerpanel{padding:22px 26px; display:none; flex-direction:column; gap:18px; overflow-y:auto;}
+  .ownerpanel.active{display:flex;}
+
+  .kpigrid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  .kpigrid.mobile2{grid-template-columns:repeat(2,1fr);}
+  .kpicard{background:#fffdf7; border:1px solid #d8cdb0; border-radius:6px; padding:12px 14px;}
+  .kpicard .l{font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft);}
+  .kpicard .n{font-family:var(--font-mono); font-size:19px; font-weight:600; margin-top:4px;}
+  .kpicard .d{font-family:var(--font-mono); font-size:10px; margin-top:3px;}
+
+  table.datatable{width:100%; border-collapse:collapse; font-size:12px;}
+  table.datatable th{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); text-align:left; padding:6px 8px; border-bottom:1px solid var(--ink);}
+  table.datatable td{padding:8px 8px; border-bottom:1px dotted #d8cdb0; font-family:var(--font-mono); font-size:11.5px;}
+  table.datatable tr:last-child td{border-bottom:none;}
+
+  .queue-item{background:#fffdf7; border:1px dashed var(--ink-soft); border-radius:4px; padding:12px 14px; position:relative;}
+  .queue-item .qtop{display:flex; justify-content:space-between; font-size:12px; font-weight:500; margin-bottom:6px;}
+  .queue-item .qmeta{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); margin-bottom:8px;}
+  .qbtns{display:flex; gap:8px;}
+  .qbtns button{flex:1; font-family:var(--font-mono); font-size:10px; text-transform:uppercase; padding:7px; border-radius:3px; cursor:pointer;}
+  .qbtns .approve{background:var(--leaf); color:#fff; border:none;}
+  .qbtns .reject{background:none; border:1px solid var(--chili); color:var(--chili-deep);}
+
+  .filterbar{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  .filterbar select, .filterbar input{font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:4px; padding:6px 9px; background:#fffdf7;}
+  .formgrid{display:grid; grid-template-columns:1fr 1fr; gap:12px; max-width:480px;}
+  h2.sec{font-family:var(--font-display); font-weight:700; font-size:14px;}
+
+  .stepcard{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:13px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;}
+  .stepcard .stitle{font-size:13px; font-weight:600;}
+  .stepcard .snum{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); margin-right:6px;}
+  .stepcard .sstatus{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); margin-top:3px;}
+  .stepcard .sstatus.done{color:var(--leaf-deep);}
+  .stepcard .sstatus.warn{color:var(--chili-deep);}
+  .stepcard.locked{opacity:.5; cursor:default;}
+  .stepcard .schev{font-family:var(--font-mono); color:var(--ink-soft); font-size:16px;}
+
+  .chipbar{display:flex; gap:6px; overflow-x:auto; padding-bottom:2px;}
+  .catchip{font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.03em; padding:6px 11px; border:1px solid var(--ink-soft); border-radius:20px; white-space:nowrap; cursor:pointer; color:var(--ink-soft); background:none;}
+  .catchip.active{background:var(--action); color:var(--gold); border-color:var(--action);}
+
+  .progresswrap{display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);}
+  .progressbar{flex:1; height:6px; background:var(--paper-dim); border-radius:3px; overflow:hidden;}
+  .progressbar .fill{height:100%; background:var(--leaf);}
+
+  .countrow{display:grid; grid-template-columns:1fr 32px 44px 44px; gap:6px; align-items:center; padding:8px 4px; border-bottom:1px dotted #d8cdb0;}
+  .countrow.done{background:#f2f7f2; border-radius:4px;}
+  .countrow .pname{font-size:11.5px;}
+  .countrow .avail{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); text-align:center;}
+  .countrow input{font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:5px 2px; background:#fff;}
+
+  .onlinerow{display:grid; grid-template-columns:1fr 42px 42px 42px; gap:6px; align-items:center; padding:8px 4px; border-bottom:1px dotted #d8cdb0;}
+  .onlinerow.done{background:#f2f7f2; border-radius:4px;}
+  .onlinerow .pname{font-size:11.5px;}
+  .onlinerow input{font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:5px 2px; background:#fff;}
+
+  .comprow{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+  .comprow select{flex:2;} .comprow input{flex:1;}
+  .comprow .rm{background:none; border:none; color:var(--chili-deep); font-family:var(--font-mono); font-size:16px; cursor:pointer; padding:0 4px;}
+  .togglerow{display:flex; align-items:center; justify-content:space-between; padding:10px 0;}
+  .togglerow label{font-size:12px;}
+
+  .dsrow{border-bottom:1px dotted #d8cdb0; padding:8px 0;}
+  .dsrow.discrepant .dstop{color:var(--chili-deep);}
+  .dstop{display:flex; align-items:center; gap:8px;}
+  .dstop .pname{font-size:11.5px; flex:1;}
+  .dstop .dsmeta{font-family:var(--font-mono); font-size:9.5px; color:var(--ink-soft);}
+  .dstop input{width:52px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:5px 2px; background:#fff;}
+  .dsreason{margin-top:6px;}
+  .dsreason select{width:100%; font-family:var(--font-mono); font-size:11px; border:1px solid var(--chili-deep); border-radius:3px; padding:6px; background:#fff;}
+
+  .pkgrow{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:12px; margin-bottom:10px;}
+  .pkgtop{display:flex; flex-direction:column; gap:2px; margin-bottom:8px;}
+  .pkgtop .pname{font-size:13px; font-weight:600;}
+  .pkgtop .pmeta{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);}
+  .pkgbtns{display:flex; gap:8px;}
+  .pkgbtns .btn{flex:1;}
+  .pkgrecount{display:none; margin-top:8px; gap:8px; align-items:center;}
+  .pkgrecount input{width:70px; font-family:var(--font-mono); font-size:12px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:6px;}
+  .pkgpending{display:none; align-items:center; gap:8px; background:#fdf0e6; border:1px solid var(--gold-deep); border-radius:6px; padding:8px 10px; margin-top:8px;}
+  .pkgpending .ptext{font-family:var(--font-mono); font-size:11px; color:var(--gold-deep); flex:1;}
+  .pkgpending .confirm{background:var(--leaf); color:#fff; border:none; border-radius:3px; padding:6px 10px; font-family:var(--font-mono); font-size:10px; cursor:pointer;}
+  .pkgpending .cancel{background:none; border:1px solid var(--chili-deep); color:var(--chili-deep); border-radius:3px; padding:6px 10px; font-family:var(--font-mono); font-size:10px; cursor:pointer;}
+
+  .cfrow{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:12px; margin-bottom:10px;}
+  .cfrow.has-waste{border-color:var(--chili-deep);}
+  .cftop .title{font-size:12px; font-weight:500;}
+  .cftop .meta{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft);}
+  .cfmove{display:flex; align-items:center; gap:8px; margin:8px 0;}
+  .cfmove label{font-size:11px; color:var(--ink-soft);}
+  .cfmove input{width:54px; font-family:var(--font-mono); font-size:12px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:5px 2px;}
+  .cfwaste{font-family:var(--font-mono); font-size:10px; color:var(--chili-deep);}
+
+  .si-yield{font-size:9.5px; color:var(--ink-soft); margin-left:4px;}
+  .ticket-row.si-needs-yield{border-bottom:none; padding-bottom:0;}
+  .si-yield-prompt{background:#fdf0e6; border:1px solid var(--chili-deep); border-radius:4px; padding:8px 10px; margin:2px 0 8px; font-size:10.5px; color:var(--chili-deep); display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .si-yield-prompt input{width:64px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid var(--chili-deep); border-radius:3px; padding:4px;}
+  .si-yield-prompt.resolved{background:#f2f8f2; border-color:var(--leaf); color:var(--leaf-deep);}
+
+  .dropzone{border:2px dashed #d8cdb0; border-radius:8px; padding:28px; text-align:center; cursor:pointer; background:#fffdf7;}
+  .dropzone:hover{border-color:var(--chrome);}
+  .dropzone .dztitle{font-family:var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;}
+  .fileschip{display:flex; gap:8px; flex-wrap:wrap;}
+  .filepill{font-family:var(--font-mono); font-size:10px; background:var(--paper-dim); border:1px solid #d8cdb0; border-radius:4px; padding:6px 10px;}
+
+  .extractrow{display:grid; grid-template-columns:20px 1fr 1fr 66px 60px 44px 30px; gap:8px; align-items:center; padding:8px 4px; border-bottom:1px dotted #d8cdb0;}
+  .extractrow input[type="text"]{font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px 7px; background:#fff; width:100%;}
+  .extractrow .rawtext{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft);}
+  .extractrow .seen{font-family:var(--font-mono); font-size:10px; color:var(--ink-soft); text-align:center;}
+  .warnbadge{font-family:var(--font-mono); font-size:9px; text-transform:uppercase; color:var(--chili-deep); border:1px solid var(--chili-deep); border-radius:3px; padding:2px 6px; white-space:nowrap;}
+
+  .maprow{display:flex; gap:16px; align-items:flex-start;}
+  .mapcol{flex:1; min-width:0;}
+  .mapcol h2.sec{margin-bottom:8px;}
+  .ingchip{display:flex; align-items:center; gap:8px; background:#fffdf7; border:1px solid #d8cdb0; border-radius:6px; padding:9px 10px; margin-bottom:8px; cursor:grab;}
+  .ingchip:active{cursor:grabbing;}
+  .ingchip .dragdot{color:var(--ink-soft); font-family:var(--font-mono); font-size:12px;}
+  .ingchip .ingname{font-size:12px; flex:1;}
+  .bucket{background:#fffdf7; border:1px solid #d8cdb0; border-radius:8px; padding:12px; margin-bottom:12px; min-height:70px;}
+  .bucket.dragover{border-color:var(--leaf); background:#f2f8f2;}
+  .bucket .bname{font-family:var(--font-display); font-weight:700; font-size:13px; margin-bottom:8px;}
+  .bucket .bempty{font-size:10.5px; color:var(--ink-soft); font-style:italic;}
+  .assignedrow{display:flex; justify-content:space-between; align-items:center; background:var(--paper-dim); border-radius:4px; padding:6px 9px; margin-bottom:6px; font-size:11.5px;}
+  .assignedrow .ratio{font-family:var(--font-mono); font-size:10px;}
+  .assignedrow .rm{background:none; border:none; color:var(--chili-deep); font-family:var(--font-mono); cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div class="modeswitch">
+  <button class="active" onclick="setMode('staff', this)">Staff — mobile</button>
+  <button onclick="setMode('ownerm', this)">Owner — mobile</button>
+  <button onclick="setMode('ownerd', this)">Owner — desktop</button>
+</div>
+
+<!-- ======================================================= -->
+<!-- STAFF MOBILE                                             -->
+<!-- ======================================================= -->
+<div id="staffwrap">
+
+<div>
+  <p class="label">Login</p>
+  <div class="phone">
+    <div class="screen" style="justify-content:center; padding:40px 24px;">
+      <div class="loginbox">
+        <div class="brand" style="justify-content:center; margin-bottom:6px;"><span class="dot"></span>CP <span style="color:var(--gold-deep);">FIVE STAR</span></div>
+        <p class="sub" style="text-align:center;">Staff sign in</p>
+        <div class="field"><label>Phone number</label><input value="01XXXXXXXXX"></div>
+        <div class="field"><label>PIN</label><input type="password" value="••••"></div>
+        <div class="btn primary block">Sign in</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div>
+  <p class="label">Staff app</p>
+  <div class="phone">
+    <div class="screen">
+      <div class="topbar">
+        <div class="brand"><span class="dot"></span>CP <span>FIVE STAR</span></div>
+        <div class="role">STAFF</div>
+      </div>
+
+      <div class="panel active" id="p-home">
+        <div id="home-notstarted">
+          <div style="text-align:center; padding:50px 10px 10px;">
+            <p class="sub" style="margin-bottom:18px;">14 Jul · Dhanmondi outlet</p>
+            <div class="btn primary" style="padding:18px; font-size:14px;" onclick="showPanel('daystartstock',null)">▶ Start your day</div>
+            <p style="margin-top:16px;"><a href="#" onclick="showPanel('yesterday',null); return false;" style="font-size:11px; color:var(--ink-soft); text-decoration:underline;">View yesterday's summary</a></p>
+          </div>
+        </div>
+        <div id="home-active" class="hidden" style="display:flex; flex-direction:column; gap:14px;">
+          <div><h1>Today — 14 Jul</h1><p class="sub">Dhanmondi outlet</p></div>
+          <div class="ticket">
+            <div class="ticket-row"><span>Stock in status</span><span class="qty">Draft — 2 items</span></div>
+            <div class="ticket-row"><span>Prepared today</span><span class="qty">50 pcs</span></div>
+            <div class="ticket-row"><span>Closing status</span><span class="qty">Not started</span></div>
+          </div>
+          <p class="sub" style="margin-top:4px;">Quick actions</p>
+          <div class="tilegrid">
+            <div class="tile" onclick="showPanel('stock',this)"><span class="n">71</span><span class="l">Pieces in stock</span></div>
+            <div class="tile" onclick="showPanel('history',this)"><span class="n">12</span><span class="l">Stock in history</span></div>
+            <div class="tile" onclick="showPanel('expense',this)"><span class="n">+</span><span class="l">Add expense</span></div>
+            <div class="tile" onclick="showPanel('profile',this)"><span class="n">···</span><span class="l">Profile &amp; settings</span></div>
+          </div>
+          <div class="tile" onclick="showPanel('packaging',this)" style="margin-top:2px;"><span class="n">📦</span><span class="l">Packaging &amp; supplies — update stock</span></div>
+          <p style="text-align:center; margin-top:4px;"><a href="#" onclick="showPanel('daystartstock',null); return false;" style="font-size:10.5px; color:var(--ink-soft); text-decoration:underline;">Edit day-start stock</a></p>
+        </div>
+      </div>
+
+      <!-- YESTERDAY'S SUMMARY — small recap, reached only via the de-emphasized link -->
+      <div class="panel" id="p-yesterday">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Yesterday — 13 Jul</h1><p class="sub">Closed &amp; locked at 11:47 PM</p></div>
+        <table class="ledger">
+          <tr><td>Total sale</td><td>৳ 11,020</td></tr>
+          <tr><td>Cash + bKash + Card</td><td>৳ 2,910</td></tr>
+          <tr><td>Wastage logged</td><td>3 pcs</td></tr>
+        </table>
+        <p class="sub" style="color:var(--chili-deep);">⚠ Crispy fry had a stock-count flag — reviewed and accepted by owner.</p>
+      </div>
+
+      <!-- DAY-START STOCK — step 1 of the morning wizard, gates everything else -->
+      <div class="panel" id="p-daystartstock">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Day-start stock</h1><p class="sub">Yesterday's ending stock, carried into today. Adjust if anything changed overnight.</p></div>
+        <div class="btn ghost" onclick="replicateStock()">↻ Replicate all from yesterday</div>
+        <p class="sub" id="daystart-warning" style="color:var(--chili-deep); display:none;">⚠ Pick a reason for each item that's short before continuing.</p>
+
+        <div class="dsrow" data-yesterday="14">
+          <div class="dstop">
+            <span class="pname">Burger Bun</span>
+            <span class="dsmeta">Yesterday: 14 pcs</span>
+            <input class="daystart-input" value="14" oninput="checkDiscrepancy(this)">
+          </div>
+          <div class="dsreason" style="display:none;">
+            <select onchange="resolveDiscrepancy(this)">
+              <option value="">Why the difference?</option>
+              <option value="spoiled">Spoiled</option>
+              <option value="miscounted">Miscounted yesterday</option>
+              <option value="surplus">Surplus found</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="dsrow" data-yesterday="9">
+          <div class="dstop">
+            <span class="pname">Crispy Patty</span>
+            <span class="dsmeta">Yesterday: 9 pcs</span>
+            <input class="daystart-input" value="9" oninput="checkDiscrepancy(this)">
+          </div>
+          <div class="dsreason" style="display:none;">
+            <select onchange="resolveDiscrepancy(this)">
+              <option value="">Why the difference?</option>
+              <option value="spoiled">Spoiled</option>
+              <option value="miscounted">Miscounted yesterday</option>
+              <option value="surplus">Surplus found</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="dsrow" data-yesterday="0.4">
+          <div class="dstop">
+            <span class="pname">Mayonnaise</span>
+            <span class="dsmeta">Yesterday: 0.4 bottle</span>
+            <input class="daystart-input" value="0.4" oninput="checkDiscrepancy(this)">
+          </div>
+          <div class="dsreason" style="display:none;">
+            <select onchange="resolveDiscrepancy(this)">
+              <option value="">Why the difference?</option>
+              <option value="spoiled">Spoiled</option>
+              <option value="miscounted">Miscounted yesterday</option>
+              <option value="surplus">Surplus found</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="dsrow" data-yesterday="30">
+          <div class="dstop">
+            <span class="pname">Coke Can <span class="chip manual" style="font-size:8px;">Direct stock</span></span>
+            <span class="dsmeta">Yesterday: 30 pcs</span>
+            <input class="daystart-input" value="30" oninput="checkDiscrepancy(this)">
+          </div>
+          <div class="dsreason" style="display:none;">
+            <select onchange="resolveDiscrepancy(this)">
+              <option value="">Why the difference?</option>
+              <option value="spoiled">Spoiled</option>
+              <option value="miscounted">Miscounted yesterday</option>
+              <option value="surplus">Surplus found</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="sub">+ 8 more ingredients</p>
+        <div class="btn primary" id="daystart-continue" onclick="tryContinueDayStart()">Confirm &amp; continue</div>
+      </div>
+
+      <!-- PREP CARRY-FORWARD — step 2 of the morning wizard -->
+      <div class="panel" id="p-prepcarryforward">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('daystartstock',null)">‹ Back</button></div>
+        <div><h1>Yesterday's leftovers</h1><p class="sub">Still good to sell today? Move what you can — anything short of the full amount is logged as wastage automatically.</p></div>
+
+        <div class="cfrow" data-leftover="16">
+          <div class="cftop">
+            <div><div class="title">Crispy fry</div><div class="meta">16 pcs remaining from yesterday</div></div>
+          </div>
+          <div class="cfmove">
+            <label>Move to today</label>
+            <input class="cf-input" value="16" oninput="checkCarryForward(this)">
+            <span class="cfwaste" style="display:none;"></span>
+          </div>
+          <button class="btn ghost sm" onclick="carryForward(this)">Confirm</button>
+        </div>
+
+        <div class="cfrow" data-leftover="4">
+          <div class="cftop">
+            <div><div class="title">Wrap</div><div class="meta">4 pcs remaining from yesterday</div></div>
+          </div>
+          <div class="cfmove">
+            <label>Move to today</label>
+            <input class="cf-input" value="4" oninput="checkCarryForward(this)">
+            <span class="cfwaste" style="display:none;"></span>
+          </div>
+          <button class="btn ghost sm" onclick="carryForward(this)">Confirm</button>
+        </div>
+
+        <div class="btn primary" style="margin-top:10px;" onclick="finishDayStart()">Continue to today's app</div>
+      </div>
+
+      <!-- STOCK IN: list -->
+      <div class="panel" id="p-stockin">
+        <div><h1>Stock in</h1><p class="sub">Today's receiving</p></div>
+        <div class="listrow" onclick="showPanel('stockinnew',null)" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ New stock in</span></div>
+        <div class="listrow"><div><div class="title">#SI-0142 · 12 packs</div><div class="meta">14 Jul · 09:40</div></div><span class="stamp pending">Pending</span></div>
+        <p class="sub" style="margin-top:6px;">Earlier</p>
+        <div class="listrow"><div><div class="title">#SI-0141 · 10 packs</div><div class="meta">13 Jul</div></div><span class="stamp approved">Approved</span></div>
+        <div class="listrow"><div><div class="title">#SI-0140 · 8 packs</div><div class="meta">12 Jul</div></div><span class="stamp approved">Approved</span></div>
+      </div>
+
+      <!-- STOCK IN: new entry, slip + manual combined, editable, then locked on submit -->
+      <div class="panel" id="p-stockinnew">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('stockin',null)">‹ Back</button></div>
+        <div><h1>New stock in</h1><p class="sub" id="si-status">Draft — editable</p></div>
+
+        <div class="field"><label>Company slip (optional)</label><div class="btn ghost" id="si-attach" onclick="extractSlip()">+ Attach &amp; auto-extract</div></div>
+
+        <div class="ticket" id="si-ticket">
+          <span class="stamp draft pos-abs" id="si-stamp">Draft</span>
+
+          <div class="ticket-row" id="si-row-1">
+            <span>Burger Bun <span class="chip slip">Slip</span></span>
+            <span><input value="4" id="si-in-1" oninput="updatePackTotal(this,10)"> packs <span class="si-yield">= 40 pcs</span></span>
+          </div>
+
+          <div class="ticket-row" id="si-row-2">
+            <span>Crispy Patty <span class="chip slip">Slip</span></span>
+            <span><input value="3" id="si-in-2" oninput="updatePackTotal(this,10)"> packs <span class="si-yield">= 30 pcs</span></span>
+          </div>
+
+          <div class="ticket-row si-needs-yield" id="si-row-3">
+            <span>Meatball <span class="chip slip">Slip</span></span>
+            <span><input value="2" id="si-in-3"> packs</span>
+          </div>
+          <div class="si-yield-prompt" id="si-yield-prompt-3">
+            ❓ This one skipped ingredient setup — how many pieces in 1 pack?
+            <input placeholder="e.g. 23" oninput="resolvePackYield(this,'si-row-3')">
+          </div>
+
+          <div class="ticket-row" id="si-row-4">
+            <span>Chicken Katsu (raw) <span class="chip manual">Manual</span></span>
+            <span><input value="2" id="si-in-4" oninput="updatePackTotal(this,1)"> packs <span class="si-yield">= 2 pcs</span></span>
+          </div>
+        </div>
+        <p class="sub" id="si-yield-warning" style="color:var(--chili-deep); display:none;">⚠ Meatball needs a pack size before you can submit — this is normally set once in Extract Ingredients, but you can answer it here too.</p>
+
+        <div class="field" id="si-manual-add">
+          <label>Add item without a slip</label>
+          <div style="display:flex; gap:8px;">
+            <select style="flex:2;"><option>Burger Bun</option><option>Crispy Patty</option><option>Mayonnaise</option><option>Chicken Katsu (raw)</option></select>
+            <input style="flex:1;" placeholder="packs">
+            <button class="btn ghost sm" onclick="addManualLine()">Add</button>
+          </div>
+        </div>
+
+        <div class="btn primary" id="si-submit" onclick="submitStockIn()">Request approval</div>
+      </div>
+
+      <div class="panel" id="p-history">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Stock in history</h1><p class="sub">All records</p></div>
+        <div class="listrow"><div><div class="title">#SI-0142 · 9 packs</div><div class="meta">14 Jul · 09:40</div></div><span class="stamp pending">Pending</span></div>
+        <div class="listrow"><div><div class="title">#SI-0141 · 10 packs</div><div class="meta">13 Jul · 09:15</div></div><span class="stamp approved">Approved</span></div>
+        <div class="listrow"><div><div class="title">#SI-0140 · 8 packs</div><div class="meta">12 Jul · 09:50</div></div><span class="stamp approved">Approved</span></div>
+        <div class="listrow"><div><div class="title">#SI-0139 · 6 packs</div><div class="meta">11 Jul · 10:05</div></div><span class="stamp rejected">Rejected</span></div>
+      </div>
+
+      <!-- PREPARATION LOG (renamed from Fry log) -->
+      <div class="panel" id="p-prep">
+        <div><h1>Preparation log</h1><p class="sub">14 Jul · running totals</p></div>
+        <div class="stockbadges">
+          <div class="stockbadge"><div class="n">7.5</div><div class="l">Raw packs left</div></div>
+          <div class="stockbadge"><div class="n">64</div><div class="l">Ready pieces</div></div>
+        </div>
+        <div class="field"><label>Product</label><select><option>Crispy chicken fry</option><option>Burger</option><option>Chicken Katsu</option><option>Rice</option></select></div>
+        <div class="field">
+          <label>Prepared by</label>
+          <div class="segmented">
+            <button class="active" id="prep-pack-btn" onclick="setPrepUnit('pack')">By pack</button>
+            <button id="prep-piece-btn" onclick="setPrepUnit('piece')">By piece</button>
+          </div>
+        </div>
+        <div class="field" id="prep-pack-field"><label>Packs used</label><input value="1.0"><p class="sub">≈ 15 pcs at current pack size</p></div>
+        <div class="field hidden" id="prep-piece-field"><label>Pieces prepared</label><input value="12"><p class="sub">Individual portions — no raw pack drawn down</p></div>
+        <div class="btn primary">Log preparation</div>
+        <div>
+          <p class="sub" style="margin-bottom:6px;">Today's entries</p>
+          <div class="listrow" style="margin-bottom:6px;"><span class="meta">11:20 · Crispy fry</span><span class="meta">1 pack → 15 pcs</span></div>
+          <div class="listrow"><span class="meta">13:05 · Rice</span><span class="meta">12 pcs (individual)</span></div>
+        </div>
+      </div>
+
+      <div class="panel" id="p-stock">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Stock overview</h1><p class="sub">Raw packs &amp; ready pieces</p></div>
+        <div class="listrow"><div class="title">Burger</div><div class="meta">3 packs · 12 pcs ready</div></div>
+        <div class="listrow"><div class="title">Wrap</div><div class="meta">2 packs · 9 pcs ready</div></div>
+        <div class="listrow"><div class="title">Crispy fry</div><div class="meta">2.5 packs · 50 pcs ready</div></div>
+        <div class="listrow"><div class="title">Rice</div><div class="meta">— · 12 pcs ready</div></div>
+        <p class="sub">+ 19 more items</p>
+      </div>
+
+      <!-- PACKAGING & SUPPLIES — periodic count, not per-transaction -->
+      <div class="panel" id="p-packaging">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Packaging &amp; supplies</h1><p class="sub">Update whenever a bundle finishes, or count what's left.</p></div>
+
+        <div class="pkgrow" data-count="340">
+          <div class="pkgtop"><span class="pname">Paper Envelope</span><span class="pmeta">340 left · last checked 2 days ago</span></div>
+          <div class="pkgbtns">
+            <button class="btn ghost sm" onclick="bundleFinished(this,500)">− 1 bundle (500)</button>
+            <button class="btn ghost sm" onclick="openRecount(this)">Recount</button>
+          </div>
+          <div class="pkgpending"><span class="ptext"></span><button class="confirm" onclick="confirmBundle(this)">✓ Confirm</button><button class="cancel" onclick="cancelBundle(this)">✕ Cancel</button></div>
+          <div class="pkgrecount"><input placeholder="e.g. 340"><button class="btn ghost sm" onclick="confirmRecount(this)">✓ Save</button></div>
+        </div>
+
+        <div class="pkgrow" data-count="180">
+          <div class="pkgtop"><span class="pname">Medium Bag</span><span class="pmeta">180 left · last checked today</span></div>
+          <div class="pkgbtns">
+            <button class="btn ghost sm" onclick="bundleFinished(this,200)">− 1 bundle (200)</button>
+            <button class="btn ghost sm" onclick="openRecount(this)">Recount</button>
+          </div>
+          <div class="pkgpending"><span class="ptext"></span><button class="confirm" onclick="confirmBundle(this)">✓ Confirm</button><button class="cancel" onclick="cancelBundle(this)">✕ Cancel</button></div>
+          <div class="pkgrecount"><input placeholder="e.g. 180"><button class="btn ghost sm" onclick="confirmRecount(this)">✓ Save</button></div>
+        </div>
+
+        <div class="pkgrow" data-count="95">
+          <div class="pkgtop"><span class="pname">Large Bag</span><span class="pmeta">95 left · last checked today</span></div>
+          <div class="pkgbtns">
+            <button class="btn ghost sm" onclick="bundleFinished(this,100)">− 1 bundle (100)</button>
+            <button class="btn ghost sm" onclick="openRecount(this)">Recount</button>
+          </div>
+          <div class="pkgpending"><span class="ptext"></span><button class="confirm" onclick="confirmBundle(this)">✓ Confirm</button><button class="cancel" onclick="cancelBundle(this)">✕ Cancel</button></div>
+          <div class="pkgrecount"><input placeholder="e.g. 95"><button class="btn ghost sm" onclick="confirmRecount(this)">✓ Save</button></div>
+        </div>
+
+        <div class="pkgrow" data-count="640">
+          <div class="pkgtop"><span class="pname">Sauce Packet</span><span class="pmeta">640 left · last checked yesterday</span></div>
+          <div class="pkgbtns">
+            <button class="btn ghost sm" onclick="bundleFinished(this,1000)">− 1 bundle (1000)</button>
+            <button class="btn ghost sm" onclick="openRecount(this)">Recount</button>
+          </div>
+          <div class="pkgpending"><span class="ptext"></span><button class="confirm" onclick="confirmBundle(this)">✓ Confirm</button><button class="cancel" onclick="cancelBundle(this)">✕ Cancel</button></div>
+          <div class="pkgrecount"><input placeholder="e.g. 640"><button class="btn ghost sm" onclick="confirmRecount(this)">✓ Save</button></div>
+        </div>
+
+        <p class="sub">"− 1 bundle" is a quick estimate for when one just runs out. "Recount" is more accurate — use it when you actually have a moment to count.</p>
+      </div>
+
+      <!-- DAILY CLOSING — redesigned sales entry + split payments -->
+      <!-- CLOSING HUB — separates counting from channel entry, each step is its own screen -->
+      <div class="panel" id="p-closing">
+        <div><h1>Day-end closing</h1><p class="sub">14 Jul · in progress</p></div>
+        <div class="stepcard" onclick="showPanel('closecount',null)">
+          <div><div class="stitle"><span class="snum">1</span>Count remains &amp; wastage</div><div class="sstatus">14 / 23 counted</div></div>
+          <span class="schev">›</span>
+        </div>
+        <div class="stepcard locked">
+          <div><div class="stitle"><span class="snum">2</span>Online sell</div><div class="sstatus">🔒 Finish step 1 first</div></div>
+          <span class="schev">›</span>
+        </div>
+        <div class="stepcard locked">
+          <div><div class="stitle"><span class="snum">3</span>Walk-in (auto-calculated)</div><div class="sstatus">🔒 Finish step 2 first</div></div>
+          <span class="schev">›</span>
+        </div>
+        <div class="stepcard locked">
+          <div><div class="stitle"><span class="snum">4</span>Payments</div><div class="sstatus">🔒 Finish step 3 first</div></div>
+          <span class="schev">›</span>
+        </div>
+        <div class="btn primary" style="margin-top:6px; opacity:.5;">Submit closing</div>
+        <p class="sub" style="text-align:center;">Steps unlock in order — but once done, tap back in any time to fix something.</p>
+      </div>
+
+      <!-- STEP 1: count, redesigned for 23+ items — search, category filter, progress, done-state -->
+      <div class="panel" id="p-closecount">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('closing',null)">‹ Back</button></div>
+        <div><h1>Count remains &amp; wastage</h1><p class="sub">Cold drinks: just enter what's left in stock.</p></div>
+        <div class="progresswrap"><div class="progressbar"><div class="fill" style="width:61%;"></div></div><span>14 / 23</span></div>
+        <input placeholder="Search 23 menu items…">
+        <div class="chipbar">
+          <button class="catchip active" onclick="selectChip(this)">All</button>
+          <button class="catchip" onclick="selectChip(this)">Fried</button>
+          <button class="catchip" onclick="selectChip(this)">Sandwich</button>
+          <button class="catchip" onclick="selectChip(this)">Sides</button>
+          <button class="catchip" onclick="selectChip(this)">Drinks</button>
+        </div>
+        <div>
+          <div class="countrow" style="font-family:var(--font-mono); font-size:9px; color:var(--ink-soft); border-bottom:1px solid var(--ink);">
+            <div>Product</div><div style="text-align:center;">Avail</div><div style="text-align:center;">Waste</div><div style="text-align:center;">Remains</div>
+          </div>
+          <div class="countrow done"><div class="pname">Crispy fry</div><div class="avail">64</div><input value="2"><input value="16"></div>
+          <div class="countrow"><div class="pname">Burger</div><div class="avail">20</div><input placeholder="0"><input placeholder="0"></div>
+          <div class="countrow done"><div class="pname">Coke Can <span class="chip manual" style="font-size:8px;">Stock</span></div><div class="avail">48</div><input value="1"><input value="30"></div>
+          <div class="countrow done"><div class="pname">Wrap</div><div class="avail">20</div><input value="0"><input value="12"></div>
+          <div class="countrow"><div class="pname">Chicken Katsu</div><div class="avail">18</div><input placeholder="0"><input placeholder="0"></div>
+        </div>
+        <p class="sub">Rows tick off automatically as you fill them in — filter by category or search to jump around instead of scrolling all 23.</p>
+      </div>
+
+      <!-- STEP 2: Online sell — same list pattern as the count screen, one row per item with a qty field per channel -->
+      <div class="panel" id="p-closeonline">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('closing',null)">‹ Back</button></div>
+        <div><h1>Online sell</h1><p class="sub">Quantity sold per channel — no counting here.</p></div>
+        <input placeholder="Search 23 menu items…">
+        <div class="chipbar">
+          <button class="catchip active" onclick="selectChip(this)">All</button>
+          <button class="catchip" onclick="selectChip(this)">Fried</button>
+          <button class="catchip" onclick="selectChip(this)">Sandwich</button>
+          <button class="catchip" onclick="selectChip(this)">Sides</button>
+          <button class="catchip" onclick="selectChip(this)">Drinks</button>
+        </div>
+        <div>
+          <div class="onlinerow" style="font-family:var(--font-mono); font-size:9px; color:var(--ink-soft); border-bottom:1px solid var(--ink);">
+            <div>Product</div><div style="text-align:center;">Pathao</div><div style="text-align:center;">Foodi</div><div style="text-align:center;">Panda</div>
+          </div>
+          <div class="onlinerow done"><div class="pname">Burger</div><input value="1"><input placeholder="0"><input value="3"></div>
+          <div class="onlinerow done"><div class="pname">Wrap</div><input placeholder="0"><input value="2"><input placeholder="0"></div>
+          <div class="onlinerow"><div class="pname">Crispy fry</div><input placeholder="0"><input placeholder="0"><input placeholder="0"></div>
+          <div class="onlinerow done"><div class="pname">Buddy Combo <span class="chip manual" style="font-size:8px; border-color:var(--gold-deep); color:var(--gold-deep);">Combo</span></div><input placeholder="0"><input placeholder="0"><input value="2"></div>
+          <div class="onlinerow"><div class="pname">Chicken Katsu</div><input placeholder="0"><input placeholder="0"><input placeholder="0"></div>
+        </div>
+        <p class="sub">Foodpanda qty uses its own promo/combo price automatically — e.g. Buddy Combo ৳249, Crispy fry 20% off. Rows tick off as soon as any channel has a quantity.</p>
+        <p class="sub">+ 18 more items — search or filter to find them</p>
+
+        <div class="field"><label>Discounts given on Pathao today (৳)</label><input value="0" placeholder="from Pathao's daily summary"></div>
+        <div class="field"><label>Discounts given on Foodi today (৳)</label><input value="150" placeholder="from Foodi's daily summary"></div>
+        <div class="field"><label>Discounts given on Foodpanda today (৳)</label><input value="480" placeholder="from Foodpanda's daily summary"></div>
+
+        <div class="btn primary">Done — back to checklist</div>
+      </div>
+
+      <!-- STEP 3: Walk-in, view-only -->
+      <div class="panel" id="p-closewalkin">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('closing',null)">‹ Back</button></div>
+        <div><h1>Walk-in (auto-calculated)</h1><p class="sub">Nothing to enter — from steps 1–2.</p></div>
+        <div class="ticket">
+          <div class="ticket-row"><span>Crispy fry</span><span class="qty" style="color:var(--leaf-deep);">46 pcs</span></div>
+          <div class="ticket-row"><span>Burger</span><span class="qty" style="color:var(--chili-deep);">−4 pcs ⚠</span></div>
+          <div class="ticket-row"><span>Coke Can</span><span class="qty" style="color:var(--leaf-deep);">17 pcs</span></div>
+        </div>
+        <p class="sub" style="color:var(--chili-deep);">⚠ Burger: waste + remains + app sales add up to more than available — go back to step 1 or 4 and recheck.</p>
+      </div>
+
+      <!-- STEP 4: Payments -->
+      <div class="panel" id="p-closepay">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('closing',null)">‹ Back</button></div>
+        <div><h1>Payments</h1><p class="sub">14 Jul</p></div>
+
+        <div class="ticket">
+          <div class="ticket-row"><span>Total sale — all channels</span><span class="qty" style="font-weight:600; color:var(--ink);">৳ 12,340</span></div>
+          <div class="ticket-row"><span>− Online payments (Foodpanda)</span><span class="qty" style="color:var(--chili-deep);">− ৳ 4,640</span></div>
+          <div class="ticket-total"><span>Total offline sales</span><span>৳ 7,700</span></div>
+        </div>
+        <p class="sub" style="font-size:10px;">Which channels count as "online" is set by the owner in Settings — Foodi &amp; Pathao are treated as cash-on-pickup here.</p>
+
+        <div class="paysection">
+          <h3>Enter what came in</h3>
+          <div class="field"><label>bKash (৳)</label><input value="890" oninput="recalcCash()" id="pay-bkash"></div>
+          <div class="field" style="margin-top:8px;"><label>Card (৳)</label><input value="0" oninput="recalcCash()" id="pay-card"></div>
+          <div class="field" style="margin-top:8px;">
+            <label>Cash (৳) — calculated automatically</label>
+            <input value="6810" disabled id="pay-cash">
+          </div>
+          <p class="sub" style="margin-top:6px;">Cash = Total offline sales − bKash − Card. Covers Foodi + Pathao (cash on pickup) + Walk-in.</p>
+        </div>
+
+        <div class="paysection">
+          <h3>Settled directly to account — Foodpanda</h3>
+          <div class="payinfo-row"><span>Foodpanda (net of commission &amp; discounts)</span><span class="amt">৳ 4,640</span></div>
+          <p class="sub" style="margin-top:6px;">No cash handled — paid to account later, tracked in Settlements.</p>
+        </div>
+
+        <div class="btn primary">Done — back to checklist</div>
+      </div>
+
+      <div class="panel" id="p-expense">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Add expense</h1><p class="sub">Logged against today</p></div>
+        <div class="field"><label>Category</label><select><option>Gas</option><option>Oil</option><option>Repairs</option><option>Electrician</option><option>Other</option></select></div>
+        <div class="field"><label>Amount (৳)</label><input value="480"></div>
+        <div class="field"><label>Note</label><input value="Cylinder refill"></div>
+        <div class="btn primary">Save expense</div>
+      </div>
+
+      <div class="panel" id="p-profile">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showPanel('home',null)">‹ Back</button></div>
+        <div><h1>Profile</h1><p class="sub">Dhanmondi outlet · Staff</p></div>
+        <div class="listrow"><div class="title">Name</div><div class="meta">Rahim Uddin</div></div>
+        <div class="listrow"><div class="title">Phone</div><div class="meta">01XXXXXXXXX</div></div>
+        <div class="btn ghost">Log out</div>
+      </div>
+
+      <div class="tabnav">
+        <button class="active" onclick="showPanel('home',this)">Home</button>
+        <button id="tab-stockin" class="tab-locked" onclick="tabGuard('stockin',this)">🔒 Stock in</button>
+        <button id="tab-prep" class="tab-locked" onclick="tabGuard('prep',this)">🔒 Prep log</button>
+        <button id="tab-closing" class="tab-locked" onclick="tabGuard('closing',this)">🔒 Closing</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ======================================================= -->
+<!-- OWNER MOBILE                                             -->
+<!-- ======================================================= -->
+<div id="ownermwrap" class="hidden">
+<div>
+  <p class="label">Owner app</p>
+  <div class="phone">
+    <div class="screen">
+      <div class="topbar">
+        <div class="brand"><span class="dot"></span>CP <span>FIVE STAR</span></div>
+        <div class="role">OWNER</div>
+      </div>
+
+      <div class="panel active" id="om-home">
+        <div><h1>Dhanmondi</h1><p class="sub">14 Jul 2026</p></div>
+        <div class="kpigrid mobile2">
+          <div class="kpicard"><div class="l">Revenue today</div><div class="n">৳12,340</div><div class="d pos">+8%</div></div>
+          <div class="kpicard"><div class="l">Net profit</div><div class="n">৳5,590</div><div class="d pos">45% margin</div></div>
+          <div class="kpicard"><div class="l">Pending</div><div class="n">2</div><div class="d">needs review</div></div>
+          <div class="kpicard"><div class="l">Stock var. (7d)</div><div class="n">−4 pcs</div><div class="d neg">watch fry</div></div>
+        </div>
+        <p class="sub">Needs your review</p>
+        <div class="queue-item">
+          <div class="qtop"><span>Stock in #SI-0142</span><span class="stamp pending">Pending</span></div>
+          <div class="qmeta">9 packs · Rahim · 09:40</div>
+          <div class="qbtns"><button class="approve">Approve</button><button class="reject">Reject</button></div>
+        </div>
+      </div>
+
+      <div class="panel" id="om-approvals">
+        <div><h1>Approvals</h1><p class="sub">Stock in &amp; closings</p></div>
+        <div class="queue-item" style="margin-bottom:10px;">
+          <div class="qtop"><span>Stock in #SI-0142</span><span class="stamp pending">Pending</span></div>
+          <div class="qmeta">9 packs · submitted 09:40</div>
+          <div class="qbtns"><button class="approve">Approve</button><button class="reject">Reject</button></div>
+        </div>
+        <div class="queue-item">
+          <div class="qtop"><span>Closing — 13 Jul</span><span class="stamp variance">Variance</span></div>
+          <div class="qmeta">Burger: waste + remains + app sales exceed available (−4 pcs)</div>
+          <div class="qbtns"><button class="approve">Accept</button><button class="reject">Flag</button></div>
+        </div>
+      </div>
+
+      <div class="panel" id="om-reports">
+        <div><h1>Reports</h1><p class="sub">Today, accrual basis</p></div>
+        <table class="ledger">
+          <tr><td>Revenue (net)</td><td>৳12,340</td></tr>
+          <tr><td>COGS</td><td>৳4,120</td></tr>
+          <tr class="subtotal"><td>Gross profit</td><td>৳8,220</td></tr>
+          <tr><td>Wastage + Shrinkage</td><td class="neg">−৳300</td></tr>
+          <tr><td>Fixed + variable + adhoc</td><td class="neg">−৳2,630</td></tr>
+          <tr class="net"><td>Net profit</td><td class="pos">৳5,290</td></tr>
+        </table>
+        <div class="tilegrid">
+          <div class="tile"><span class="n">→</span><span class="l">Full sales report</span></div>
+          <div class="tile"><span class="n">→</span><span class="l">Settlements</span></div>
+          <div class="tile" onclick="showOwnerMobile('packagingreport',null)"><span class="n">📦</span><span class="l">Packaging &amp; supplies</span></div>
+        </div>
+      </div>
+
+      <!-- MOBILE: Packaging & supplies report -->
+      <div class="panel" id="om-packagingreport">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('reports',null)">‹ Back</button></div>
+        <div><h1>Packaging &amp; supplies</h1><p class="sub">This week · vs. sales volume</p></div>
+        <div class="listrow" style="margin-bottom:6px;"><div><div class="title">Paper Envelope</div><div class="meta">420 used · 36/100 sold</div></div><span class="stamp approved">Normal</span></div>
+        <div class="listrow" style="margin-bottom:6px;"><div><div class="title">Medium Bag</div><div class="meta">320 used · 27/100 sold (avg 19)</div></div><span class="stamp variance">⚠ +42%</span></div>
+        <div class="listrow" style="margin-bottom:6px;"><div><div class="title">Large Bag</div><div class="meta">60 used · 5/100 sold</div></div><span class="stamp approved">Normal</span></div>
+        <div class="listrow"><div><div class="title">Sauce Packet</div><div class="meta">510 used · 43/100 sold</div></div><span class="stamp approved">Normal</span></div>
+        <div class="ticket" style="margin-top:12px;"><div class="ticket-row"><span>Total cost</span><span class="qty" style="font-weight:600; color:var(--ink);">৳ 3,010</span></div></div>
+        <p class="sub" style="color:var(--chili-deep);">⚠ Medium Bag is 42% above its usual rate for this sales volume — a signal to check, not proof of anything. Could be more medium orders this week, could be misuse.</p>
+      </div>
+
+      <div class="panel" id="om-more">
+        <div><h1>More</h1></div>
+        <div class="tilegrid">
+          <div class="tile"><span class="n">৳</span><span class="l">Expenses</span></div>
+          <div class="tile" onclick="showOwnerMobile('products',null)"><span class="n">≡</span><span class="l">Products &amp; packs</span></div>
+          <div class="tile" onclick="showOwnerMobile('outlets',null)"><span class="n">◈</span><span class="l">Team &amp; outlets</span></div>
+          <div class="tile" onclick="showOwnerMobile('settings',null)"><span class="n">⚙</span><span class="l">Settings &amp; promos</span></div>
+          <div class="tile" onclick="showOwnerMobile('setup',null)"><span class="n">🧩</span><span class="l">Setup (ingredients &amp; recipes)</span></div>
+        </div>
+        <div class="btn ghost">Log out</div>
+      </div>
+
+      <!-- MOBILE: Products hub -->
+      <div class="panel" id="om-products">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('more',null)">‹ Back</button></div>
+        <div><h1>Products &amp; packs</h1><p class="sub">23 menu items</p></div>
+        <div class="listrow"><div class="title">Burger</div><div class="meta">৳95 · 20 pcs/pack</div></div>
+        <div class="listrow"><div class="title">Crispy fry</div><div class="meta">৳77 · 15 pcs/pack</div></div>
+        <div class="listrow"><div class="title">Buddy Combo <span class="chip manual" style="font-size:8px; border-color:var(--gold-deep); color:var(--gold-deep);">Combo</span></div><div class="meta">৳280</div></div>
+        <div class="listrow" onclick="showOwnerMobile('addproduct',null)" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ Add product</span></div>
+        <div class="listrow" onclick="showOwnerMobile('addcombo',null)" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ Add combo</span></div>
+      </div>
+
+      <!-- MOBILE: Outlets hub -->
+      <div class="panel" id="om-outlets">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('more',null)">‹ Back</button></div>
+        <div><h1>Team &amp; outlets</h1></div>
+        <p class="sub" style="margin-bottom:4px;">Outlets</p>
+        <div class="listrow"><div class="title">Dhanmondi</div><div class="meta">Road 14/B, Dhaka</div></div>
+        <div class="listrow" onclick="showOwnerMobile('addoutlet',null)" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ Add outlet</span></div>
+        <p class="sub" style="margin:8px 0 4px;">Staff</p>
+        <div class="listrow"><div class="title">Rahim Uddin</div><div class="meta">Dhanmondi</div></div>
+      </div>
+
+      <!-- MOBILE: Add outlet -->
+      <div class="panel" id="om-addoutlet">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('outlets',null)">‹ Back</button></div>
+        <div><h1>Add outlet</h1></div>
+        <div class="field"><label>Outlet name</label><input placeholder="e.g. CP Five Star — Uttara"></div>
+        <div class="field"><label>Address</label><input placeholder="Road, area, city"></div>
+        <div class="togglerow"><label>Active</label><input type="checkbox" checked></div>
+        <div class="btn primary">Save outlet</div>
+      </div>
+
+      <!-- MOBILE: Add product -->
+      <div class="panel" id="om-addproduct">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('products',null)">‹ Back</button></div>
+        <div><h1>Add product</h1></div>
+        <div class="field"><label>Product name</label><input placeholder="e.g. Chicken Popcorn"></div>
+        <div class="field"><label>Category</label><select><option>Sandwich</option><option>Fried chicken</option><option>Sides</option><option>Drinks</option><option>Sauces</option><option>Other</option></select></div>
+        <div class="field"><label>Selling price — walk-in (৳)</label><input placeholder="e.g. 95"></div>
+        <div class="field">
+          <label>How is it made available for sale?</label>
+          <div class="segmented">
+            <button class="active" id="npm-prep-btn" onclick="setNewProductTypeMobile('prepared')">Prepared</button>
+            <button id="npm-stock-btn" onclick="setNewProductTypeMobile('stocked')">Direct stock</button>
+          </div>
+        </div>
+        <div id="npm-pack-fields">
+          <div class="field"><label>Pieces per pack</label><input placeholder="e.g. 20"></div>
+          <div class="field" style="margin-top:8px;"><label>Cost per pack (৳)</label><input placeholder="e.g. 950"></div>
+        </div>
+        <div class="togglerow"><label>Active</label><input type="checkbox" checked></div>
+        <div class="btn primary">Save product</div>
+      </div>
+
+      <!-- MOBILE: Add combo -->
+      <div class="panel" id="om-addcombo">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('products',null)">‹ Back</button></div>
+        <div><h1>Add combo</h1></div>
+        <div class="field"><label>Combo name</label><input placeholder="e.g. Family Feast"></div>
+        <div class="field"><label>Combo price — walk-in (৳)</label><input placeholder="e.g. 280"></div>
+        <p class="sub" style="margin-top:4px;">What's inside</p>
+        <div class="comprow"><select><option>Burger</option><option>Wrap</option><option>Crispy fry</option></select><input placeholder="Qty" value="1"><button class="rm">×</button></div>
+        <div class="comprow"><select><option selected>Wrap</option><option>Burger</option><option>Crispy fry</option></select><input placeholder="Qty" value="1"><button class="rm">×</button></div>
+        <button class="btn ghost sm">+ Add component</button>
+        <p class="sub" style="margin-top:8px;">Channel prices (optional)</p>
+        <div class="comprow"><select><option>Foodpanda</option><option>Foodi</option><option>Pathao</option></select><input placeholder="৳ price" value="249"><button class="rm">×</button></div>
+        <button class="btn ghost sm">+ Add channel price</button>
+        <div class="btn primary" style="margin-top:10px;">Save combo</div>
+      </div>
+
+      <!-- MOBILE: Settings & Promos -->
+      <div class="panel" id="om-settings">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('more',null)">‹ Back</button></div>
+        <div><h1>Settings &amp; promotions</h1><p class="sub">All channels manual entry in v1.</p></div>
+
+        <p class="sub" style="margin-bottom:4px;">Sales channels</p>
+        <div class="listrow" style="margin-bottom:6px;">
+          <div class="title">Foodpanda</div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input value="20" style="width:38px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;">%
+            <select style="font-family:var(--font-mono); font-size:10px; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><option selected>Direct</option><option>At outlet</option></select>
+          </div>
+        </div>
+        <div class="listrow" style="margin-bottom:6px;">
+          <div class="title">Foodi</div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input value="18" style="width:38px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;">%
+            <select style="font-family:var(--font-mono); font-size:10px; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><option>Direct</option><option selected>At outlet</option></select>
+          </div>
+        </div>
+        <div class="listrow" style="margin-bottom:6px;">
+          <div class="title">Pathao</div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input value="15" style="width:38px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;">%
+            <select style="font-family:var(--font-mono); font-size:10px; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><option>Direct</option><option selected>At outlet</option></select>
+          </div>
+        </div>
+
+        <p class="sub" style="margin:10px 0 4px;">Channel-specific pricing — tap to edit</p>
+        <div class="listrow" style="margin-bottom:6px; cursor:pointer;" onclick="editChannelPriceMobile('Buddy Combo','Foodpanda','249')"><div><div class="title">Buddy Combo</div><div class="meta">Foodpanda</div></div><div class="meta">৳ 249</div></div>
+        <div class="listrow" style="margin-bottom:6px; cursor:pointer;" onclick="editChannelPriceMobile('Crispy fry','Foodpanda','96')"><div><div class="title">Crispy fry</div><div class="meta">Foodpanda</div></div><div class="meta">৳ 96</div></div>
+        <div class="listrow" onclick="newChannelPriceMobile()" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ Add channel price</span></div>
+
+        <p class="sub" style="margin:10px 0 4px;">Ongoing promotions</p>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Foodpanda — all items</div><div class="meta">20% off</div></div>
+        <div class="listrow" onclick="showOwnerMobile('more',null)" style="cursor:pointer; border-style:dashed; justify-content:center;"><span class="title">+ Add promotion</span></div>
+
+        <p class="sub" style="margin:10px 0 4px;">Cost categories</p>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Rent</div><div class="meta">Fixed</div></div>
+        <div class="listrow"><div class="title">Gas</div><div class="meta">Variable</div></div>
+      </div>
+
+      <!-- MOBILE: Setup hub -->
+      <div class="panel" id="om-setup">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('more',null)">‹ Back</button></div>
+        <div><h1>Setup</h1><p class="sub">Ingredients &amp; recipes — best done on desktop, but usable here.</p></div>
+        <div class="listrow" onclick="showOwnerMobile('extract',null)" style="cursor:pointer; margin-bottom:8px;"><div class="title">Extract ingredients from slips</div><span class="schev">›</span></div>
+        <div class="listrow" onclick="showOwnerMobile('importmenu',null)" style="cursor:pointer; margin-bottom:8px;"><div class="title">Import menu</div><span class="schev">›</span></div>
+        <div class="listrow" onclick="showOwnerMobile('maprecipes',null)" style="cursor:pointer;"><div class="title">Map recipes</div><span class="schev">›</span></div>
+      </div>
+
+      <!-- MOBILE: Extract ingredients -->
+      <div class="panel" id="om-extract">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('setup',null)">‹ Back</button></div>
+        <div><h1>Extract ingredients</h1></div>
+        <div class="dropzone">
+          <div class="dztitle">+ Upload slip photos</div>
+          <p class="sub">Camera or gallery — add as many as you have</p>
+        </div>
+        <div class="fileschip" style="margin:8px 0;"><span class="filepill">📄 IMG_0142</span><span class="filepill">📄 IMG_0143</span></div>
+        <div class="btn primary">Extract items</div>
+        <p class="sub" style="margin-top:10px;">34 unique items found — pick each one's unit (whatever's natural — "portion" for sauces) and how many per pack. One-time, here only.</p>
+        <div class="listrow" style="margin-bottom:6px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div class="title">Crispy Chicken Patty</div>
+            <div class="meta">"CKN PATTY 5IN 10PC" · 3 slips</div>
+            <div style="margin-top:4px; display:flex; align-items:center; gap:6px;"><span class="meta">Unit:</span><input value="piece" style="width:54px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"><span class="meta">Qty/pack:</span><input value="10" style="width:36px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"></div>
+          </div>
+          <input type="checkbox" checked>
+        </div>
+        <div class="listrow" style="margin-bottom:6px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div class="title">Burger Bun</div>
+            <div class="meta">"5* BUN 10PC" · 3 slips</div>
+            <div style="margin-top:4px; display:flex; align-items:center; gap:6px;"><span class="meta">Unit:</span><input value="piece" style="width:54px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"><span class="meta">Qty/pack:</span><input value="10" style="width:36px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"></div>
+          </div>
+          <input type="checkbox" checked>
+        </div>
+        <div class="listrow" style="margin-bottom:6px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div class="title">Mayonnaise</div>
+            <div class="meta">"MAYO 1L BTL" · 2 slips</div>
+            <div style="margin-top:4px; display:flex; align-items:center; gap:6px;"><span class="meta">Unit:</span><input value="portion" style="width:54px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"><span class="meta">Qty/pack:</span><input value="22" style="width:36px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"></div>
+          </div>
+          <input type="checkbox" checked>
+        </div>
+        <div class="listrow" style="margin-bottom:6px; align-items:flex-start;">
+          <div style="flex:1;">
+            <div class="title">Bamboo Stick</div>
+            <div class="meta">"BAMBOO STICK BAG" · 1 slip</div>
+            <div style="margin-top:4px; display:flex; align-items:center; gap:6px;"><span class="meta">Unit:</span><input value="piece" style="width:54px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"><span class="meta">Qty/pack:</span><input value="50" style="width:36px; font-family:var(--font-mono); font-size:10px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:3px;"></div>
+          </div>
+          <input type="checkbox" checked>
+        </div>
+        <div class="listrow"><div><div class="title">Delivery Charge <span class="warnbadge" style="font-size:8px;">Not a product?</span></div><div class="meta">3 slips</div></div><input type="checkbox"></div>
+        <p class="sub">+ 29 more</p>
+        <div class="btn primary">Save 33 ingredients</div>
+      </div>
+
+      <!-- MOBILE: Import menu -->
+      <div class="panel" id="om-importmenu">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('setup',null)">‹ Back</button></div>
+        <div><h1>Import menu</h1></div>
+        <div class="field"><label>Paste menu list</label><textarea style="font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:4px; padding:10px; min-height:80px; background:#fffdf7;" placeholder="Burger, Sandwich, 95"></textarea></div>
+        <div class="btn ghost">Parse</div>
+        <p class="sub" style="margin-top:8px;">23 items parsed</p>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Burger</div><div class="meta">৳95 · exists</div></div>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Chicken Katsu</div><div class="meta">৳120 · new</div></div>
+        <p class="sub">+ 21 more</p>
+        <div class="btn primary">Import 23 items</div>
+      </div>
+
+      <!-- MOBILE: Map recipes (tap-to-assign, not drag) -->
+      <div class="panel" id="om-maprecipes">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('setup',null)">‹ Back</button></div>
+        <div><h1>Map recipes</h1><p class="sub">Tap a purchase item, then pick which selling item it belongs to.</p></div>
+        <div class="listrow" style="margin-bottom:6px; cursor:pointer;" onclick="tapAssign('Burger Bun')"><div class="title">Burger Bun</div></div>
+        <div class="listrow" style="margin-bottom:6px; cursor:pointer;" onclick="tapAssign('Crispy Patty')"><div class="title">Crispy Patty</div></div>
+        <div class="listrow" style="margin-bottom:6px; cursor:pointer;" onclick="tapAssign('Mayonnaise')"><div class="title">Mayonnaise</div></div>
+        <div class="listrow" style="cursor:pointer;" onclick="tapAssign('Bamboo Stick')"><div class="title">Bamboo Stick</div></div>
+
+        <div class="addform" id="tap-assign-form" style="display:none; margin-top:10px;">
+          <p class="sub" id="tap-assign-name" style="font-weight:600; color:var(--ink);"></p>
+          <select><option>5★ Burger</option><option>Chicken Ball (4pc)</option><option>Wrap</option></select>
+          <button class="btn ghost sm">+ Assign to recipe</button>
+        </div>
+
+        <p class="sub" style="margin-top:12px;">5★ Burger recipe so far</p>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Burger Bun</div></div>
+        <div class="listrow" style="margin-bottom:6px;"><div class="title">Crispy Patty</div></div>
+        <div class="listrow"><div class="title">Mayonnaise</div></div>
+      </div>
+
+      <!-- MOBILE: Add/Edit Channel Price -->
+      <div class="panel" id="om-addchannelprice">
+        <div style="display:flex; align-items:center; gap:10px;"><button class="backbtn" onclick="showOwnerMobile('settings',null)">‹ Back</button></div>
+        <div><h1 id="cpm-title">Add channel price</h1></div>
+        <div class="field"><label>Product / Combo</label><select id="cpm-product"><option>Buddy Combo</option><option>Burger</option><option>Wrap</option><option>Crispy fry</option></select></div>
+        <div class="field"><label>Channel</label><select id="cpm-channel"><option>Foodpanda</option><option>Foodi</option><option>Pathao</option><option>Walk-in</option></select></div>
+        <div class="field"><label>Price (৳)</label><input id="cpm-price" placeholder="e.g. 249"></div>
+        <div class="field"><label>Effective from</label><input type="date" id="cpm-from" value="2026-07-15"></div>
+        <div class="togglerow"><label>Active</label><input type="checkbox" checked></div>
+        <div class="btn primary">Save price</div>
+        <div class="btn ghost" id="cpm-delete" style="color:var(--chili-deep); border-color:var(--chili-deep); display:none;">Remove price</div>
+      </div>
+
+      <div class="tabnav">
+        <button class="active" onclick="showOwnerMobile('home',this)">Home</button>
+        <button onclick="showOwnerMobile('approvals',this)">Approvals</button>
+        <button onclick="showOwnerMobile('reports',this)">Reports</button>
+        <button onclick="showOwnerMobile('more',this)">More</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ======================================================= -->
+<!-- OWNER DESKTOP                                            -->
+<!-- ======================================================= -->
+<div id="ownerdwrap" class="hidden" style="width:100%; display:flex; flex-direction:column; align-items:center; gap:36px;">
+
+<div style="width:100%; max-width:960px;">
+  <p class="label">Login</p>
+  <div class="desktop" style="min-height:300px; align-items:center; justify-content:center;">
+    <div class="loginbox" style="width:280px; margin:0 auto;">
+      <div class="brand" style="justify-content:center; margin-bottom:6px;"><span class="dot"></span>CP <span style="color:var(--gold-deep);">FIVE STAR</span></div>
+      <p class="sub" style="text-align:center;">Owner sign in</p>
+      <div class="field"><label>Email</label><input value="owner@cpfivestar.example"></div>
+      <div class="field"><label>Password</label><input type="password" value="••••••••"></div>
+      <div class="btn primary block">Sign in</div>
+    </div>
+  </div>
+</div>
+
+<div style="width:100%; max-width:960px;">
+<p class="label">Owner dashboard</p>
+<div class="desktop">
+  <div class="sidebar">
+    <div class="sidebrand"><span class="dot"></span><span>CP FIVE STAR</span></div>
+    <button class="navitem active" style="padding-left:16px;" onclick="showOwner('dashboard',this)">Dashboard</button>
+
+    <button class="navparent" onclick="toggleNavGroup(this)">Approvals <span class="navchev">▸</span></button>
+    <div class="navchildren">
+      <button class="navitem" onclick="showOwner('stockin',this)">Stock in</button>
+      <button class="navitem" onclick="showOwner('closings',this)">Closings</button>
+    </div>
+
+    <button class="navparent" onclick="toggleNavGroup(this)">Reports <span class="navchev">▸</span></button>
+    <div class="navchildren">
+      <button class="navitem" onclick="showOwner('sales',this)">Sales report</button>
+      <button class="navitem" onclick="showOwner('settlements',this)">Settlements</button>
+      <button class="navitem" onclick="showOwner('pnl',this)">Profit &amp; loss</button>
+      <button class="navitem" onclick="showOwner('packaging',this)">Packaging &amp; supplies</button>
+    </div>
+
+    <button class="navparent" onclick="toggleNavGroup(this)">Manage <span class="navchev">▸</span></button>
+    <div class="navchildren">
+      <button class="navitem" onclick="showOwner('expenses',this)">Expenses</button>
+      <button class="navitem" onclick="showOwner('products',this)">Products &amp; packs</button>
+      <button class="navitem" onclick="showOwner('team',this)">Team &amp; outlets</button>
+      <button class="navitem" onclick="showOwner('settings',this)">Settings &amp; promotions</button>
+    </div>
+
+    <button class="navparent" onclick="toggleNavGroup(this)">Setup <span class="navchev">▸</span></button>
+    <div class="navchildren">
+      <button class="navitem" onclick="showOwner('extract',this)">Extract ingredients</button>
+      <button class="navitem" onclick="showOwner('importmenu',this)">Import menu</button>
+      <button class="navitem" onclick="showOwner('maprecipes',this)">Map recipes</button>
+    </div>
+  </div>
+
+  <div class="maincol">
+    <div class="desktoptop"><h1 id="owner-title">Dashboard</h1><div class="date">Dhanmondi outlet · 14 Jul 2026</div></div>
+
+    <div class="ownerpanel active" id="o-dashboard">
+      <div class="kpigrid">
+        <div class="kpicard"><div class="l">Revenue today</div><div class="n">৳ 12,340</div><div class="d pos">+8% vs yesterday</div></div>
+        <div class="kpicard"><div class="l">Net profit today</div><div class="n">৳ 5,590</div><div class="d pos">45% margin</div></div>
+        <div class="kpicard"><div class="l">Pending approvals</div><div class="n">2</div><div class="d">1 stock in, 1 variance</div></div>
+        <div class="kpicard"><div class="l">Stock variance (7d)</div><div class="n">−4 pcs</div><div class="d neg">Watch crispy fry</div></div>
+      </div>
+      <div>
+        <h2 class="sec" style="margin-bottom:10px;">Needs your review</h2>
+        <div class="queue-item" style="margin-bottom:10px;">
+          <div class="qtop"><span>Stock in #SI-0142</span><span class="stamp pending">Pending</span></div>
+          <div class="qmeta">9 packs (7 from slip, 2 manual) · submitted 09:40 by Rahim</div>
+          <div class="qbtns"><button class="approve">Approve</button><button class="reject">Reject</button></div>
+        </div>
+        <div class="queue-item">
+          <div class="qtop"><span>Closing — 13 Jul</span><span class="stamp variance">Variance</span></div>
+          <div class="qmeta">Burger: waste + remains + app sales exceed available (−4 pcs)</div>
+          <div class="qbtns"><button class="approve">Accept</button><button class="reject">Flag</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ownerpanel" id="o-stockin">
+      <div class="filterbar">
+        <select><option>All statuses</option><option>Draft</option><option>Pending</option><option>Approved</option><option>Rejected</option></select>
+        <input placeholder="Search record #">
+      </div>
+      <table class="datatable">
+        <tr><th>Record</th><th>Date</th><th>Packs</th><th>Source</th><th>Submitted by</th><th>Status</th></tr>
+        <tr><td>#SI-0142</td><td>14 Jul</td><td>9</td><td>Slip + manual</td><td>Rahim</td><td><span class="stamp pending">Pending</span></td></tr>
+        <tr><td>#SI-0141</td><td>13 Jul</td><td>10</td><td>Slip</td><td>Rahim</td><td><span class="stamp approved">Approved</span></td></tr>
+        <tr><td>#SI-0140</td><td>12 Jul</td><td>8</td><td>Slip</td><td>Rahim</td><td><span class="stamp approved">Approved</span></td></tr>
+        <tr><td>#SI-0139</td><td>11 Jul</td><td>2</td><td>Manual</td><td>Rahim</td><td><span class="stamp rejected">Rejected</span></td></tr>
+      </table>
+    </div>
+
+    <div class="ownerpanel" id="o-closings">
+      <div class="filterbar">
+        <select><option>All statuses</option><option>Locked</option><option>Variance flagged</option><option>Cash mismatch</option></select>
+        <input type="date" value="2026-07-14">
+      </div>
+      <table class="datatable">
+        <tr><th>Date</th><th>Revenue</th><th>Cash+bKash+card</th><th>Stock variance</th><th>Status</th></tr>
+        <tr><td>14 Jul</td><td>৳ 12,340</td><td>৳ 3,340</td><td>—</td><td><span class="stamp pending">In progress</span></td></tr>
+        <tr><td>13 Jul</td><td>৳ 11,020</td><td>৳ 2,910</td><td>−2 pcs crispy fry</td><td><span class="stamp variance">Variance</span></td></tr>
+        <tr><td>12 Jul</td><td>৳ 10,480</td><td>৳ 3,020</td><td>—</td><td><span class="stamp approved">Locked</span></td></tr>
+      </table>
+    </div>
+
+    <div class="ownerpanel" id="o-sales">
+      <div class="filterbar">
+        <input type="date" value="2026-07-07"><span class="sub">to</span><input type="date" value="2026-07-14">
+        <select><option>All channels</option><option>Foodpanda</option><option>Foodi</option><option>Pathao</option><option>Walk-in</option></select>
+        <input placeholder="Search 23 menu items…">
+      </div>
+      <table class="datatable">
+        <tr><th>Product</th><th>Foodpanda</th><th>Foodi</th><th>Pathao</th><th>Walk-in</th><th>Total pcs</th><th>Net revenue</th></tr>
+        <tr><td>Burger</td><td>21</td><td>6</td><td>9</td><td>14</td><td>50</td><td>৳ 4,750</td></tr>
+        <tr><td>Wrap</td><td>15</td><td>11</td><td>4</td><td>8</td><td>38</td><td>৳ 3,420</td></tr>
+        <tr><td>Crispy fry</td><td>18</td><td>9</td><td>7</td><td>20</td><td>54</td><td>৳ 4,170</td></tr>
+        <tr><td>Chicken Katsu</td><td>4</td><td>2</td><td>1</td><td>3</td><td>10</td><td>৳ 1,150</td></tr>
+      </table>
+      <p class="sub">Showing 4 of 23 menu items · net revenue reflects channel-specific promo pricing</p>
+    </div>
+
+    <div class="ownerpanel" id="o-settlements">
+      <p class="sub">Only channels set to "Direct to account" in Settings appear here — Foodpanda by default. Foodi, Pathao &amp; Walk-in are collected same-day and don't need settlement tracking.</p>
+      <table class="datatable">
+        <tr><th>Channel</th><th>Period</th><th>Expected</th><th>Received</th><th>Status</th></tr>
+        <tr><td>Foodpanda</td><td>7–13 Jul</td><td>৳ 9,840</td><td>৳ 9,840</td><td><span class="stamp approved">Received</span></td></tr>
+      </table>
+    </div>
+
+    <div class="ownerpanel" id="o-pnl">
+      <div class="filterbar"><select><option>Today</option><option>This week</option><option>This month</option></select></div>
+      <table class="ledger">
+        <tr><td>Revenue (net of commission &amp; promos)</td><td>৳ 12,340</td></tr>
+        <tr><td>COGS</td><td>৳ 4,120</td></tr>
+        <tr class="subtotal"><td>Gross profit</td><td>৳ 8,220</td></tr>
+        <tr class="section"><td colspan="2">Losses</td></tr>
+        <tr><td>Wastage (burnt, dropped, or leftover discarded)</td><td class="neg">− ৳ 210</td></tr>
+        <tr><td>Shrinkage (ingredient loss found at day-start)</td><td class="neg">− ৳ 90</td></tr>
+        <tr class="section"><td colspan="2">Costs</td></tr>
+        <tr><td>Fixed (rent + salary, daily share)</td><td class="neg">− ৳ 2,000</td></tr>
+        <tr><td>Variable (gas, oil)</td><td class="neg">− ৳ 480</td></tr>
+        <tr><td>Adhoc (repairs)</td><td class="neg">− ৳ 150</td></tr>
+        <tr class="net"><td>Net profit</td><td class="pos">৳ 5,290</td></tr>
+      </table>
+      <p class="sub">Packaging &amp; supplies cost is tracked separately — see the report in the sidebar, since it's estimated from stock counts, not exact per-sale attribution like the lines above.</p>
+    </div>
+
+    <!-- PACKAGING & SUPPLIES REPORT — ratio-against-sales insight, not per-transaction -->
+    <div class="ownerpanel" id="o-packaging">
+      <div class="filterbar"><select><option>This week</option><option>This month</option></select></div>
+      <table class="datatable">
+        <tr><th>Item</th><th>Used</th><th>Cost</th><th>Per 100 sold</th><th>Trailing avg</th><th></th></tr>
+        <tr><td>Paper Envelope</td><td>420</td><td>৳ 420</td><td>36/100</td><td>34/100</td><td><span class="stamp approved">Normal</span></td></tr>
+        <tr><td>Medium Bag</td><td>320</td><td>৳ 1,600</td><td>27/100</td><td>19/100</td><td><span class="stamp variance">⚠ +42%</span></td></tr>
+        <tr><td>Large Bag</td><td>60</td><td>৳ 480</td><td>5/100</td><td>5/100</td><td><span class="stamp approved">Normal</span></td></tr>
+        <tr><td>Sauce Packet</td><td>510</td><td>৳ 510</td><td>43/100</td><td>41/100</td><td><span class="stamp approved">Normal</span></td></tr>
+      </table>
+      <div class="ticket" style="margin-top:14px;">
+        <div class="ticket-row"><span>Total packaging &amp; supplies cost</span><span class="qty" style="font-weight:600; color:var(--ink);">৳ 3,010</span></div>
+      </div>
+      <p class="sub" style="color:var(--chili-deep);">⚠ Medium Bag usage is 42% above its own recent average relative to sales volume — worth a closer look. This is a signal, not proof: it could be a genuine shift in order mix (more medium-size orders this week) or it could be misuse. The data can't tell you which.</p>
+      <p class="sub">These items aren't tied to individual sales the way ingredients are — order size determines which bag gets used, and that isn't logged per transaction. Numbers here come from staff stock counts (Packaging &amp; supplies, in the app) compared against total units sold in the same period, not an exact per-order breakdown.</p>
+    </div>
+
+    <div class="ownerpanel" id="o-expenses">
+      <div class="filterbar">
+        <select><option>All types</option><option>Fixed</option><option>Variable</option><option>Adhoc</option></select>
+        <input type="date" value="2026-07-14">
+      </div>
+      <table class="datatable">
+        <tr><th>Date</th><th>Category</th><th>Type</th><th>Amount</th><th>Note</th></tr>
+        <tr><td>14 Jul</td><td>Gas</td><td>Variable</td><td>৳ 480</td><td>Cylinder refill</td></tr>
+        <tr><td>14 Jul</td><td>Rent</td><td>Fixed</td><td>৳ 2,000</td><td>Daily share</td></tr>
+        <tr><td>12 Jul</td><td>Repairs</td><td>Adhoc</td><td>৳ 150</td><td>Fryer thermostat</td></tr>
+      </table>
+      <h2 class="sec">Add expense</h2>
+      <div class="formgrid">
+        <div class="field"><label>Category</label><select><option>Gas</option><option>Oil</option><option>Rent</option><option>Salary</option><option>Repairs</option><option>Electrician</option></select></div>
+        <div class="field"><label>Amount (৳)</label><input value=""></div>
+        <div class="field" style="grid-column:1/-1;"><label>Note</label><input value=""></div>
+      </div>
+      <div class="btn primary" style="width:160px;">Save expense</div>
+    </div>
+
+    <div class="ownerpanel" id="o-products">
+      <div class="filterbar"><input placeholder="Search 23 menu items…"></div>
+      <table class="datatable">
+        <tr><th>Product</th><th>Type</th><th>Category</th><th>Selling price</th><th>Pack size</th><th>Pack cost</th><th>Recipe</th></tr>
+        <tr><td>Burger</td><td>Single</td><td>Sandwich</td><td>৳ 95</td><td>20 pcs</td><td>৳ 950</td><td><a href="#" onclick="editRecipeFor('5★ Burger'); return false;" style="font-family:var(--font-mono); font-size:10px; color:var(--gold-deep);">3 ingredients ✎</a></td></tr>
+        <tr><td>Wrap</td><td>Single</td><td>Sandwich</td><td>৳ 90</td><td>20 pcs</td><td>৳ 900</td><td><a href="#" onclick="editRecipeFor('Wrap'); return false;" style="font-family:var(--font-mono); font-size:10px; color:var(--chili-deep);">Not mapped ✎</a></td></tr>
+        <tr><td>Crispy fry</td><td>Single</td><td>Fried chicken</td><td>৳ 77</td><td>15 pcs</td><td>৳ 780</td><td><a href="#" onclick="editRecipeFor('Crispy fry'); return false;" style="font-family:var(--font-mono); font-size:10px; color:var(--chili-deep);">Not mapped ✎</a></td></tr>
+        <tr><td>Chicken Katsu</td><td>Single</td><td>Fried chicken</td><td>৳ 120</td><td>—</td><td>— (prepared by piece)</td><td><a href="#" onclick="editRecipeFor('Chicken Katsu'); return false;" style="font-family:var(--font-mono); font-size:10px; color:var(--chili-deep);">Not mapped ✎</a></td></tr>
+        <tr><td>Buddy Combo</td><td>Combo</td><td>Combo</td><td>৳ 280</td><td>—</td><td>— (see components below)</td><td>—</td></tr>
+      </table>
+      <p class="sub">Showing 5 of 23 · pack size left blank for items prepared by piece</p>
+      <div class="btn ghost" style="width:160px;" onclick="showOwner('addproduct', null, 'Add product')">+ Add product</div>
+
+      <h2 class="sec">Combo composition</h2>
+      <table class="datatable">
+        <tr><th>Combo</th><th>Contains</th></tr>
+        <tr><td>Buddy Combo</td><td>1 Burger + 1 Wrap + 1 Soft Drink</td></tr>
+      </table>
+      <p class="sub">Selling a combo deducts each component from display stock automatically — Buddy Combo still draws down Burger and Wrap stock.</p>
+      <div class="btn ghost" style="width:160px;" onclick="showOwner('addcombo', null, 'Add combo')">+ Add combo</div>
+    </div>
+
+    <!-- EDIT RECIPE — quantities are edited here, not in the bulk mapper -->
+    <div class="ownerpanel" id="o-editrecipe">
+      <button class="backbtn" style="align-self:flex-start;" onclick="showOwner('products', null, 'Products & packs')">‹ Back to Products &amp; packs</button>
+      <div><h1 id="editrecipe-title" style="font-family:var(--font-display); font-weight:700; font-size:16px;">5★ Burger — recipe</h1><p class="sub">Ingredients come from Map Recipes; quantities are set here.</p></div>
+      <div id="editrecipe-rows">
+        <div class="assignedrow"><span>Burger Bun</span><span style="display:flex; align-items:center; gap:6px;"><input value="1" style="width:44px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><span class="ratio" style="cursor:default;">piece(s)</span></span><button class="rm">×</button></div>
+        <div class="assignedrow"><span>Crispy Patty</span><span style="display:flex; align-items:center; gap:6px;"><input value="1" style="width:44px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><span class="ratio" style="cursor:default;">piece(s)</span></span><button class="rm">×</button></div>
+        <div class="assignedrow"><span>Mayonnaise</span><span style="display:flex; align-items:center; gap:6px;"><input value="1" style="width:44px; font-family:var(--font-mono); font-size:11px; text-align:center; border:1px solid #d8cdb0; border-radius:3px; padding:4px;"><span class="ratio" style="cursor:default;">portion(s)</span></span><button class="rm">×</button></div>
+      </div>
+      <p class="sub">To add a new ingredient to this recipe, drag it in from Map Recipes — this screen is for adjusting quantities on ones already assigned.</p>
+      <div class="btn primary" style="width:160px;">Save recipe</div>
+    </div>
+
+    <div class="ownerpanel" id="o-team">
+      <h2 class="sec">Staff</h2>
+      <table class="datatable">
+        <tr><th>Name</th><th>Role</th><th>Outlet</th><th>Status</th></tr>
+        <tr><td>Rahim Uddin</td><td>Staff</td><td>Dhanmondi</td><td><span class="stamp approved">Active</span></td></tr>
+      </table>
+      <h2 class="sec">Outlets</h2>
+      <table class="datatable">
+        <tr><th>Name</th><th>Address</th><th>Status</th></tr>
+        <tr><td>Dhanmondi</td><td>Road 14/B, Dhaka</td><td><span class="stamp approved">Active</span></td></tr>
+      </table>
+      <div class="btn ghost" style="width:160px;" onclick="showOwner('addoutlet', null, 'Add outlet')">+ Add outlet</div>
+    </div>
+
+    <!-- ADD OUTLET -->
+    <div class="ownerpanel" id="o-addoutlet">
+      <button class="backbtn" style="align-self:flex-start;" onclick="showOwner('team', null, 'Team & outlets')">‹ Back to Team &amp; outlets</button>
+      <div class="formgrid">
+        <div class="field" style="grid-column:1/-1;"><label>Outlet name</label><input placeholder="e.g. CP Five Star — Uttara"></div>
+        <div class="field" style="grid-column:1/-1;"><label>Address</label><input placeholder="Road, area, city"></div>
+      </div>
+      <div class="togglerow" style="max-width:480px;"><label>Active</label><input type="checkbox" checked></div>
+      <div class="btn primary" style="width:160px;">Save outlet</div>
+    </div>
+
+    <!-- ADD PRODUCT -->
+    <div class="ownerpanel" id="o-addproduct">
+      <button class="backbtn" style="align-self:flex-start;" onclick="showOwner('products', null, 'Products & packs')">‹ Back to Products &amp; packs</button>
+      <div class="formgrid">
+        <div class="field" style="grid-column:1/-1;"><label>Product name</label><input placeholder="e.g. Chicken Popcorn"></div>
+        <div class="field"><label>Category</label><select><option>Sandwich</option><option>Fried chicken</option><option>Sides</option><option>Drinks</option><option>Sauces</option><option>Other</option></select></div>
+        <div class="field"><label>Selling price — walk-in (৳)</label><input placeholder="e.g. 95"></div>
+      </div>
+      <div class="field" style="max-width:480px;">
+        <label>How is it made available for sale?</label>
+        <div class="segmented" style="max-width:320px;">
+          <button class="active" id="np-prep-btn" onclick="setNewProductType('prepared')">Prepared item</button>
+          <button id="np-stock-btn" onclick="setNewProductType('stocked')">Direct stock</button>
+        </div>
+        <p class="sub" style="margin-top:6px;">"Prepared" = fried/cooked from packs (uses the frying log). "Direct stock" = sold straight from stock, e.g. cold drinks.</p>
+      </div>
+      <div class="formgrid" id="np-pack-fields">
+        <div class="field"><label>Pieces per pack</label><input placeholder="e.g. 20"></div>
+        <div class="field"><label>Cost per pack (৳)</label><input placeholder="e.g. 950"></div>
+      </div>
+      <div class="togglerow" style="max-width:480px;"><label>Active</label><input type="checkbox" checked></div>
+      <div class="btn primary" style="width:160px;">Save product</div>
+    </div>
+
+    <!-- ADD COMBO -->
+    <div class="ownerpanel" id="o-addcombo">
+      <button class="backbtn" style="align-self:flex-start;" onclick="showOwner('products', null, 'Products & packs')">‹ Back to Products &amp; packs</button>
+      <div class="formgrid">
+        <div class="field" style="grid-column:1/-1;"><label>Combo name</label><input placeholder="e.g. Family Feast"></div>
+        <div class="field"><label>Category</label><select><option selected>Combo</option><option>Sandwich</option><option>Fried chicken</option></select></div>
+        <div class="field"><label>Combo price — walk-in (৳)</label><input placeholder="e.g. 280"></div>
+      </div>
+
+      <h2 class="sec">What's inside</h2>
+      <p class="sub">Selling this combo will deduct each component from display stock automatically.</p>
+      <div class="comprow"><select><option>Burger</option><option>Wrap</option><option>Crispy fry</option><option>Soft Drink</option></select><input placeholder="Qty" value="1"><button class="rm">×</button></div>
+      <div class="comprow"><select><option selected>Wrap</option><option>Burger</option><option>Crispy fry</option><option>Soft Drink</option></select><input placeholder="Qty" value="1"><button class="rm">×</button></div>
+      <button class="btn ghost sm" style="width:160px;">+ Add component</button>
+
+      <h2 class="sec">Channel prices (optional)</h2>
+      <p class="sub">Set what this combo sells for on specific channels — otherwise the walk-in price above applies everywhere.</p>
+      <div class="comprow"><select><option>Foodpanda</option><option>Foodi</option><option>Pathao</option></select><input placeholder="৳ price" value="249"><button class="rm">×</button></div>
+      <button class="btn ghost sm" style="width:160px;">+ Add channel price</button>
+
+      <div class="togglerow" style="max-width:480px;"><label>Active</label><input type="checkbox" checked></div>
+      <div class="btn primary" style="width:160px;">Save combo</div>
+    </div>
+
+    <div class="ownerpanel" id="o-settings">
+      <p class="sub">All channels are manual entry in v1 — Foodpanda &amp; Foodi do offer partner APIs for order history, but access requires account-manager approval rather than self-serve signup. Worth revisiting once the manual flow is proven out.</p>
+
+      <h2 class="sec">Sales channels</h2>
+      <p class="sub">Commission and settlement type are both editable per channel — nothing here is hardcoded.</p>
+      <table class="datatable">
+        <tr><th>Channel</th><th>Commission</th><th>Settlement</th></tr>
+        <tr><td>Foodpanda</td><td><input value="20" style="width:48px; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:4px 6px;">%</td><td><select><option selected>Direct to account</option><option>Collected at outlet</option></select></td></tr>
+        <tr><td>Foodi</td><td><input value="18" style="width:48px; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:4px 6px;">%</td><td><select><option>Direct to account</option><option selected>Collected at outlet</option></select></td></tr>
+        <tr><td>Pathao</td><td><input value="15" style="width:48px; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:4px 6px;">%</td><td><select><option>Direct to account</option><option selected>Collected at outlet</option></select></td></tr>
+        <tr><td>Walk-in</td><td><input value="0" style="width:48px; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:4px 6px;">%</td><td><select><option>Direct to account</option><option selected>Collected at outlet</option></select></td></tr>
+      </table>
+      <h2 class="sec">Channel-specific pricing</h2>
+      <p class="sub">Direct price per product/combo per channel — this is how combo deals get set up. Tap a row to edit it.</p>
+      <table class="datatable">
+        <tr><th>Product / Combo</th><th>Channel</th><th>Price</th><th>Note</th></tr>
+        <tr style="cursor:pointer;" onclick="editChannelPrice('Buddy Combo','Foodpanda','249','2026-07-01')"><td>Buddy Combo</td><td>Foodpanda</td><td>৳ 249</td><td>vs ৳280 walk-in price</td></tr>
+        <tr style="cursor:pointer;" onclick="editChannelPrice('Buddy Combo','Foodi','259','2026-07-01')"><td>Buddy Combo</td><td>Foodi</td><td>৳ 259</td><td>vs ৳280 walk-in price</td></tr>
+        <tr style="cursor:pointer;" onclick="editChannelPrice('Crispy fry','Foodpanda','96','2026-07-01')"><td>Crispy fry</td><td>Foodpanda</td><td>৳ 96</td><td>from 20% ongoing promo below</td></tr>
+      </table>
+      <div class="btn ghost" style="width:180px;" onclick="newChannelPrice()">+ Add channel price</div>
+
+      <h2 class="sec">Ongoing promotions</h2>
+      <p class="sub">Simple % or fixed discounts off the base price — not for combos, which use a direct price above.</p>
+      <table class="datatable">
+        <tr><th>Channel</th><th>Product</th><th>Discount</th><th>Dates</th></tr>
+        <tr><td>Foodpanda</td><td>All items</td><td>20% off</td><td>1–31 Jul</td></tr>
+        <tr><td>All channels</td><td>Wrap</td><td>10% off</td><td>Ongoing</td></tr>
+      </table>
+      <div class="btn ghost" style="width:160px;">+ Add promotion</div>
+
+      <h2 class="sec">Order-level offers <span class="chip manual" style="border-color:var(--chili-deep); color:var(--chili-deep);">Reference only</span></h2>
+      <p class="sub">Threshold deals like "10% off orders above ৳500" can't be calculated line-by-line here — this system tracks daily quantities, not individual orders. Logged for your reference; reconcile the real impact via the channel's own settlement total.</p>
+      <table class="datatable">
+        <tr><th>Channel</th><th>Offer</th><th>Dates</th></tr>
+        <tr><td>Foodpanda</td><td>10% off orders above ৳500</td><td>1–31 Jul</td></tr>
+      </table>
+      <div class="btn ghost" style="width:160px;">+ Log offer</div>
+
+      <h2 class="sec">Cost categories</h2>
+      <table class="datatable">
+        <tr><th>Category</th><th>Type</th></tr>
+        <tr><td>Rent</td><td>Fixed</td></tr>
+        <tr><td>Salary</td><td>Fixed</td></tr>
+        <tr><td>Gas</td><td>Variable</td></tr>
+        <tr><td>Oil</td><td>Variable</td></tr>
+        <tr><td>Repairs</td><td>Adhoc</td></tr>
+      </table>
+    </div>
+
+    <!-- ADD/EDIT CHANNEL PRICE -->
+    <div class="ownerpanel" id="o-addchannelprice">
+      <button class="backbtn" style="align-self:flex-start;" onclick="showOwner('settings', null, 'Settings & promotions')">‹ Back to Settings</button>
+      <div class="formgrid">
+        <div class="field"><label>Product / Combo</label><select id="cp-product"><option>Buddy Combo</option><option>Burger</option><option>Wrap</option><option>Crispy fry</option><option>Chicken Katsu</option></select></div>
+        <div class="field"><label>Channel</label><select id="cp-channel"><option>Foodpanda</option><option>Foodi</option><option>Pathao</option><option>Walk-in</option></select></div>
+        <div class="field"><label>Price (৳)</label><input id="cp-price" placeholder="e.g. 249"></div>
+        <div class="field"><label>Effective from</label><input type="date" id="cp-from" value="2026-07-15"></div>
+        <div class="field"><label>Effective to (optional)</label><input type="date" id="cp-to"></div>
+      </div>
+      <div class="togglerow" style="max-width:480px;"><label>Active</label><input type="checkbox" checked></div>
+      <div style="display:flex; gap:10px;">
+        <div class="btn primary" style="width:160px;">Save price</div>
+        <div class="btn ghost" id="cp-delete" style="width:140px; color:var(--chili-deep); border-color:var(--chili-deep); display:none;">Remove price</div>
+      </div>
+    </div>
+
+    <!-- SETUP: EXTRACT INGREDIENTS FROM SLIPS -->
+    <div class="ownerpanel" id="o-extract">
+      <p class="sub">Upload every slip you've got — the system pulls out every unique line item across all of them and de-duplicates by wording.</p>
+      <div class="dropzone">
+        <div class="dztitle">+ Drop slip photos here, or click to browse</div>
+        <p class="sub">JPG, PNG, or PDF — upload as many as you have</p>
+      </div>
+      <div class="fileschip">
+        <span class="filepill">📄 IMG_0142.jpg</span>
+        <span class="filepill">📄 IMG_0143.jpg</span>
+        <span class="filepill">📄 IMG_0144.jpg</span>
+      </div>
+      <div class="btn primary" style="width:160px;">Extract items</div>
+
+      <h2 class="sec">34 unique items found across 3 slips</h2>
+      <p class="sub">Uncheck or delete anything that isn't really an ingredient. Rename to a clean internal name, pick the unit recipes should use (whatever's natural in the kitchen — "portion" for sauces, not "bottle"), and how many of that unit come in one pack. This is the one place you'll ever need to enter this.</p>
+      <div class="extractrow" style="font-family:var(--font-mono); font-size:9px; color:var(--ink-soft); border-bottom:1px solid var(--ink);">
+        <div></div><div>As seen on slip</div><div>Ingredient name</div><div style="text-align:center;">Unit</div><div style="text-align:center;">Qty/pack</div><div style="text-align:center;">Slips</div><div></div>
+      </div>
+      <div class="extractrow">
+        <input type="checkbox" checked>
+        <div class="rawtext">CKN PATTY 5IN 10PC</div>
+        <input type="text" value="Crispy Chicken Patty">
+        <input type="text" value="piece" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <input type="text" value="10" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <div class="seen">3</div>
+        <button class="rm">×</button>
+      </div>
+      <div class="extractrow">
+        <input type="checkbox" checked>
+        <div class="rawtext">5* BUN 10PC</div>
+        <input type="text" value="Burger Bun">
+        <input type="text" value="piece" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <input type="text" value="10" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <div class="seen">3</div>
+        <button class="rm">×</button>
+      </div>
+      <div class="extractrow">
+        <input type="checkbox" checked>
+        <div class="rawtext">MAYO 1L BTL</div>
+        <input type="text" value="Mayonnaise">
+        <input type="text" value="portion" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <input type="text" value="22" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <div class="seen">2</div>
+        <button class="rm">×</button>
+      </div>
+      <div class="extractrow">
+        <input type="checkbox" checked>
+        <div class="rawtext">BAMBOO STICK BAG</div>
+        <input type="text" value="Bamboo Stick">
+        <input type="text" value="piece" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <input type="text" value="50" style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px;">
+        <div class="seen">1</div>
+        <button class="rm">×</button>
+      </div>
+      <div class="extractrow">
+        <input type="checkbox">
+        <div class="rawtext">DELIVERY CHARGE <span class="warnbadge">Not a product?</span></div>
+        <input type="text" value="Delivery Charge" disabled>
+        <input type="text" disabled style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px; opacity:.4;">
+        <input type="text" disabled style="text-align:center; font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:3px; padding:5px; opacity:.4;">
+        <div class="seen">3</div>
+        <button class="rm">×</button>
+      </div>
+      <p class="sub">+ 29 more rows</p>
+      <div class="btn primary" style="width:220px;">Save 33 ingredients</div>
+    </div>
+
+    <!-- SETUP: IMPORT MENU -->
+    <div class="ownerpanel" id="o-importmenu">
+      <p class="sub">Paste your menu (name, category, price — one per line) or add rows manually below.</p>
+      <div class="field">
+        <label>Paste menu list</label>
+        <textarea style="font-family:var(--font-mono); font-size:11px; border:1px solid #d8cdb0; border-radius:4px; padding:10px; min-height:90px; background:#fffdf7;" placeholder="Burger, Sandwich, 95
+Wrap, Sandwich, 90
+Crispy Chicken Fry, Fried chicken, 77"></textarea>
+      </div>
+      <div class="btn ghost" style="width:120px;">Parse</div>
+
+      <h2 class="sec">Preview — 23 items parsed</h2>
+      <table class="datatable">
+        <tr><th></th><th>Name</th><th>Category</th><th>Price</th><th>Status</th></tr>
+        <tr><td><input type="checkbox" checked></td><td>Burger</td><td>Sandwich</td><td>৳95</td><td><span class="stamp variance">Already exists</span></td></tr>
+        <tr><td><input type="checkbox" checked></td><td>Wrap</td><td>Sandwich</td><td>৳90</td><td><span class="stamp variance">Already exists</span></td></tr>
+        <tr><td><input type="checkbox" checked></td><td>Chicken Katsu</td><td>Fried chicken</td><td>৳120</td><td><span class="stamp approved">New</span></td></tr>
+        <tr><td><input type="checkbox" checked></td><td>Chicken Pop Stick</td><td>Fried chicken</td><td>৳120</td><td><span class="stamp approved">New</span></td></tr>
+      </table>
+      <p class="sub">+ 19 more rows · "Already exists" rows update price/category instead of creating a duplicate</p>
+      <div class="btn primary" style="width:160px;">Import 23 items</div>
+    </div>
+
+    <!-- SETUP: MAP RECIPES (drag & drop) -->
+    <div class="ownerpanel" id="o-maprecipes">
+      <p class="sub">Drag a purchase item onto a selling item to include it in that recipe.</p>
+      <div class="maprow">
+        <div class="mapcol">
+          <h2 class="sec">Purchase items</h2>
+          <div class="ingchip" draggable="true" ondragstart="dragIngredient(event,'Burger Bun')">
+            <span class="dragdot">⠿</span><span class="ingname">Burger Bun</span>
+          </div>
+          <div class="ingchip" draggable="true" ondragstart="dragIngredient(event,'Crispy Patty')">
+            <span class="dragdot">⠿</span><span class="ingname">Crispy Patty</span>
+          </div>
+          <div class="ingchip" draggable="true" ondragstart="dragIngredient(event,'Mayonnaise')">
+            <span class="dragdot">⠿</span><span class="ingname">Mayonnaise</span>
+          </div>
+          <div class="ingchip" draggable="true" ondragstart="dragIngredient(event,'Bamboo Stick')">
+            <span class="dragdot">⠿</span><span class="ingname">Bamboo Stick</span>
+          </div>
+          <div class="ingchip" draggable="true" ondragstart="dragIngredient(event,'Chicken Ball (raw)')">
+            <span class="dragdot">⠿</span><span class="ingname">Chicken Ball (raw)</span>
+          </div>
+        </div>
+        <div class="mapcol">
+          <h2 class="sec">Selling items</h2>
+          <div class="bucket" id="bucket-burger" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropIngredient(event,'bucket-burger')">
+            <div class="bname">5★ Burger</div>
+            <div class="assignedrow"><span>Burger Bun</span><button class="rm">×</button></div>
+            <div class="assignedrow"><span>Crispy Patty</span><button class="rm">×</button></div>
+            <div class="assignedrow"><span>Mayonnaise</span><button class="rm">×</button></div>
+          </div>
+          <div class="bucket" id="bucket-chickenball" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropIngredient(event,'bucket-chickenball')">
+            <div class="bname">Chicken Ball (4pc)</div>
+            <div class="assignedrow"><span>Chicken Ball (raw)</span><button class="rm">×</button></div>
+            <div class="assignedrow"><span>Bamboo Stick</span><button class="rm">×</button></div>
+          </div>
+          <div class="bucket" id="bucket-wrap" ondragover="event.preventDefault(); this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropIngredient(event,'bucket-wrap')">
+            <div class="bname">Wrap</div>
+            <div class="bempty">Drop a purchase item here</div>
+          </div>
+        </div>
+      </div>
+      <div class="btn primary" style="width:160px; margin-top:8px;">Save recipes</div>
+    </div>
+  </div>
+</div>
+</div>
+
+</div>
+
+<script>
+function setMode(mode, btn){
+  document.getElementById('staffwrap').classList.toggle('hidden', mode !== 'staff');
+  document.getElementById('ownermwrap').classList.toggle('hidden', mode !== 'ownerm');
+  document.getElementById('ownerdwrap').classList.toggle('hidden', mode !== 'ownerd');
+  document.querySelectorAll('.modeswitch button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function showPanel(name, btn){
+  document.querySelectorAll('#staffwrap .panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('p-' + name).classList.add('active');
+  var mainTabs = ['home','stockin','prep','closing'];
+  if(mainTabs.includes(name)){
+    document.querySelectorAll('#staffwrap .tabnav button').forEach(b => b.classList.remove('active'));
+    if(btn) btn.classList.add('active');
+  }
+}
+function tabGuard(name, btn){
+  if(btn.classList.contains('tab-locked')){
+    alert('Finish starting your day first — Home ▶ Start your day.');
+    showPanel('home', document.querySelector('.tabnav button'));
+    return;
+  }
+  showPanel(name, btn);
+}
+function replicateStock(){
+  document.querySelectorAll('.daystart-input').forEach(function(input){
+    var row = input.closest('.dsrow');
+    input.value = row.dataset.yesterday;
+    checkDiscrepancy(input);
+  });
+}
+function checkDiscrepancy(input){
+  var row = input.closest('.dsrow');
+  var yesterday = parseFloat(row.dataset.yesterday);
+  var today = parseFloat(input.value) || 0;
+  var reasonBlock = row.querySelector('.dsreason');
+  if(today !== yesterday){
+    row.classList.add('discrepant');
+    reasonBlock.style.display = 'block';
+  } else {
+    row.classList.remove('discrepant');
+    reasonBlock.style.display = 'none';
+    reasonBlock.querySelector('select').value = '';
+  }
+}
+function resolveDiscrepancy(select){
+  var row = select.closest('.dsrow');
+  row.classList.toggle('discrepant', select.value === '');
+}
+function tryContinueDayStart(){
+  var unresolved = document.querySelectorAll('#p-daystartstock .dsreason select');
+  var blocked = false;
+  unresolved.forEach(function(sel){
+    var row = sel.closest('.dsrow');
+    if(row.classList.contains('discrepant') && sel.value === ''){
+      blocked = true;
+    }
+  });
+  if(blocked){
+    document.getElementById('daystart-warning').style.display = 'block';
+    return;
+  }
+  document.getElementById('daystart-warning').style.display = 'none';
+  showPanel('prepcarryforward', null);
+}
+function checkCarryForward(input){
+  var row = input.closest('.cfrow');
+  var leftover = parseFloat(row.dataset.leftover);
+  var moving = parseFloat(input.value) || 0;
+  var wasteEl = row.querySelector('.cfwaste');
+  var waste = leftover - moving;
+  if(waste > 0){
+    wasteEl.textContent = '+' + waste + ' pcs → wastage';
+    wasteEl.style.display = 'inline';
+    row.classList.add('has-waste');
+  } else {
+    wasteEl.style.display = 'none';
+    row.classList.remove('has-waste');
+  }
+}
+function carryForward(btn){
+  var row = btn.closest('.cfrow');
+  var input = row.querySelector('.cf-input');
+  var leftover = parseFloat(row.dataset.leftover);
+  var moving = parseFloat(input.value) || 0;
+  var waste = leftover - moving;
+  input.disabled = true;
+  btn.textContent = waste > 0 ? ('✓ ' + moving + ' moved, ' + waste + ' wasted') : '✓ Moved';
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+}
+function finishDayStart(){
+  document.getElementById('home-notstarted').classList.add('hidden');
+  document.getElementById('home-active').classList.remove('hidden');
+  ['tab-stockin','tab-prep','tab-closing'].forEach(function(id){
+    var tab = document.getElementById(id);
+    tab.classList.remove('tab-locked');
+    tab.textContent = tab.textContent.replace('🔒 ', '');
+  });
+  showPanel('home', document.querySelector('.tabnav button'));
+}
+function toggleNavGroup(btn){
+  btn.classList.toggle('expanded');
+  btn.nextElementSibling.classList.toggle('expanded');
+}
+function showOwnerMobile(name, btn){
+  document.querySelectorAll('#ownermwrap .panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('om-' + name).classList.add('active');
+  if(btn){
+    document.querySelectorAll('#ownermwrap .tabnav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+}
+function showOwner(name, btn, titleOverride){
+  document.querySelectorAll('.ownerpanel').forEach(p => p.classList.remove('active'));
+  document.getElementById('o-' + name).classList.add('active');
+  if(btn){
+    document.querySelectorAll('#ownerdwrap .navitem').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('owner-title').textContent = btn.textContent;
+  } else if(titleOverride){
+    document.getElementById('owner-title').textContent = titleOverride;
+  }
+}
+function setPrepUnit(unit){
+  document.getElementById('prep-pack-field').classList.toggle('hidden', unit !== 'pack');
+  document.getElementById('prep-piece-field').classList.toggle('hidden', unit !== 'piece');
+  document.getElementById('prep-pack-btn').classList.toggle('active', unit === 'pack');
+  document.getElementById('prep-piece-btn').classList.toggle('active', unit === 'piece');
+}
+function extractSlip(){
+  document.getElementById('si-attach').textContent = '✓ Slip attached — 4 lines extracted';
+}
+function addManualLine(){
+  var ticket = document.getElementById('si-ticket');
+  var row = document.createElement('div');
+  row.className = 'ticket-row';
+  row.innerHTML = '<span>New item <span class="chip manual">Manual</span></span><span><input value="1"> packs</span>';
+  ticket.appendChild(row);
+}
+function updatePackTotal(input, piecesPerPack){
+  var pieces = (parseFloat(input.value) || 0) * piecesPerPack;
+  input.parentElement.querySelector('.si-yield').textContent = '= ' + pieces + ' pcs';
+}
+function resolvePackYield(input, rowId){
+  var pieces = parseFloat(input.value);
+  var prompt = document.getElementById('si-yield-prompt-' + rowId.split('-')[2]);
+  var row = document.getElementById(rowId);
+  if(!pieces){ return; }
+  row.classList.remove('si-needs-yield');
+  var packInput = row.querySelector('input');
+  var packs = parseFloat(packInput.value) || 0;
+  packInput.insertAdjacentHTML('afterend', ' <span class="si-yield">= ' + (packs*pieces) + ' pcs</span>');
+  prompt.classList.add('resolved');
+  prompt.innerHTML = '✓ Pack size set — 1 pack = ' + pieces + ' pcs (saved for next time too)';
+  checkYieldsResolved();
+}
+function checkYieldsResolved(){
+  var unresolved = document.querySelectorAll('#si-ticket .si-needs-yield').length;
+  document.getElementById('si-yield-warning').style.display = unresolved > 0 ? 'block' : 'none';
+  return unresolved === 0;
+}
+function submitStockIn(){
+  if(!checkYieldsResolved()){
+    document.getElementById('si-yield-warning').style.display = 'block';
+    return;
+  }
+  document.querySelectorAll('#si-ticket input').forEach(i => i.disabled = true);
+  document.getElementById('si-ticket').classList.add('locked');
+  document.getElementById('si-stamp').textContent = 'Pending';
+  document.getElementById('si-stamp').className = 'stamp pending pos-abs';
+  document.getElementById('si-status').textContent = 'Pending — awaiting owner review';
+  document.getElementById('si-manual-add').classList.add('hidden');
+  document.getElementById('si-submit').outerHTML = '<div class="btn ghost" style="opacity:.6;">Submitted — locked for edits</div>';
+}
+function selectChip(btn){
+  btn.parentElement.querySelectorAll('.catchip').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+}
+function recalcCash(){
+  var offlineTotal = 7700;
+  var bkash = parseFloat(document.getElementById('pay-bkash').value) || 0;
+  var card = parseFloat(document.getElementById('pay-card').value) || 0;
+  document.getElementById('pay-cash').value = (offlineTotal - bkash - card).toFixed(0);
+}
+function setNewProductType(type){
+  document.getElementById('np-pack-fields').classList.toggle('hidden', type !== 'prepared');
+  document.getElementById('np-prep-btn').classList.toggle('active', type === 'prepared');
+  document.getElementById('np-stock-btn').classList.toggle('active', type === 'stocked');
+}
+function setNewProductTypeMobile(type){
+  document.getElementById('npm-pack-fields').classList.toggle('hidden', type !== 'prepared');
+  document.getElementById('npm-prep-btn').classList.toggle('active', type === 'prepared');
+  document.getElementById('npm-stock-btn').classList.toggle('active', type === 'stocked');
+}
+function editChannelPrice(product, channel, price, from){
+  document.getElementById('cp-product').value = product;
+  document.getElementById('cp-channel').value = channel;
+  document.getElementById('cp-price').value = price;
+  document.getElementById('cp-from').value = from;
+  document.getElementById('cp-delete').style.display = 'block';
+  showOwner('addchannelprice', null, 'Edit channel price');
+}
+function newChannelPrice(){
+  document.getElementById('cp-price').value = '';
+  document.getElementById('cp-from').value = '';
+  document.getElementById('cp-to').value = '';
+  document.getElementById('cp-delete').style.display = 'none';
+  showOwner('addchannelprice', null, 'Add channel price');
+}
+function editChannelPriceMobile(product, channel, price){
+  document.getElementById('cpm-title').textContent = 'Edit channel price';
+  document.getElementById('cpm-product').value = product;
+  document.getElementById('cpm-channel').value = channel;
+  document.getElementById('cpm-price').value = price;
+  document.getElementById('cpm-delete').style.display = 'block';
+  showOwnerMobile('addchannelprice', null);
+}
+function newChannelPriceMobile(){
+  document.getElementById('cpm-title').textContent = 'Add channel price';
+  document.getElementById('cpm-price').value = '';
+  document.getElementById('cpm-delete').style.display = 'none';
+  showOwnerMobile('addchannelprice', null);
+}
+var draggedIngredient = null;
+function dragIngredient(event, name){
+  draggedIngredient = name;
+  event.dataTransfer.effectAllowed = 'copy';
+}
+function editRecipeFor(productName){
+  document.getElementById('editrecipe-title').textContent = productName + ' — recipe';
+  showOwner('editrecipe', null, 'Edit recipe');
+}
+function bundleFinished(btn, bundleSize){
+  var row = btn.closest('.pkgrow');
+  var current = parseInt(row.dataset.count);
+  var pendingValue = Math.max(0, current - bundleSize);
+  row.dataset.pending = pendingValue;
+  row.querySelector('.pkgbtns').style.display = 'none';
+  var pending = row.querySelector('.pkgpending');
+  pending.style.display = 'flex';
+  pending.querySelector('.ptext').textContent = 'Pending: ' + current + ' → ' + pendingValue;
+}
+function confirmBundle(btn){
+  var row = btn.closest('.pkgrow');
+  var newCount = row.dataset.pending;
+  row.dataset.count = newCount;
+  row.querySelector('.pmeta').textContent = newCount + ' left · updated just now';
+  row.querySelector('.pkgpending').style.display = 'none';
+  row.querySelector('.pkgbtns').style.display = 'flex';
+}
+function cancelBundle(btn){
+  var row = btn.closest('.pkgrow');
+  row.querySelector('.pkgpending').style.display = 'none';
+  row.querySelector('.pkgbtns').style.display = 'flex';
+}
+function openRecount(btn){
+  var row = btn.closest('.pkgrow');
+  var recount = row.querySelector('.pkgrecount');
+  recount.style.display = 'flex';
+  recount.querySelector('input').value = row.dataset.count;
+}
+function confirmRecount(btn){
+  var row = btn.closest('.pkgrow');
+  var input = row.querySelector('.pkgrecount input');
+  var newCount = parseInt(input.value) || 0;
+  row.dataset.count = newCount;
+  row.querySelector('.pmeta').textContent = newCount + ' left · updated just now';
+  row.querySelector('.pkgrecount').style.display = 'none';
+}
+function dropIngredient(event, bucketId){
+  event.preventDefault();
+  var bucket = document.getElementById(bucketId);
+  bucket.classList.remove('dragover');
+  if(!draggedIngredient) return;
+  var empty = bucket.querySelector('.bempty');
+  if(empty) empty.remove();
+  var row = document.createElement('div');
+  row.className = 'assignedrow';
+  row.innerHTML = '<span>' + draggedIngredient + '</span><button class="rm" onclick="this.parentElement.remove()">×</button>';
+  bucket.appendChild(row);
+}
+function tapAssign(name){
+  document.getElementById('tap-assign-name').textContent = name;
+  document.getElementById('tap-assign-form').style.display = 'flex';
+}
+</script>
+</body>
+</html>
