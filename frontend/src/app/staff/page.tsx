@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { shortDate, today } from "@/lib/format";
+import { shortDate, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import type {
   DailyClosing,
@@ -17,27 +17,25 @@ import type {
 
 export default function StaffHome() {
   const { user } = useAuth();
-  const { day } = useOperatingDay();
+  const { day, workDate, setWorkDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
 
-  const [outletName, setOutletName] = useState("outlet");
-  const [readyPieces, setReadyPieces] = useState(0);
-  const [historyCount, setHistoryCount] = useState(0);
+  const [outletObj, setOutletObj] = useState<Outlet | null>(null);
+  const [displayStock, setDisplayStock] = useState<DisplayStock[]>([]);
   const [stockInStatus, setStockInStatus] = useState("None today");
   const [preparedToday, setPreparedToday] = useState(0);
   const [closingStatus, setClosingStatus] = useState("Not started");
 
   useEffect(() => {
-    const t = today();
+    const t = workDate || today();
     api<Paginated<Outlet>>("/outlets/").then((d) => {
       const o = d.results.find((x) => x.id === outlet) ?? d.results[0];
-      if (o) setOutletName(o.name);
+      if (o) setOutletObj(o);
     });
     api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`).then((d) =>
-      setReadyPieces(d.results.reduce((s, r) => s + r.pieces_available, 0))
+      setDisplayStock(d.results)
     );
     api<Paginated<StockInRecord>>(`/stock-in/?outlet=${outlet}`).then((d) => {
-      setHistoryCount(d.count ?? d.results.length);
       const draft = d.results.find((r) => r.status === "DRAFT");
       const latest = d.results[0];
       if (draft) setStockInStatus(`Draft — ${draft.items.length} item${draft.items.length === 1 ? "" : "s"}`);
@@ -49,16 +47,24 @@ export default function StaffHome() {
     api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${t}`).then((d) => {
       const c = d.results[0];
       if (c) setClosingStatus(c.status.charAt(0) + c.status.slice(1).toLowerCase());
+      else setClosingStatus("Not started");
     });
-  }, [outlet]);
+  }, [outlet, workDate]);
 
   const status = day?.status ?? "NOT_STARTED";
+  const readyPieces = displayStock.reduce((s, d) => s + d.pieces_available, 0);
+  const readyProducts = displayStock.filter((d) => d.pieces_available > 0);
+
+  const closingColor =
+    closingStatus === "Locked" ? "text-leaf-deep font-semibold" :
+    closingStatus === "Submitted" ? "text-leaf" :
+    "text-ink-soft";
 
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="font-display text-xl font-bold">Today — {shortDate(today())}</h1>
-        <p className="text-xs text-ink-soft">{outletName} outlet</p>
+        <h1 className="font-display text-xl font-bold">{outletObj?.name ?? "outlet"}</h1>
+        <p className="text-xs text-ink-soft">{shortDate(workDate || today())}</p>
       </div>
 
       {/* Gated start-of-day wizard */}
@@ -66,6 +72,37 @@ export default function StaffHome() {
         <div className="flex flex-col gap-3">
           {status === "NOT_STARTED" && (
             <>
+              {/* Date selector — only when owner has enabled it */}
+              {outletObj?.allow_staff_date_selection && (
+                <div className="ticket overflow-hidden flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] uppercase tracking-wide text-ink-soft shrink-0">
+                      Operating date
+                    </span>
+                    {workDate !== today() && (
+                      <button
+                        className="font-mono text-[10px] text-ink-soft underline shrink-0"
+                        onClick={() => setWorkDate(today())}
+                      >
+                        reset to today
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="date"
+                    className="field-input w-full min-w-0"
+                    value={workDate || today()}
+                    max={today()}
+                    onChange={(e) => e.target.value && setWorkDate(e.target.value)}
+                  />
+                  {workDate && workDate !== today() && (
+                    <p className="font-mono text-[10px] text-gold-deep">
+                      Entering data for {shortDate(workDate)} — not today
+                    </p>
+                  )}
+                </div>
+              )}
+
               <Link href="/staff/day-start" className="btn btn-primary text-center">
                 ▶ Start your day
               </Link>
@@ -100,21 +137,51 @@ export default function StaffHome() {
 
       {(status === "IN_PROGRESS" || status === "CLOSED") && (
         <>
-          <div className="ticket">
-            <div className="ticket-row">
-              <span>Stock in status</span>
-              <span className="qty text-ink-soft">{stockInStatus}</span>
-            </div>
+          {/* Day summary */}
+          <div className="ticket flex flex-col gap-0">
+            {day?.started_at && (
+              <div className="ticket-row">
+                <span>Opened at</span>
+                <span className="qty">{timeOf(day.started_at)}</span>
+              </div>
+            )}
             <div className="ticket-row">
               <span>Prepared today</span>
               <span className="qty text-ink-soft">{preparedToday} pcs</span>
             </div>
             <div className="ticket-row">
-              <span>Closing status</span>
-              <span className="qty text-ink-soft">{closingStatus}</span>
+              <span>Stock in</span>
+              <span className="qty text-ink-soft">{stockInStatus}</span>
+            </div>
+            <div className="ticket-row">
+              <span>Closing</span>
+              <span className={`qty ${closingColor}`}>{closingStatus}</span>
             </div>
           </div>
 
+          {/* Ready-to-sell grid */}
+          {readyProducts.length > 0 && (
+            <div>
+              <p className="mb-2 font-mono text-[11px] uppercase tracking-wide text-ink-soft">
+                Ready to sell — {readyPieces} pcs total
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {readyProducts.map((d) => (
+                  <div
+                    key={d.id}
+                    className="flex items-center justify-between rounded border border-[#d8cdb0] bg-paper px-2.5 py-2"
+                  >
+                    <span className="font-mono text-[11px] text-ink truncate">{d.product_name}</span>
+                    <span className="ml-2 shrink-0 font-mono text-[13px] font-bold text-ink">
+                      {d.pieces_available}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Edit links */}
           <div className="flex flex-wrap gap-3 text-[11px]">
             <Link href="/staff/day-start" className="font-mono text-gold-deep underline">
               Edit day-start stock
@@ -124,15 +191,15 @@ export default function StaffHome() {
             </Link>
           </div>
 
-          <p className="mt-1 text-xs text-ink-soft">Quick actions</p>
+          {/* Quick action tiles */}
           <div className="tilegrid">
             <Link href="/staff/stock" className="tile">
               <span className="n">{readyPieces}</span>
-              <span className="l">Pieces in stock</span>
+              <span className="l">Stock overview</span>
             </Link>
-            <Link href="/staff/stock-in" className="tile">
-              <span className="n">{historyCount}</span>
-              <span className="l">Stock in history</span>
+            <Link href="/staff/closing/history" className="tile">
+              <span className="n">≡</span>
+              <span className="l">Closing history</span>
             </Link>
             <Link href="/staff/packaging" className="tile">
               <span className="n">▦</span>
@@ -143,9 +210,6 @@ export default function StaffHome() {
               <span className="l">Add expense</span>
             </Link>
           </div>
-          <Link href="/staff/profile" className="text-center font-mono text-[11px] text-ink-soft underline">
-            Profile &amp; settings
-          </Link>
         </>
       )}
     </div>
@@ -153,19 +217,9 @@ export default function StaffHome() {
 }
 
 function WizardStep({
-  n,
-  title,
-  hint,
-  href,
-  done,
-  active,
+  n, title, hint, href, done, active,
 }: {
-  n: number;
-  title: string;
-  hint: string;
-  href: string;
-  done: boolean;
-  active: boolean;
+  n: number; title: string; hint: string; href: string; done: boolean; active: boolean;
 }) {
   const inner = (
     <div

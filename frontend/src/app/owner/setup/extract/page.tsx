@@ -28,6 +28,8 @@ interface EditDraft {
   name: string;
   base_unit: string;
   tracking_mode: TrackingMode;
+  pieces_per_pack: string;
+  cost_per_pack: string;
 }
 
 function toRow(c: ExtractCandidate): Row {
@@ -53,7 +55,8 @@ export default function ExtractIngredients() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [showManual, setShowManual] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED" });
+  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED", pieces_per_pack: "", cost_per_pack: "" });
+  const [editOrigPack, setEditOrigPack] = useState<{ pieces_per_pack: string; cost_per_pack: string }>({ pieces_per_pack: "", cost_per_pack: "" });
   const [editBusy, setEditBusy] = useState(false);
 
   async function refresh() {
@@ -113,7 +116,16 @@ export default function ExtractIngredients() {
 
   function startEdit(ing: Ingredient) {
     setEditId(ing.id);
-    setEditDraft({ name: ing.name, base_unit: ing.base_unit, tracking_mode: ing.tracking_mode });
+    const origPieces = ing.active_pack?.pieces_per_pack ?? "";
+    const origCost   = ing.active_pack?.cost_per_pack   ?? "";
+    setEditDraft({
+      name: ing.name,
+      base_unit: ing.base_unit,
+      tracking_mode: ing.tracking_mode,
+      pieces_per_pack: origPieces,
+      cost_per_pack: origCost,
+    });
+    setEditOrigPack({ pieces_per_pack: origPieces, cost_per_pack: origCost });
   }
 
   async function saveEdit() {
@@ -122,8 +134,29 @@ export default function ExtractIngredients() {
     try {
       await api(`/ingredients/${editId}/`, {
         method: "PATCH",
-        body: JSON.stringify(editDraft),
+        body: JSON.stringify({
+          name: editDraft.name,
+          base_unit: editDraft.base_unit,
+          tracking_mode: editDraft.tracking_mode,
+        }),
       });
+
+      // Only version a new PackDefinition if the pack values actually changed.
+      const packChanged =
+        editDraft.pieces_per_pack !== editOrigPack.pieces_per_pack ||
+        editDraft.cost_per_pack   !== editOrigPack.cost_per_pack;
+      if (packChanged && editDraft.pieces_per_pack.trim()) {
+        await api("/pack-definitions/", {
+          method: "POST",
+          body: JSON.stringify({
+            ingredient: editId,
+            pieces_per_pack: editDraft.pieces_per_pack,
+            cost_per_pack: editDraft.cost_per_pack || "0",
+            effective_from: today(),
+          }),
+        });
+      }
+
       setEditId(null);
       refresh();
     } catch {
@@ -308,6 +341,7 @@ export default function ExtractIngredients() {
                     >
                       <option value="RECIPE_LINKED">Recipe-linked (bun, patty, sauce…)</option>
                       <option value="PERIODIC_COUNT">Periodic count (bags, packets…)</option>
+                      <option value="ONE_TIME">One-time purchase (tools, equipment…)</option>
                     </select>
                   </label>
                 </div>
@@ -344,7 +378,8 @@ export default function ExtractIngredients() {
               <th>Ingredient</th>
               <th>Base unit</th>
               <th>Tracking</th>
-              <th>Pack yield</th>
+              <th>Qty / pack</th>
+              <th>Cost / pack (৳)</th>
               <th>Aliases</th>
               <th></th>
             </tr>
@@ -377,9 +412,27 @@ export default function ExtractIngredients() {
                     >
                       <option value="RECIPE_LINKED">Recipe-linked</option>
                       <option value="PERIODIC_COUNT">Periodic count</option>
+                      <option value="ONE_TIME">One-time purchase</option>
                     </select>
                   </td>
-                  <td className="text-ink-soft">{ing.active_pack ? `${ing.active_pack.pieces_per_pack} ${ing.base_unit}` : "—"}</td>
+                  <td>
+                    <input
+                      className="field-input !py-0.5 !text-xs w-full"
+                      inputMode="decimal"
+                      placeholder="e.g. 10"
+                      value={editDraft.pieces_per_pack}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, pieces_per_pack: e.target.value }))}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="field-input !py-0.5 !text-xs w-full"
+                      inputMode="decimal"
+                      placeholder="e.g. 950"
+                      value={editDraft.cost_per_pack}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, cost_per_pack: e.target.value }))}
+                    />
+                  </td>
                   <td className="font-mono text-[10px] text-ink-soft">{ing.aliases.map((a) => a.alias_text).join(", ") || "—"}</td>
                   <td>
                     <div className="flex gap-2">
@@ -404,7 +457,8 @@ export default function ExtractIngredients() {
                   <td>{ing.name}</td>
                   <td>{ing.base_unit}</td>
                   <td className="capitalize">{ing.tracking_mode.replace("_", " ").toLowerCase()}</td>
-                  <td>{ing.active_pack ? `${ing.active_pack.pieces_per_pack} ${ing.base_unit}` : "—"}</td>
+                  <td className="font-mono text-xs">{ing.active_pack?.pieces_per_pack ?? "—"}</td>
+                  <td className="font-mono text-xs">{ing.active_pack?.cost_per_pack ? `৳${ing.active_pack.cost_per_pack}` : "—"}</td>
                   <td className="font-mono text-[10px]">{ing.aliases.map((a) => a.alias_text).join(", ") || "—"}</td>
                   <td>
                     <div className="flex gap-3">
@@ -508,6 +562,7 @@ function ManualAdd({ onAdded }: { onAdded: () => void }) {
           <select className="field-input" value={tracking} onChange={(e) => setTracking(e.target.value as TrackingMode)}>
             <option value="RECIPE_LINKED">Recipe-linked</option>
             <option value="PERIODIC_COUNT">Periodic count</option>
+            <option value="ONE_TIME">One-time purchase</option>
           </select>
         </label>
         <label className="field">

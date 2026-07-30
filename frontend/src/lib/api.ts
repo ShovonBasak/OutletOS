@@ -88,6 +88,23 @@ export async function api<T = unknown>(
   return res.json();
 }
 
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const access = getAccess();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: access ? { Authorization: `Bearer ${access}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, null);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function login(phone: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/login/`, {
     method: "POST",

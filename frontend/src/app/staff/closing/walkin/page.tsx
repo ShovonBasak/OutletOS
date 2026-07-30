@@ -4,18 +4,21 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
-import { bdt } from "@/lib/format";
+import { bdt, today } from "@/lib/format";
+import { useOperatingDay } from "@/lib/staffDay";
 import type { DailyClosing } from "@/lib/types";
 
 export default function WalkinScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const { workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
+  const opDate = workDate || today();
   const [closing, setClosing] = useState<DailyClosing | null>(null);
 
   useEffect(() => {
-    getOrCreateTodayClosing(outlet).then(setClosing);
-  }, [outlet]);
+    getOrCreateTodayClosing(outlet, opDate).then(setClosing);
+  }, [outlet, opDate]);
 
   if (!closing) return <p className="font-mono text-xs text-ink-soft">Loading…</p>;
 

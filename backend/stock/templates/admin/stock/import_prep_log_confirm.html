@@ -1,0 +1,156 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Confirm Prep Log Import | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_preparationlog_changelist' %}">Preparation logs</a>
+  › <a href="{% url 'admin:stock_preparationlog_import_historic' %}">Import historic slips</a>
+  › Confirm
+</div>
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+  .slip-card {
+    border: 1px dashed #aaa;
+    border-radius: 6px;
+    padding: 1em 1.5em;
+    margin-bottom: 1.5em;
+    background: #fafafa;
+  }
+  .slip-card h3 { margin-top: 0; color: #333; }
+  .item-row {
+    display: grid;
+    grid-template-columns: 2em 2fr 2fr 5em 7em;
+    gap: .5em;
+    align-items: center;
+    padding: .3em 0;
+    border-bottom: 1px solid #eee;
+  }
+  .item-row.header {
+    font-weight: bold;
+    font-size: .85em;
+    color: #555;
+    border-bottom: 2px solid #ccc;
+    padding-bottom: .4em;
+  }
+  .item-row input[type="number"],
+  .item-row select { width: 100%; box-sizing: border-box; }
+  .raw-text { font-size: .85em; color: #666; font-style: italic; }
+  .unresolved { background: #fff3cd; }
+  .warn-badge {
+    background: #f0c419; color: #241512;
+    font-size: .75em; padding: 1px 6px; border-radius: 3px; margin-left: .3em;
+  }
+  .note { font-size:.85em; color:#555; margin:.5em 0; }
+  .source-fresh { color: #3f6b3f; font-size:.8em; }
+  .source-cf { color: #c9601c; font-size:.8em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Confirm Prep Log Import</h1>
+<p class="note">
+  Review the data extracted from each prep log slip. Edit the date, product mapping, pieces, and source
+  before importing. Uncheck items you want to skip. Items with no product mapping will be skipped automatically.
+</p>
+
+{% if messages %}
+{% for message in messages %}
+<div class="{% if message.tags %}{{ message.tags }}{% else %}infomessage{% endif %}" style="padding:.5em 1em;margin-bottom:.5em;border-left:4px solid #ccc;">
+  {{ message }}
+</div>
+{% endfor %}
+{% endif %}
+
+<form method="post" id="confirm-form">
+  {% csrf_token %}
+
+  <div id="slips-container"></div>
+
+  <div class="submit-row" style="margin-top:1.5em;">
+    <input type="submit" value="✓ Import All Checked Items" class="default" style="padding:.5em 1.5em;">
+    <a href="{% url 'admin:stock_preparationlog_import_historic' %}" style="margin-left:1em;">← Start Over</a>
+    <a href="{% url 'admin:stock_preparationlog_changelist' %}" style="margin-left:1em;">Cancel</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  const sessionData = {{ session_data_json|safe }};
+  const allProducts = {{ all_products_json|safe }};
+
+  const container = document.getElementById('slips-container');
+  const form = document.getElementById('confirm-form');
+
+  const numSlipsInput = document.createElement('input');
+  numSlipsInput.type = 'hidden';
+  numSlipsInput.name = 'num_slips';
+  numSlipsInput.value = sessionData.slips.length;
+  form.appendChild(numSlipsInput);
+
+  sessionData.slips.forEach((slip, i) => {
+    const card = document.createElement('div');
+    card.className = 'slip-card';
+
+    card.innerHTML = `
+      <h3>
+        Slip ${i + 1}: <em>${slip.image_name}</em>
+        ${slip.items.some(it => !it.product_id) ? '<span class="warn-badge">Has unresolved items</span>' : ''}
+      </h3>
+      <div style="display:flex;align-items:center;gap:.5em;margin-bottom:.8em;">
+        <label for="slip_${i}_date" style="font-weight:bold;">Date:</label>
+        <input type="date" name="slip_${i}_date" id="slip_${i}_date"
+               value="${slip.date || ''}" required style="min-width:150px;">
+        <input type="hidden" name="slip_${i}_num_items" value="${slip.items.length}">
+      </div>
+    `;
+
+    const headerRow = document.createElement('div');
+    headerRow.className = 'item-row header';
+    headerRow.innerHTML = `
+      <span>✓</span>
+      <span>Raw text (from slip)</span>
+      <span>Product</span>
+      <span>Pieces</span>
+      <span>Source</span>
+    `;
+    card.appendChild(headerRow);
+
+    slip.items.forEach((item, j) => {
+      const row = document.createElement('div');
+      row.className = 'item-row' + (item.product_id ? '' : ' unresolved');
+
+      let productOptions = '<option value="">— unresolved —</option>';
+      allProducts.forEach(p => {
+        const sel = p.id == item.product_id ? 'selected' : '';
+        productOptions += `<option value="${p.id}" ${sel}>${p.name}${p.category ? ' (' + p.category + ')' : ''}</option>`;
+      });
+
+      row.innerHTML = `
+        <input type="checkbox" name="item_${i}_${j}_include" ${item.product_id ? 'checked' : ''}>
+        <span class="raw-text">${item.raw_text}</span>
+        <select name="item_${i}_${j}_product_id">
+          ${productOptions}
+        </select>
+        <input type="number" name="item_${i}_${j}_pieces_prepared" value="${item.pieces_prepared || ''}"
+               min="1" step="1" style="width:5em;">
+        <select name="item_${i}_${j}_source">
+          <option value="FRESH" ${item.source === 'FRESH' ? 'selected' : ''}>FRESH</option>
+          <option value="CARRIED_FORWARD" ${item.source === 'CARRIED_FORWARD' ? 'selected' : ''}>CARRIED FWD</option>
+        </select>
+        <input type="hidden" name="item_${i}_${j}_raw_text" value="${item.raw_text.replace(/"/g, '&quot;')}">
+      `;
+
+      card.appendChild(row);
+    });
+
+    container.appendChild(card);
+  });
+})();
+</script>
+{% endblock %}

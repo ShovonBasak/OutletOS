@@ -1,0 +1,129 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Import Stock-In from Excel | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_stockinrecord_changelist' %}">Stock-in records</a>
+  › Import from Excel
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Import Stock-In from Excel</h1>
+
+<p style="color:#666;margin-bottom:1.5em;">
+  Upload a filled-in Excel file to import one invoice's lines into an APPROVED stock-in record.
+  Ingredient names are matched automatically via alias lookup and fuzzy matching.
+  You can review, edit, and resolve unmatched lines on the next screen before committing.
+</p>
+
+{% if messages %}
+{% for message in messages %}
+<div class="{% if message.tags %}{{ message.tags }}{% else %}infomessage{% endif %}"
+     style="padding:.5em 1em;margin-bottom:.5em;border-left:4px solid #ccc;">
+  {{ message }}
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="module" style="padding:1em 1.5em;margin-bottom:1em;">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_outlet" style="font-weight:bold;display:block;margin-bottom:.3em;">Outlet</label>
+      <select name="outlet" id="id_outlet" required style="min-width:200px;">
+        {% for outlet in outlets %}
+        <option value="{{ outlet.id }}">{{ outlet.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_invoice_number" style="font-weight:bold;display:block;margin-bottom:.3em;">
+        Invoice Number <span style="font-weight:normal;color:#888;">(optional)</span>
+      </label>
+      <input type="text" name="invoice_number" id="id_invoice_number"
+             placeholder="e.g. INV-2024-001" style="min-width:240px;">
+      <p class="help" style="color:#666;margin-top:.3em;">
+        The invoice/challan number printed on the supplier slip. Stored for reference.
+      </p>
+    </div>
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_slip_date" style="font-weight:bold;display:block;margin-bottom:.3em;">
+        Invoice / Delivery Date
+      </label>
+      <input type="date" name="slip_date" id="id_slip_date" required style="min-width:160px;">
+      <p class="help" style="color:#666;margin-top:.3em;">
+        The date printed on the invoice. Used as the stock-in date for RawStock accounting.
+      </p>
+    </div>
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_excel_file" style="font-weight:bold;display:block;margin-bottom:.3em;">
+        Excel File (.xlsx)
+      </label>
+      <input type="file" name="excel_file" id="id_excel_file" accept=".xlsx,.xls" required>
+      <p class="help" style="color:#666;margin-top:.3em;">
+        Use the template column layout.
+        <a href="{{ sample_excel_url }}" style="color:#007bff;">Download blank template</a>
+      </p>
+    </div>
+
+    <div class="submit-row" style="margin-top:1.5em;">
+      <input type="submit" value="Parse Excel →" class="default" style="padding:.5em 1.5em;">
+      <a href="{% url 'admin:stock_stockinrecord_changelist' %}" style="margin-left:1em;">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="module" style="padding:1em 1.5em;background:#fffbe6;border-left:4px solid #f0c419;">
+  <h3 style="margin-top:0;">Expected column headers (row 1)</h3>
+  <table style="border-collapse:collapse;font-size:.9em;width:100%;">
+    <thead>
+      <tr style="background:#f5f5f5;">
+        <th style="text-align:left;padding:.3em .6em;border:1px solid #ddd;">Column</th>
+        <th style="text-align:left;padding:.3em .6em;border:1px solid #ddd;">Maps to</th>
+        <th style="text-align:left;padding:.3em .6em;border:1px solid #ddd;">Required</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for col in column_info %}
+      <tr>
+        <td style="padding:.3em .6em;border:1px solid #ddd;font-family:monospace;">{{ col.0 }}</td>
+        <td style="padding:.3em .6em;border:1px solid #ddd;color:#555;">{{ col.1 }}</td>
+        <td style="padding:.3em .6em;border:1px solid #ddd;">{{ col.2 }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" style="padding:.4em .6em;border:1px solid #ddd;color:#888;">
+        Product / Service Name · Quantity · Unit (PACK/PIECE) · Per Unit Rate · Total Amount ·
+        SD Rate (%) · SD Amount · VAT Rate (%) · VAT Amount · Total Value incl. VAT &amp; TAX
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin:.8em 0 0;color:#555;font-size:.85em;">
+    Column order doesn't matter — detection is by header text.
+    Summary rows containing "Grand Total", "Sub Total", or "VAT Total" are automatically
+    captured as slip-level totals and skipped from the item list.
+  </p>
+</div>
+
+<div class="module" style="padding:1em 1.5em;background:#f0f8ff;border-left:4px solid #4a90d9;">
+  <h3 style="margin-top:0;">What this import does</h3>
+  <ul style="margin:0;padding-left:1.2em;">
+    <li>Creates an <strong>APPROVED</strong> StockInRecord for the selected date (bypasses the
+        OperatingDay staff gate — designed for admin/historic imports).</li>
+    <li>Updates <strong>RawStock</strong> immediately for all resolved ingredient lines.</li>
+    <li>Ingredient names are matched via supplier alias table, then exact name, then fuzzy
+        (≥ 80 % similarity). Unmatched lines are saved as "Unrecognized" and flagged on the
+        confirm screen.</li>
+    <li>Price data (Rate, VAT, Total) is stored on each line for COGS calculations.</li>
+  </ul>
+</div>
+{% endblock %}

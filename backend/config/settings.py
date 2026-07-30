@@ -99,13 +99,58 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
 
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
-}
+# ---------------------------------------------------------------------------
+# Media / file storage
+#
+# Local (default): files saved to MEDIA_ROOT, served by Django at /media/.
+# S3-compatible:   set AWS_STORAGE_BUCKET_NAME (+ credentials below) to
+#                  switch automatically.  Supports AWS S3, DigitalOcean Spaces,
+#                  MinIO, and any S3-compatible store via AWS_S3_ENDPOINT_URL.
+#
+# Required env vars for S3:
+#   AWS_STORAGE_BUCKET_NAME   bucket name
+#   AWS_ACCESS_KEY_ID         access key
+#   AWS_SECRET_ACCESS_KEY     secret key
+#
+# Optional env vars for S3:
+#   AWS_S3_REGION_NAME        region (default: us-east-1)
+#   AWS_S3_ENDPOINT_URL       custom endpoint for non-AWS stores (e.g. MinIO)
+#   AWS_S3_CUSTOM_DOMAIN      CDN / Spaces custom domain for public URLs
+# ---------------------------------------------------------------------------
+
+_S3_BUCKET = os.getenv("AWS_STORAGE_BUCKET_NAME")
+
+if _S3_BUCKET:
+    AWS_STORAGE_BUCKET_NAME  = _S3_BUCKET
+    AWS_ACCESS_KEY_ID        = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY    = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_S3_REGION_NAME       = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+    AWS_S3_ENDPOINT_URL      = os.getenv("AWS_S3_ENDPOINT_URL")   # None = real AWS
+    AWS_S3_CUSTOM_DOMAIN     = os.getenv("AWS_S3_CUSTOM_DOMAIN")  # CDN / Spaces domain
+    AWS_DEFAULT_ACL          = "private"
+    AWS_S3_FILE_OVERWRITE    = False
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+
+    _media_domain = AWS_S3_CUSTOM_DOMAIN or f"s3.amazonaws.com/{_S3_BUCKET}"
+    MEDIA_URL = f"https://{_media_domain}/media/"
+    MEDIA_ROOT = BASE_DIR / "media"   # unused with S3 but keeps other code happy
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+            "OPTIONS": {"location": "media"},
+        },
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    }
+else:
+    MEDIA_URL  = "/media/"
+    MEDIA_ROOT = BASE_DIR / "media"
+
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -130,4 +175,4 @@ CORS_ALLOW_CREDENTIALS = True
 # In local dev the Next server may land on a different port (e.g. 3001 when 3000
 # is taken); allow any localhost/127.0.0.1 port so the frontend isn't CORS-blocked.
 if DEBUG:
-    CORS_ALLOWED_ORIGIN_REGEXES = [r"^http://(localhost|127\.0\.0\.1):\d+$"]
+    CORS_ALLOWED_ORIGIN_REGEXES = [r"^http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+):\d+$"]

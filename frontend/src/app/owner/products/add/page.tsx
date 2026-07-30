@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { today } from "@/lib/format";
 import type { Product } from "@/lib/types";
 
 const CATEGORIES = ["Sandwich", "Fried chicken", "Sides", "Drinks", "Sauces", "Other"];
@@ -13,6 +14,7 @@ export default function AddProductPage() {
   const [name, setName] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [price, setPrice] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [prepared, setPrepared] = useState(true);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,6 +36,7 @@ export default function AddProductPage() {
           product_type: "SINGLE",
           requires_preparation: prepared,
           selling_price: price,
+          effective_from: effectiveFrom,
           is_active: active,
         }),
       });
@@ -70,7 +73,14 @@ export default function AddProductPage() {
           <span className="field-label">Selling price — walk-in (৳)</span>
           <input className="field-input" placeholder="e.g. 95" value={price} onChange={(e) => setPrice(e.target.value)} />
         </label>
+        <label className="field">
+          <span className="field-label">Effective from</span>
+          <input className="field-input" type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+        </label>
       </div>
+      <p className="max-w-[480px] text-xs text-ink-soft">
+        Changing the price later doesn&apos;t overwrite this — it schedules a new price starting that date. Past sales always keep the price they sold at.
+      </p>
 
       <div className="field max-w-[480px]">
         <span className="field-label">How is it made available for sale?</span>

@@ -6,20 +6,23 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
-import { bdt, today } from "@/lib/format";
+import { bdt, shortDate, today } from "@/lib/format";
+import { useOperatingDay } from "@/lib/staffDay";
 import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, Paginated, Product } from "@/lib/types";
 
 export default function ClosingHub() {
   const { user } = useAuth();
   const router = useRouter();
+  const { workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
+  const opDate = workDate || today();
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
-    const c = await getOrCreateTodayClosing(outlet);
+    const c = await getOrCreateTodayClosing(outlet, opDate);
     setClosing(c);
     const p = await api<Paginated<Product>>("/products/?active=true");
     setTotalProducts(p.results.filter((x) => x.product_type === "SINGLE").length);
@@ -27,7 +30,7 @@ export default function ClosingHub() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outlet]);
+  }, [outlet, opDate]);
 
   if (!closing) return <p className="font-mono text-xs text-ink-soft">Loading closing…</p>;
 
@@ -51,7 +54,7 @@ export default function ClosingHub() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-display text-xl font-bold">Day-end closing</h1>
-          <p className="text-xs text-ink-soft">{today()}</p>
+          <p className="text-xs text-ink-soft">{shortDate(opDate)}</p>
         </div>
         <Stamp status={closing.status} />
       </div>

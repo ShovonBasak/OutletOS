@@ -32,6 +32,9 @@ class StockInItemSerializer(serializers.ModelSerializer):
             "id", "ingredient", "ingredient_name", "base_unit", "raw_extracted_text",
             "source", "unit_captured", "extracted_quantity", "confirmed_quantity",
             "pack_definition", "pieces_per_pack", "base_unit_quantity",
+            "rate", "total_amount",
+            "sd_rate", "sd_amount", "vat_rate", "vat_amount",
+            "unit_price", "line_total",
             "is_unrecognized", "needs_pack_yield",
         ]
 
@@ -57,8 +60,9 @@ class StockInRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockInRecord
         fields = [
-            "id", "outlet", "stock_in_date", "submitted_by", "submitted_by_name",
+            "id", "outlet", "stock_in_date", "invoice_number", "submitted_by", "submitted_by_name",
             "status", "reviewed_by", "reviewed_at", "slip_image", "notes",
+            "slip_subtotal", "slip_vat_total", "slip_grand_total",
             "created_at", "items", "unresolved_count",
         ]
         # slip_image is set via the dedicated multipart upload-slip action.
@@ -96,7 +100,7 @@ class PreparationLogSerializer(serializers.ModelSerializer):
         model = PreparationLog
         fields = [
             "id", "outlet", "logged_by", "product", "product_name", "timestamp",
-            "source", "carried_forward_from", "leftover_available_pieces",
+            "op_date", "source", "carried_forward_from", "leftover_available_pieces",
             "prep_unit", "packs_used", "pieces_prepared", "wastage_pieces",
         ]
         read_only_fields = ["timestamp", "logged_by", "wastage_pieces"]
@@ -116,12 +120,25 @@ class PreparationLogSerializer(serializers.ModelSerializer):
 class RawStockSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
+    tracking_mode = serializers.CharField(source="ingredient.tracking_mode", read_only=True)
+    pieces_per_pack = serializers.SerializerMethodField()
+    cost_per_base_unit = serializers.SerializerMethodField()
+
+    def get_pieces_per_pack(self, obj):
+        pack = obj.ingredient.active_pack()
+        return str(pack.pieces_per_pack) if pack else None
+
+    def get_cost_per_base_unit(self, obj):
+        pack = obj.ingredient.active_pack()
+        if pack and pack.pieces_per_pack:
+            return str(round(pack.cost_per_pack / pack.pieces_per_pack, 4))
+        return None
 
     class Meta:
         model = RawStock
         fields = [
             "id", "outlet", "ingredient", "ingredient_name", "base_unit",
-            "quantity_available",
+            "tracking_mode", "quantity_available", "pieces_per_pack", "cost_per_base_unit",
         ]
 
 

@@ -1,0 +1,82 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Import Historic Prep Log Slips | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_preparationlog_changelist' %}">Preparation logs</a>
+  › Import historic slips
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Import Historic Preparation Log Slips</h1>
+
+<p style="color:#666;margin-bottom:1.5em;">
+  Upload one or more prep log slip images. AI (Claude) will read each slip,
+  extract the date and items prepared, and let you review before committing.
+</p>
+
+{% if not ai_available %}
+<div class="errornote" style="margin-bottom:1em;">
+  <strong>AI extraction unavailable.</strong>
+  Set <code>ANTHROPIC_API_KEY</code> in your <code>.env</code> file
+  (get a free key at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a>).
+</div>
+{% endif %}
+
+{% if messages %}
+{% for message in messages %}
+<div class="{% if message.tags %}{{ message.tags }}{% else %}infomessage{% endif %}" style="padding:.5em 1em;margin-bottom:.5em;border-left:4px solid #ccc;">
+  {{ message }}
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="module" style="padding:1em 1.5em;margin-bottom:1em;">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_outlet" style="font-weight:bold;display:block;margin-bottom:.3em;">Outlet</label>
+      <select name="outlet" id="id_outlet" required style="min-width:200px;">
+        {% for outlet in outlets %}
+        <option value="{{ outlet.id }}">{{ outlet.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_images" style="font-weight:bold;display:block;margin-bottom:.3em;">Prep Log Images</label>
+      <input type="file" name="images" id="id_images" multiple accept="image/*" required>
+      <p class="help" style="color:#666;margin-top:.3em;">
+        Upload one or more preparation log slip photos.
+        You can upload multiple slips at once — each will be extracted separately.
+      </p>
+    </div>
+
+    <div class="submit-row" style="margin-top:1.5em;">
+      {% if ai_available %}
+      <input type="submit" value="Extract from Slips →" class="default" style="padding:.5em 1.5em;">
+      {% else %}
+      <input type="submit" value="Extract from Slips →" class="default" disabled style="opacity:.5;padding:.5em 1.5em;">
+      {% endif %}
+      <a href="{% url 'admin:stock_preparationlog_changelist' %}" style="margin-left:1em;">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="module" style="padding:1em 1.5em;background:#fffbe6;border-left:4px solid #f0c419;">
+  <h3 style="margin-top:0;">What this import does</h3>
+  <ul style="margin:0;padding-left:1.2em;">
+    <li><strong>FRESH</strong> entries deduct RawStock via the product's Recipe (same as normal prep).</li>
+    <li><strong>CARRIED FORWARD</strong> entries add to DisplayStock only — no RawStock deduction.</li>
+    <li>All entries add prepared pieces to <strong>DisplayStock</strong>.</li>
+    <li>The prep timestamp is set to noon on the slip's date.</li>
+    <li>Lines where the product couldn't be matched are skipped and flagged.</li>
+  </ul>
+</div>
+{% endblock %}

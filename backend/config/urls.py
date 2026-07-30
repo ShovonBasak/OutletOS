@@ -9,11 +9,13 @@ from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView
 from catalog.views import (
     OutletViewSet,
     ProductViewSet,
+    ProductPriceViewSet,
     ComboComponentViewSet,
     IngredientViewSet,
     SupplierProductAliasViewSet,
     PackDefinitionViewSet,
     RecipeViewSet,
+    RecipeProductComponentViewSet,
 )
 from stock.views import (
     StockInRecordViewSet,
@@ -43,11 +45,13 @@ router = DefaultRouter()
 router.register("users", UserViewSet)
 router.register("outlets", OutletViewSet)
 router.register("products", ProductViewSet)
+router.register("product-prices", ProductPriceViewSet)
 router.register("combo-components", ComboComponentViewSet)
 router.register("ingredients", IngredientViewSet)
 router.register("supplier-aliases", SupplierProductAliasViewSet)
 router.register("pack-definitions", PackDefinitionViewSet)
 router.register("recipes", RecipeViewSet)
+router.register("recipe-product-components", RecipeProductComponentViewSet)
 router.register("stock-in", StockInRecordViewSet)
 router.register("raw-stock", RawStockViewSet)
 router.register("preparation-logs", PreparationLogViewSet)
@@ -76,8 +80,9 @@ urlpatterns = [
     path("api/", include(router.urls)),
 ]
 
-# Serve uploaded slip images. This app is a small internal tool, so Django
-# serves media directly in all environments (no separate object store in v1).
-urlpatterns += [
-    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
-]
+# Serve uploaded files locally.  When S3 is configured, Django's ImageField
+# returns the S3 URL directly so this route is not needed.
+if not settings.STORAGES["default"]["BACKEND"].endswith("S3Boto3Storage"):
+    urlpatterns += [
+        re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+    ]

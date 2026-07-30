@@ -5,11 +5,11 @@ import type {
   OperatingDay,
 } from "./types";
 
-/** Get (or lazily create) today's OperatingDay for the outlet. */
-export async function getTodayOperatingDay(outlet: number): Promise<OperatingDay> {
-  return api<OperatingDay>(`/operating-days/today/?outlet=${outlet}`, {
-    method: "POST",
-  });
+/** Get (or lazily create) an OperatingDay for the given date (defaults to today). */
+export async function getTodayOperatingDay(outlet: number, date?: string): Promise<OperatingDay> {
+  const params = new URLSearchParams({ outlet: String(outlet) });
+  if (date) params.set("date", date);
+  return api<OperatingDay>(`/operating-days/today/?${params}`, { method: "POST" });
 }
 
 export async function fetchDayStartStock(dayId: number): Promise<DayStartStockRow[]> {

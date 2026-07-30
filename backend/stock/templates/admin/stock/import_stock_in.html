@@ -1,0 +1,82 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Import Historic Stock-In Slips | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_stockinrecord_changelist' %}">Stock-in records</a>
+  › Import historic slips
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Import Historic Purchase / Stock-In Slips</h1>
+
+<p style="color:#666;margin-bottom:1.5em;">
+  Upload one or more purchase/delivery slip images. PaddleOCR PP-Structure will read each slip,
+  extract the date, ingredient lines, and pricing, then let you review and correct before importing.
+  If a slip has no clear table borders, PaddleOCR switches automatically to text-based extraction.
+  Either way, you can edit every field on the next screen before committing.
+</p>
+
+{% if not ai_available %}
+<div class="errornote" style="margin-bottom:1em;">
+  <strong>PaddleOCR not installed.</strong>
+  Run: <code>pip install paddlepaddle paddleocr opencv-python-headless</code>
+</div>
+{% endif %}
+
+{% if messages %}
+{% for message in messages %}
+<div class="{% if message.tags %}{{ message.tags }}{% else %}infomessage{% endif %}" style="padding:.5em 1em;margin-bottom:.5em;border-left:4px solid #ccc;">
+  {{ message }}
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="module" style="padding:1em 1.5em;margin-bottom:1em;">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_outlet" style="font-weight:bold;display:block;margin-bottom:.3em;">Outlet</label>
+      <select name="outlet" id="id_outlet" required style="min-width:200px;">
+        {% for outlet in outlets %}
+        <option value="{{ outlet.id }}">{{ outlet.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-row" style="margin-bottom:1em;">
+      <label for="id_images" style="font-weight:bold;display:block;margin-bottom:.3em;">Slip Images</label>
+      <input type="file" name="images" id="id_images" multiple accept="image/*" required>
+      <p class="help" style="color:#666;margin-top:.3em;">
+        Upload one or more purchase/delivery slip photos.
+        You can upload multiple slips at once — each will be extracted separately.
+      </p>
+    </div>
+
+    <div class="submit-row" style="margin-top:1.5em;">
+      {% if ai_available %}
+      <input type="submit" value="Extract from Slips →" class="default" style="padding:.5em 1.5em;">
+      {% else %}
+      <input type="submit" value="Extract from Slips →" class="default" disabled style="opacity:.5;padding:.5em 1.5em;">
+      {% endif %}
+      <a href="{% url 'admin:stock_stockinrecord_changelist' %}" style="margin-left:1em;">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<div class="module" style="padding:1em 1.5em;background:#fffbe6;border-left:4px solid #f0c419;">
+  <h3 style="margin-top:0;">What this import does</h3>
+  <ul style="margin:0;padding-left:1.2em;">
+    <li>Creates an <strong>APPROVED</strong> StockInRecord for each slip's date (bypasses OperatingDay gating).</li>
+    <li>Updates <strong>RawStock</strong> immediately for all resolved ingredient lines.</li>
+    <li>Lines where the ingredient couldn't be matched are saved as "Unrecognized" and flagged.</li>
+    <li>You can review and edit all extracted data before confirming the import.</li>
+  </ul>
+</div>
+{% endblock %}

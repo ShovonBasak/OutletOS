@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { today } from "@/lib/format";
+import { shortDate, today } from "@/lib/format";
+import { useOperatingDay } from "@/lib/staffDay";
 import type { CostCategory, Paginated } from "@/lib/types";
 
 export default function StaffAddExpense() {
   const router = useRouter();
   const { user } = useAuth();
+  const { workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
+  const opDate = workDate || today();
   const [categories, setCategories] = useState<CostCategory[]>([]);
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
@@ -36,7 +39,7 @@ export default function StaffAddExpense() {
     try {
       await api("/expenses/", {
         method: "POST",
-        body: JSON.stringify({ outlet, date: today(), category: Number(category), amount, description: note }),
+        body: JSON.stringify({ outlet, date: opDate, category: Number(category), amount, description: note }),
       });
       router.push("/staff");
     } catch {
@@ -52,7 +55,7 @@ export default function StaffAddExpense() {
       </Link>
       <div>
         <h1 className="font-display text-xl font-bold">Add expense</h1>
-        <p className="text-xs text-ink-soft">Logged against today</p>
+        <p className="text-xs text-ink-soft">Logged for {shortDate(opDate)}</p>
       </div>
 
       <label className="field">

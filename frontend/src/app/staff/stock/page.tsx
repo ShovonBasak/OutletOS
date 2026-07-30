@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { packBreakdown } from "@/lib/format";
 import type { DisplayStock, Paginated, RawStock } from "@/lib/types";
 
 export default function StockOverview() {
@@ -37,14 +38,20 @@ export default function StockOverview() {
           Raw ingredients
         </p>
         <div className="flex flex-col gap-2">
-          {raw.map((r) => (
-            <div key={r.id} className="listrow">
-              <span className="title">{r.ingredient_name}</span>
-              <span className="meta">
-                {r.quantity_available} {r.base_unit}
-              </span>
-            </div>
-          ))}
+          {raw.map((r) => {
+            const packs = packBreakdown(r.quantity_available, r.pieces_per_pack, r.base_unit);
+            return (
+              <div key={r.id} className="listrow">
+                <span className="title">{r.ingredient_name}</span>
+                <div className="text-right">
+                  <p className="meta">{Number(r.quantity_available)} {r.base_unit}</p>
+                  {packs && (
+                    <p className="font-mono text-[10px] text-ink-soft/60">= {packs}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
           {raw.length === 0 && <p className="font-mono text-xs text-ink-soft">No raw stock yet.</p>}
         </div>
       </div>

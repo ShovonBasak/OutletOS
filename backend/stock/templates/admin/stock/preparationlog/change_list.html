@@ -1,0 +1,20 @@
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls %}
+
+{% block object-tools %}
+<ul class="object-tools">
+  <li>
+    <a href="{% url 'admin:stock_preparationlog_import_historic' %}" class="addlink">
+      ↑ Import Historic Slips
+    </a>
+  </li>
+  {% if has_add_permission %}
+  <li>
+    {% url cl.opts|admin_urlname:'add' as add_url %}
+    <a href="{% add_preserved_filters add_url is_popup to_field %}" class="addlink">
+      {% blocktranslate with cl.opts.verbose_name as name %}Add {{ name }}{% endblocktranslate %}
+    </a>
+  </li>
+  {% endif %}
+</ul>
+{% endblock %}

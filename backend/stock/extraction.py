@@ -1,15 +1,14 @@
 """Slip OCR extraction for Stock In.
 
-Reads an uploaded delivery-slip image and produces candidate line items
-(SLIP_EXTRACTED). Each OCR line is matched against SupplierProductAlias (exact,
-then normalized/fuzzy) to resolve an Ingredient and its active PackDefinition.
-Unmatched lines are kept as "Unrecognized" rows (ingredient_id=None) so staff
-can resolve them once — that resolution saves a new alias for next time.
+Primary path:  PaddleOCR PP-StructureV3 (stock/ocr/ pipeline)
+               – table-aware extraction; returns date + structured line items
+Fallback path: Tesseract + alias matching
+               – plain-text OCR; used when PaddleOCR is not installed
 
-This is deliberately best-effort: the raw parsed value is stored in
-`extracted_quantity` for audit, and staff must confirm/correct
-`confirmed_quantity` before submitting. It never fabricates data — if OCR is
-unavailable it raises OcrUnavailable so the UI can fall back to manual entry.
+Both paths produce the same ExtractedLine dataclass that stock/views.py
+consumes. The raw extracted_quantity is stored for audit; staff confirm or
+correct confirmed_quantity before submitting. Never fabricates data — raises
+OcrUnavailable if all OCR paths are unavailable.
 """
 from __future__ import annotations
 
@@ -30,6 +29,15 @@ class ExtractedLine:
     ingredient_id: int | None = None
     pack_definition_id: int | None = None
     unit_captured: str = "PACK"
+    # Price fields — populated by OCR parsers, absent from Tesseract plain-text fallback
+    rate: float | None = None
+    total_amount: float | None = None
+    sd_rate: float | None = None
+    sd_amount: float | None = None
+    vat_rate: float | None = None
+    vat_amount: float | None = None
+    line_total: float | None = None
+    unit_price: float | None = None
 
 
 def _ocr_text(image_path: str) -> str:
@@ -143,6 +151,45 @@ def parse_lines(text: str) -> list[ExtractedLine]:
 
 
 def extract_from_slip(image_path: str) -> list[ExtractedLine]:
+    """Extract stock-in lines from a slip image.
+
+    Primary path: PaddleOCR PP-StructureV3 — table-aware, returns date and
+    structured line items with catalog resolution.
+    Fallback:     Tesseract plain-text OCR + alias matching.
+
+    Raises OcrUnavailable only when both paths are exhausted.
+    """
+    # ── PaddleOCR primary ────────────────────────────────────────────────────
+    try:
+        from stock.ocr import PaddleOcrUnavailable, PreprocessingError, extract_slip
+
+        parsed = extract_slip(image_path)
+        lines: list[ExtractedLine] = []
+        for item in parsed["items"]:
+            lines.append(
+                ExtractedLine(
+                    raw_text=item["raw_text"],
+                    extracted_quantity=item["quantity"],
+                    ingredient_id=item["matched_ingredient_id"],
+                    pack_definition_id=item["matched_pack_definition_id"],
+                    unit_captured=item["unit"],
+                    rate=item.get("rate"),
+                    total_amount=item.get("total_amount"),
+                    sd_rate=item.get("sd_rate"),
+                    sd_amount=item.get("sd_amount"),
+                    vat_rate=item.get("vat_rate"),
+                    vat_amount=item.get("vat_amount"),
+                    line_total=item.get("line_total"),
+                    unit_price=item.get("unit_price"),
+                )
+            )
+        return lines
+    except (PaddleOcrUnavailable, PreprocessingError):
+        pass  # fall through to Tesseract
+    except Exception:
+        pass  # unexpected engine error — degrade gracefully
+
+    # ── Tesseract fallback ───────────────────────────────────────────────────
     text = _ocr_text(image_path)
     return parse_lines(text)
 

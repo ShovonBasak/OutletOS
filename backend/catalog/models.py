@@ -8,6 +8,12 @@ class Outlet(models.Model):
     address = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
 
+    # ── Staff feature flags ──────────────────────────────────────────────────
+    allow_staff_date_selection = models.BooleanField(
+        default=True,
+        help_text="Let staff choose which date to log operations for (e.g. back-entering yesterday's data).",
+    )
+
     class Meta:
         ordering = ["name"]
 
@@ -23,17 +29,17 @@ class ProductType(models.TextChoices):
 class Product(models.Model):
     """The sellable/priced thing a customer orders. What's received and stocked
     is now an Ingredient (see below); a Product is linked to the ingredients it's
-    made from via Recipe."""
+    made from via Recipe.
+
+    Selling price is version-tracked in ProductPrice — use active_price() to get
+    the current value instead of a raw field on this model."""
 
     name = models.CharField(max_length=120)
     category = models.CharField(max_length=80, blank=True)
     product_type = models.CharField(
         max_length=10, choices=ProductType.choices, default=ProductType.SINGLE
     )
-    # True for fried/prepared items that flow through PreparationLog; False for
-    # items sold straight from stock (cold drinks, etc.).
     requires_preparation = models.BooleanField(default=True)
-    selling_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -41,6 +47,17 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
+
+    def active_price(self, as_of=None):
+        """Return the effective ProductPrice row on `as_of` (default: today), or None."""
+        from django.utils import timezone
+        from django.db.models import Q
+        ref = as_of or timezone.localdate()
+        return self.prices.filter(
+            effective_from__lte=ref
+        ).filter(
+            Q(effective_to__isnull=True) | Q(effective_to__gte=ref)
+        ).order_by("-effective_from").first()
 
 
 class ComboComponent(models.Model):
@@ -65,8 +82,9 @@ class ComboComponent(models.Model):
 
 
 class TrackingMode(models.TextChoices):
-    RECIPE_LINKED = "RECIPE_LINKED", "Recipe-linked"
+    RECIPE_LINKED  = "RECIPE_LINKED",  "Recipe-linked"
     PERIODIC_COUNT = "PERIODIC_COUNT", "Periodic count"
+    ONE_TIME       = "ONE_TIME",       "One-time purchase"
 
 
 class Ingredient(models.Model):
@@ -159,8 +177,15 @@ class Recipe(models.Model):
     ingredient = models.ForeignKey(
         Ingredient, on_delete=models.PROTECT, related_name="recipes"
     )
-    # How many of the ingredient's base_unit are consumed per 1 unit of product.
     quantity_per_unit = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+    is_primary = models.BooleanField(
+        default=False,
+        help_text=(
+            "Designates this ingredient as the pack-size reference for multi-ingredient products. "
+            "When set, PACK-mode prep uses this ingredient's pack definition to compute pieces prepared; "
+            "all other ingredients are deducted proportionally. At most one per product."
+        ),
+    )
 
     class Meta:
         unique_together = ("product", "ingredient")
@@ -168,3 +193,67 @@ class Recipe(models.Model):
 
     def __str__(self):
         return f"{self.product} ← {self.quantity_per_unit} {self.ingredient.base_unit} {self.ingredient}"
+
+
+class RecipeProductComponent(models.Model):
+    """A prepared Product that is consumed during preparation of another Product.
+
+    Distinct from Recipe (which links to raw Ingredients / RawStock). This links
+    two Products so that preparing `product` pulls `quantity_per_unit` ready pieces
+    of `component_product` from its DisplayStock.
+
+    Example: preparing 1 Five-Star Burger consumes 1 ready Ginger Fillet.
+    """
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="product_recipe_components"
+    )
+    component_product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="used_as_prep_component"
+    )
+    quantity_per_unit = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+
+    class Meta:
+        unique_together = ("product", "component_product")
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.product} ← {self.quantity_per_unit} pcs {self.component_product} (prep)"
+
+
+class ProductPrice(models.Model):
+    """Version-tracked walk-in (base) selling price for a product.
+
+    Setting a new price never overwrites history — the current active row is
+    closed (effective_to = new effective_from − 1) and a new row is opened.
+    ChannelPrice / ChannelPromotion still resolve against this base.
+    DailyClosingSalesLine.unit_price snapshots the resolved value at sale time,
+    so historical revenue figures are always accurate regardless of later changes.
+    """
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="prices"
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    changed_by = models.ForeignKey(
+        "accounts.User",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="product_price_changes",
+    )
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-effective_from"]
+
+    def __str__(self):
+        return (
+            f"{self.product} ৳{self.price} from {self.effective_from}"
+            + (f" to {self.effective_to}" if self.effective_to else " (current)")
+        )
+
+    @property
+    def is_active(self):
+        return self.effective_to is None

@@ -5,27 +5,30 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
-import { bdt2 } from "@/lib/format";
+import { bdt2, today } from "@/lib/format";
+import { useOperatingDay } from "@/lib/staffDay";
 import type { DailyClosing } from "@/lib/types";
 
 export default function PaymentsScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const { workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
+  const opDate = workDate || today();
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [bkash, setBkash] = useState("0");
   const [card, setCard] = useState("0");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    getOrCreateTodayClosing(outlet).then((c) => {
+    getOrCreateTodayClosing(outlet, opDate).then((c) => {
       setClosing(c);
       const b = c.payments.find((p) => p.method === "BKASH");
       const cd = c.payments.find((p) => p.method === "CARD");
       if (b) setBkash(String(b.amount));
       if (cd) setCard(String(cd.amount));
     });
-  }, [outlet]);
+  }, [outlet, opDate]);
 
   async function recompute(nextBkash = bkash, nextCard = card) {
     if (!closing) return;

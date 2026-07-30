@@ -36,6 +36,7 @@ export default function ProductsPage() {
               <th>Selling price</th>
               <th>Recipe (ingredients)</th>
               <th></th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -44,15 +45,16 @@ export default function ProductsPage() {
                 <td>{p.name}</td>
                 <td className="capitalize">{p.product_type.toLowerCase()}</td>
                 <td>{p.category}</td>
-                <td>{bdt(p.selling_price)}</td>
+                <td className="font-mono">{bdt(p.selling_price)}</td>
                 <td>
                   {p.product_type === "COMBO"
                     ? "— (components)"
-                    : p.recipes.length
-                    ? p.recipes
-                        .map((r) => `${r.quantity_per_unit} ${r.base_unit} ${r.ingredient_name}`)
-                        .join(", ")
-                    : "— no recipe"}
+                    : (() => {
+                        const rawParts = p.recipes.map((r) => `${r.quantity_per_unit} ${r.base_unit} ${r.ingredient_name}`);
+                        const prepParts = p.product_recipe_components.map((c) => `${c.quantity_per_unit} pcs ${c.component_name} (prep)`);
+                        const all = [...rawParts, ...prepParts];
+                        return all.length ? all.join(", ") : "— no recipe";
+                      })()}
                 </td>
                 <td>
                   {p.product_type === "SINGLE" && (
@@ -64,11 +66,19 @@ export default function ProductsPage() {
                     </Link>
                   )}
                 </td>
+                <td>
+                  <Link
+                    href={`/owner/products/edit/${p.id}`}
+                    className="font-mono text-[11px] text-ink-soft underline"
+                  >
+                    Change price
+                  </Link>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-ink-soft">
+                <td colSpan={7} className="text-ink-soft">
                   No products.
                 </td>
               </tr>

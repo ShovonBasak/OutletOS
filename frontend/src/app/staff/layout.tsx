@@ -2,18 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import { getTodayOperatingDay } from "@/lib/operatingDay";
 import { OperatingDayContext } from "@/lib/staffDay";
+import { today } from "@/lib/format";
 import type { OperatingDay } from "@/lib/types";
 
 const TABS = [
   { href: "/staff", label: "Home", gate: "always" as const },
   { href: "/staff/stock-in", label: "Stock In", gate: "stock" as const },
   { href: "/staff/prep", label: "Prep log", gate: "full" as const },
-  { href: "/staff/closing", label: "Closing", gate: "full" as const },
+  { href: "/staff/closing", label: "Closing", gate: "closing" as const },
 ];
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
@@ -22,13 +23,23 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const outlet = user?.outlet ?? 1;
   const [day, setDay] = useState<OperatingDay | null>(null);
+  const [workDate, _setWorkDate] = useState(today());
+  const workDateRef = useRef(workDate);
 
   async function refreshDay() {
     if (!user) return;
     try {
-      setDay(await getTodayOperatingDay(outlet));
+      setDay(await getTodayOperatingDay(outlet, workDateRef.current));
     } catch {
       /* ignore — home still renders */
+    }
+  }
+
+  function setWorkDate(d: string) {
+    workDateRef.current = d;
+    _setWorkDate(d);
+    if (user) {
+      getTodayOperatingDay(outlet, d).then(setDay).catch(() => {});
     }
   }
 
@@ -48,15 +59,16 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const isActive = (href: string) =>
     href === "/staff" ? pathname === "/staff" : pathname.startsWith(href);
 
-  const isUnlocked = (gate: "always" | "stock" | "full") => {
+  const isUnlocked = (gate: "always" | "stock" | "full" | "closing") => {
     if (gate === "always") return true;
     if (!day) return false;
     if (gate === "stock") return day.stock_in_unlocked;
+    if (gate === "closing") return day.full_unlocked || day.status === "CLOSED";
     return day.full_unlocked;
   };
 
   return (
-    <OperatingDayContext.Provider value={{ day, refreshDay }}>
+    <OperatingDayContext.Provider value={{ day, refreshDay, workDate, setWorkDate }}>
       <div className="mx-auto flex min-h-screen w-full max-w-[420px] flex-col bg-paper shadow-xl">
         <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper">
           <Brand />

@@ -2,9 +2,9 @@
 
 Order of precedence (most specific wins), per CLAUDE.md:
     1. ChannelPrice exact match (channel + product, active on date)
-    2. ChannelPromotion applied to Product.selling_price:
+    2. ChannelPromotion applied to the active ProductPrice.price:
          product+channel  →  channel-only  →  product-only
-    3. Plain Product.selling_price
+    3. Plain active ProductPrice.price
 The resolved value is snapshotted into DailyClosingSalesLine.unit_price.
 """
 from decimal import Decimal
@@ -42,7 +42,8 @@ def resolve_price(product, channel, on_date=None):
     if cp:
         return cp.price, "channel_price"
 
-    base = product.selling_price
+    active_pp = product.active_price(as_of=on_date)
+    base = active_pp.price if active_pp else Decimal("0")
 
     # 2. Promotions, most specific first.
     promos = _active_on(ChannelPromotion.objects.all(), on_date)
@@ -59,5 +60,5 @@ def resolve_price(product, channel, on_date=None):
     if product_only:
         return _apply_promo(base, product_only), "promo_product"
 
-    # 3. Plain selling price.
-    return base, "selling_price"
+    # 3. Plain active ProductPrice.
+    return base, "product_price"

@@ -7,6 +7,7 @@ import { bdt, today } from "@/lib/format";
 import type { Pnl } from "@/lib/types";
 
 const TILES = [
+  { href: "/owner/stock", icon: "▤", label: "Stock levels" },
   { href: "/owner/sales", icon: "→", label: "Full sales report" },
   { href: "/owner/settlements", icon: "→", label: "Settlements" },
   { href: "/owner/pnl", icon: "≣", label: "Profit & loss detail" },

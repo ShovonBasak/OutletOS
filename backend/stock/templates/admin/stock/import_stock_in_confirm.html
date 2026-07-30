@@ -1,0 +1,245 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Confirm Stock-In Import | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_stockinrecord_changelist' %}">Stock-in records</a>
+  › <a href="{% url 'admin:stock_stockinrecord_import_historic' %}">Import historic slips</a>
+  › Confirm
+</div>
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+  .slip-card {
+    border: 1px dashed #aaa;
+    border-radius: 6px;
+    padding: 1em 1.5em;
+    margin-bottom: 1.5em;
+    background: #fafafa;
+  }
+  .slip-card h3 { margin-top: 0; color: #333; }
+  .item-row {
+    display: grid;
+    grid-template-columns: 2em 2fr 1.5fr 5em 8em 1.5fr 6em 6em;
+    gap: .5em;
+    align-items: center;
+    padding: .3em 0;
+    border-bottom: 1px solid #eee;
+  }
+  .item-row.header {
+    font-weight: bold;
+    font-size: .85em;
+    color: #555;
+    border-bottom: 2px solid #ccc;
+    padding-bottom: .4em;
+  }
+  .slip-totals {
+    display: flex;
+    gap: 1.5em;
+    align-items: center;
+    margin: .5em 0 .8em;
+    font-size: .9em;
+  }
+  .slip-totals label { font-weight: bold; margin-right: .3em; }
+  .slip-totals input[type="number"] { width: 8em; }
+  .item-row input[type="number"],
+  .item-row select { width: 100%; box-sizing: border-box; }
+  .raw-text { font-size: .85em; color: #666; font-style: italic; }
+  .unresolved { background: #fff3cd; }
+  .warn-badge {
+    background: #f0c419; color: #241512;
+    font-size: .75em; padding: 1px 6px; border-radius: 3px; margin-left: .3em;
+  }
+  .note { font-size:.85em; color:#555; margin:.5em 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Confirm Stock-In Import</h1>
+<p class="note">
+  Review the data extracted from each slip. You can edit the date, quantities, units, and ingredient
+  mapping before importing. Uncheck items you want to skip.
+</p>
+
+{% if messages %}
+{% for message in messages %}
+<div class="{% if message.tags %}{{ message.tags }}{% else %}infomessage{% endif %}" style="padding:.5em 1em;margin-bottom:.5em;border-left:4px solid #ccc;">
+  {{ message }}
+</div>
+{% endfor %}
+{% endif %}
+
+<form method="post" id="confirm-form">
+  {% csrf_token %}
+
+  <div id="slips-container"></div>
+
+  <div class="submit-row" style="margin-top:1.5em;">
+    <input type="submit" value="✓ Import All Checked Items" class="default" style="padding:.5em 1.5em;">
+    <a href="{% url 'admin:stock_stockinrecord_import_historic' %}" style="margin-left:1em;">← Start Over</a>
+    <a href="{% url 'admin:stock_stockinrecord_changelist' %}" style="margin-left:1em;">Cancel</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  const sessionData = {{ session_data_json|safe }};
+  const allIngredients = {{ all_ingredients_json|safe }};
+  const allPacks = {{ all_packs_json|safe }};
+
+  // Build ingredient lookup: id → {name, base_unit}
+  const ingMap = {};
+  allIngredients.forEach(i => { ingMap[i.id] = i; });
+
+  // Build pack lookup: ingredient_id → [{id, pieces_per_pack, cost_per_pack}]
+  const packsByIng = {};
+  allPacks.forEach(p => {
+    if (!packsByIng[p.ingredient_id]) packsByIng[p.ingredient_id] = [];
+    packsByIng[p.ingredient_id].push(p);
+  });
+
+  const container = document.getElementById('slips-container');
+  const form = document.getElementById('confirm-form');
+
+  // Hidden field for num_slips
+  const numSlipsInput = document.createElement('input');
+  numSlipsInput.type = 'hidden';
+  numSlipsInput.name = 'num_slips';
+  numSlipsInput.value = sessionData.slips.length;
+  form.appendChild(numSlipsInput);
+
+  sessionData.slips.forEach((slip, i) => {
+    const card = document.createElement('div');
+    card.className = 'slip-card';
+
+    // Slip header
+    card.innerHTML = `
+      <h3>
+        Slip ${i + 1}: <em>${slip.image_name}</em>
+        ${slip.items.some(it => !it.ingredient_id) ? '<span class="warn-badge">Has unresolved items</span>' : ''}
+      </h3>
+      <div style="display:flex;align-items:center;gap:1em;margin-bottom:.5em;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:.5em;">
+          <label for="slip_${i}_invoice_number" style="font-weight:bold;">Invoice No.:</label>
+          <input type="text" name="slip_${i}_invoice_number" id="slip_${i}_invoice_number"
+                 value="${slip.invoice_number || ''}" placeholder="e.g. INV-2024-001"
+                 style="min-width:180px;">
+        </div>
+        <div style="display:flex;align-items:center;gap:.5em;">
+          <label for="slip_${i}_date" style="font-weight:bold;">Date:</label>
+          <input type="date" name="slip_${i}_date" id="slip_${i}_date"
+                 value="${slip.date || ''}" required style="min-width:150px;">
+        </div>
+        <input type="hidden" name="slip_${i}_num_items" value="${slip.items.length}">
+      </div>
+      <div class="slip-totals">
+        <div>
+          <label>Subtotal (before VAT) ৳</label>
+          <input type="number" name="slip_${i}_subtotal" value="${slip.subtotal || ''}"
+                 min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label>VAT ৳</label>
+          <input type="number" name="slip_${i}_vat_total" value="${slip.vat_total || ''}"
+                 min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label><strong>Grand Total (after VAT) ৳</strong></label>
+          <input type="number" name="slip_${i}_grand_total" value="${slip.grand_total || ''}"
+                 min="0" step="0.01" placeholder="0.00"
+                 style="font-weight:bold;border-color:#7a2420;">
+        </div>
+      </div>
+    `;
+
+    // Items header
+    const headerRow = document.createElement('div');
+    headerRow.className = 'item-row header';
+    headerRow.innerHTML = `
+      <span>✓</span>
+      <span>Raw text (from slip)</span>
+      <span>Ingredient</span>
+      <span>Qty</span>
+      <span>Unit</span>
+      <span>Pack definition</span>
+      <span>Unit price ৳</span>
+      <span>Line total ৳</span>
+    `;
+    card.appendChild(headerRow);
+
+    slip.items.forEach((item, j) => {
+      const row = document.createElement('div');
+      row.className = 'item-row' + (item.ingredient_id ? '' : ' unresolved');
+
+      // Build ingredient options
+      let ingOptions = '<option value="">— unresolved —</option>';
+      allIngredients.forEach(ing => {
+        const sel = ing.id == item.ingredient_id ? 'selected' : '';
+        ingOptions += `<option value="${ing.id}" ${sel}>${ing.name} (${ing.base_unit})</option>`;
+      });
+
+      // Build pack options based on current ingredient
+      const buildPackOptions = (ingId) => {
+        let opts = '<option value="">— no pack —</option>';
+        const packs = ingId ? (packsByIng[ingId] || []) : [];
+        packs.forEach(p => {
+          const sel = p.id == item.pack_definition_id ? 'selected' : '';
+          opts += `<option value="${p.id}" ${sel}>${p.pieces_per_pack} pcs/pack @ ৳${p.cost_per_pack}</option>`;
+        });
+        return opts;
+      };
+
+      const qtyMath = (item.quantity && item.rate && item.total_amount)
+        ? `(${item.quantity} × ${item.rate} = ${(+item.quantity * +item.rate).toFixed(2)}, slip total_amount=${item.total_amount})`
+        : '';
+
+      row.innerHTML = `
+        <input type="checkbox" name="item_${i}_${j}_include" ${item.ingredient_id ? 'checked' : ''}>
+        <span class="raw-text">
+          ${item.raw_text}
+          ${item.rate || item.total_amount ? `<br><small style="color:#888;">rate=${item.rate||'—'} · pre-tax total=${item.total_amount||'—'} · vat=${item.vat_amount||'—'} · after-tax=${item.line_total||'—'} ${qtyMath}</small>` : ''}
+        </span>
+        <select name="item_${i}_${j}_ingredient_id" id="ing_${i}_${j}">
+          ${ingOptions}
+        </select>
+        <input type="number" name="item_${i}_${j}_quantity" value="${item.quantity || ''}"
+               min="0" step="0.001" style="width:5em;">
+        <select name="item_${i}_${j}_unit">
+          <option value="PACK" ${item.unit === 'PACK' ? 'selected' : ''}>PACK</option>
+          <option value="PIECE" ${item.unit === 'PIECE' ? 'selected' : ''}>PIECE</option>
+        </select>
+        <select name="item_${i}_${j}_pack_definition_id" id="pack_${i}_${j}">
+          ${buildPackOptions(item.ingredient_id)}
+        </select>
+        <input type="number" name="item_${i}_${j}_unit_price" value="${item.unit_price || ''}"
+               min="0" step="0.0001" placeholder="—" style="width:6em;">
+        <input type="number" name="item_${i}_${j}_line_total" value="${item.line_total || ''}"
+               min="0" step="0.01" placeholder="—" style="width:6em;font-weight:bold;">
+        <input type="hidden" name="item_${i}_${j}_raw_text" value="${item.raw_text.replace(/"/g, '&quot;')}">
+        <input type="hidden" name="item_${i}_${j}_rate" value="${item.rate || ''}">
+        <input type="hidden" name="item_${i}_${j}_total_amount" value="${item.total_amount || ''}">
+        <input type="hidden" name="item_${i}_${j}_sd_rate" value="${item.sd_rate || ''}">
+        <input type="hidden" name="item_${i}_${j}_sd_amount" value="${item.sd_amount || ''}">
+        <input type="hidden" name="item_${i}_${j}_vat_rate" value="${item.vat_rate || ''}">
+        <input type="hidden" name="item_${i}_${j}_vat_amount" value="${item.vat_amount || ''}">
+      `;
+
+      // Wire ingredient change → update pack options
+      row.querySelector(`#ing_${i}_${j}`).addEventListener('change', function () {
+        const packSel = document.getElementById(`pack_${i}_${j}`);
+        packSel.innerHTML = buildPackOptions(parseInt(this.value) || null);
+      });
+
+      card.appendChild(row);
+    });
+
+    container.appendChild(card);
+  });
+})();
+</script>
+{% endblock %}

@@ -71,16 +71,19 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
     # ---- Step 1: Count remains & wastage ----
     @action(detail=True, methods=["post"], url_path="stock-count")
     def stock_count(self, request, pk=None):
-        """Bulk upsert stock counts. Body: {"items": [{product, available_pieces,
-        wastage_pieces, remains_pieces}, ...]}"""
+        """Bulk upsert stock counts. Body: {"items": [{product, wastage_pieces,
+        remains_pieces}, ...]}. available_pieces is auto-filled from DisplayStock."""
+        from stock.models import DisplayStock
         closing = self.get_object()
         self._guard_editable(closing)
         for row in request.data.get("items", []):
             product = Product.objects.get(pk=row["product"])
+            ds = DisplayStock.objects.filter(outlet=closing.outlet, product=product).first()
+            available = ds.pieces_available if ds else 0
             obj, _ = DailyClosingStockCount.objects.get_or_create(
                 daily_closing=closing, product=product
             )
-            obj.available_pieces = row.get("available_pieces", obj.available_pieces)
+            obj.available_pieces = available
             obj.wastage_pieces = row.get("wastage_pieces", obj.wastage_pieces)
             obj.remains_pieces = row.get("remains_pieces", obj.remains_pieces)
             obj.save()

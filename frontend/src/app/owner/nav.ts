@@ -23,6 +23,7 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Reports",
     items: [
+      { href: "/owner/stock", label: "Stock levels" },
       { href: "/owner/sales", label: "Sales report" },
       { href: "/owner/settlements", label: "Settlements" },
       { href: "/owner/pnl", label: "Profit & loss" },
@@ -85,7 +86,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
     tab: "/owner/reports",
-    prefixes: ["/owner/reports", "/owner/sales", "/owner/settlements", "/owner/pnl", "/owner/packaging"],
+    prefixes: ["/owner/reports", "/owner/stock", "/owner/sales", "/owner/settlements", "/owner/pnl", "/owner/packaging"],
   },
   {
     tab: "/owner/more",

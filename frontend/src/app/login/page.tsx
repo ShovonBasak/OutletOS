@@ -60,9 +60,25 @@ export default function LoginPage() {
               {busy ? "Signing in…" : "Sign in"}
             </button>
             <div className="rounded border border-dashed border-ink-soft/50 p-3 font-mono text-[11px] text-ink-soft">
-              <p className="mb-1 font-semibold">Demo logins</p>
-              <p>Owner · 01700000000 / owner123</p>
-              <p>Staff · 01800000000 / staff123</p>
+              <p className="mb-1.5 font-semibold">Demo logins</p>
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  className="flex items-center justify-between rounded bg-ink-soft/10 px-2.5 py-1.5 text-left active:bg-ink-soft/20"
+                  onClick={() => { setPhone("01700000000"); setPassword("owner123"); }}
+                >
+                  <span>Owner</span>
+                  <span className="text-ink-soft/60">tap to fill →</span>
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center justify-between rounded bg-ink-soft/10 px-2.5 py-1.5 text-left active:bg-ink-soft/20"
+                  onClick={() => { setPhone("01800000000"); setPassword("staff123"); }}
+                >
+                  <span>Staff</span>
+                  <span className="text-ink-soft/60">tap to fill →</span>
+                </button>
+              </div>
             </div>
           </form>
         </div>

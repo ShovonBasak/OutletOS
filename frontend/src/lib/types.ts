@@ -14,10 +14,11 @@ export interface Outlet {
   name: string;
   address: string;
   is_active: boolean;
+  allow_staff_date_selection: boolean;
 }
 
 export type ProductType = "SINGLE" | "COMBO";
-export type TrackingMode = "RECIPE_LINKED" | "PERIODIC_COUNT";
+export type TrackingMode = "RECIPE_LINKED" | "PERIODIC_COUNT" | "ONE_TIME";
 
 export interface PackDefinition {
   id: number;
@@ -73,6 +74,15 @@ export interface Recipe {
   ingredient_name: string;
   base_unit: string;
   quantity_per_unit: string;
+  is_primary: boolean;
+}
+
+export interface RecipeProductComponent {
+  id: number;
+  product: number;
+  component_product: number;
+  component_name: string;
+  quantity_per_unit: string;
 }
 
 export interface ComboComponent {
@@ -83,16 +93,32 @@ export interface ComboComponent {
   quantity_per_combo: number;
 }
 
+export interface ProductPrice {
+  id: number;
+  product: number;
+  price: string;
+  effective_from: string;
+  effective_to: string | null;
+  changed_by: number | null;
+  changed_by_name: string | null;
+  note: string;
+  is_active: boolean;
+}
+
 export interface Product {
   id: number;
   name: string;
   category: string;
   product_type: ProductType;
   requires_preparation: boolean;
+  /** Computed from the active ProductPrice — read-only in GET responses. */
   selling_price: string;
+  /** Full active ProductPrice object, null if no price set yet. */
+  active_price: ProductPrice | null;
   is_active: boolean;
   components: ComboComponent[];
   recipes: Recipe[];
+  product_recipe_components: RecipeProductComponent[];
 }
 
 export type SettlementType = "DIRECT_TO_ACCOUNT" | "COLLECTED_AT_OUTLET";
@@ -154,6 +180,7 @@ export interface DayStartStockRow {
   ingredient: number;
   ingredient_name: string;
   base_unit: string;
+  pieces_per_pack: string | null;
   system_carried_qty: number;
   confirmed_qty: number;
   discrepancy_reason: DiscrepancyReason;
@@ -187,12 +214,22 @@ export interface StockInItem {
   base_unit_quantity?: string;
   is_unrecognized?: boolean;
   needs_pack_yield?: boolean;
+  // Price fields from supplier slip
+  rate?: string | null;
+  total_amount?: string | null;
+  sd_rate?: string | null;
+  sd_amount?: string | null;
+  vat_rate?: string | null;
+  vat_amount?: string | null;
+  line_total?: string | null;
+  unit_price?: string | null;
 }
 
 export interface StockInRecord {
   id: number;
   outlet: number;
   stock_in_date: string;
+  invoice_number: string;
   submitted_by: number;
   submitted_by_name: string;
   status: StockInStatus;
@@ -200,6 +237,7 @@ export interface StockInRecord {
   reviewed_at: string | null;
   slip_image: string | null;
   notes: string;
+  slip_vat_total?: string | null;
   created_at: string;
   items: StockInItem[];
   unresolved_count: number;
@@ -229,7 +267,10 @@ export interface RawStock {
   ingredient: number;
   ingredient_name: string;
   base_unit: string;
+  tracking_mode: TrackingMode;
   quantity_available: string;
+  pieces_per_pack: string | null;
+  cost_per_base_unit: string | null;
 }
 
 export interface DisplayStock {
@@ -240,6 +281,16 @@ export interface DisplayStock {
 }
 
 // ---- Packaging (periodic count) -------------------------------------------
+export interface PackagingLevel {
+  ingredient: number;
+  ingredient_name: string;
+  base_unit: string;
+  pieces_per_pack: string | null;
+  current_qty: string;
+  source: "counted" | "stock_in_derived";
+  last_checked_at: string | null;
+}
+
 export interface PeriodicStockCheck {
   id: number;
   outlet: number;

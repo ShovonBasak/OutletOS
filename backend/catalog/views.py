@@ -15,7 +15,9 @@ from .models import (
     Outlet,
     PackDefinition,
     Product,
+    ProductPrice,
     Recipe,
+    RecipeProductComponent,
     SupplierProductAlias,
 )
 from .serializers import (
@@ -23,7 +25,9 @@ from .serializers import (
     IngredientSerializer,
     OutletSerializer,
     PackDefinitionSerializer,
+    ProductPriceSerializer,
     ProductSerializer,
+    RecipeProductComponentSerializer,
     RecipeSerializer,
     SupplierProductAliasSerializer,
 )
@@ -37,7 +41,7 @@ class OutletViewSet(viewsets.ModelViewSet):
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().prefetch_related(
-        "components", "recipes__ingredient"
+        "components", "recipes__ingredient", "product_recipe_components__component_product"
     )
     serializer_class = ProductSerializer
     permission_classes = [IsOwnerOrReadOnly]
@@ -49,11 +53,74 @@ class ProductViewSet(viewsets.ModelViewSet):
             qs = qs.filter(product_type=ptype)
         return qs
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        as_of_param = self.request.query_params.get("as_of")
+        if as_of_param:
+            from datetime import date as date_type
+            try:
+                ctx["as_of"] = date_type.fromisoformat(as_of_param)
+            except ValueError:
+                pass
+        return ctx
+
     def destroy(self, request, *args, **kwargs):
         product = self.get_object()
         product.is_active = False
         product.save(update_fields=["is_active"])
         return Response(status=204)
+
+    @action(detail=True, methods=["post"], url_path="set-price")
+    def set_price(self, request, pk=None):
+        """Schedule a new walk-in selling price.
+
+        Body: { price, effective_from (YYYY-MM-DD, default today), note (optional) }
+
+        Closes any currently active ProductPrice (effective_to = new_from − 1 day)
+        and opens a new row.  Past prices are never deleted.
+        """
+        from datetime import date as date_type
+        product = self.get_object()
+
+        raw_price = request.data.get("price")
+        if raw_price is None:
+            raise ValidationError({"price": "This field is required."})
+        try:
+            new_price = Decimal(str(raw_price))
+            if new_price < 0:
+                raise ValueError
+        except (ValueError, Exception):
+            raise ValidationError({"price": "Must be a non-negative number."})
+
+        raw_from = request.data.get("effective_from")
+        try:
+            effective_from = date_type.fromisoformat(raw_from) if raw_from else timezone.localdate()
+        except ValueError:
+            raise ValidationError({"effective_from": "Use YYYY-MM-DD format."})
+
+        note = (request.data.get("note") or "").strip()
+
+        # Close the currently active row(s).
+        close_to = effective_from - timedelta(days=1)
+        ProductPrice.objects.filter(
+            product=product, effective_to__isnull=True
+        ).update(effective_to=close_to)
+
+        row = ProductPrice.objects.create(
+            product=product,
+            price=new_price,
+            effective_from=effective_from,
+            changed_by=request.user if request.user.is_authenticated else None,
+            note=note,
+        )
+        return Response(ProductPriceSerializer(row).data, status=201)
+
+    @action(detail=True, methods=["get"], url_path="price-history")
+    def price_history(self, request, pk=None):
+        """Return all ProductPrice rows for this product, newest first."""
+        product = self.get_object()
+        rows = product.prices.order_by("-effective_from")
+        return Response(ProductPriceSerializer(rows, many=True).data)
 
     @action(
         detail=False,
@@ -62,7 +129,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def extract_from_menu(self, request):
-        """Read menu photo(s) via Gemini vision and return product candidates not
+        """Read menu photo(s) via Claude vision and return product candidates not
         yet in the catalog.  Field name: `photos` (repeatable).  Returns a list
         of {name, category, selling_price, requires_preparation, is_combo}."""
         files = request.FILES.getlist("photos") or request.FILES.getlist("photos[]")
@@ -74,7 +141,7 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         if not ai_extraction.available():
             return Response(
-                {"detail": "Menu extraction requires a Gemini API key — set GEMINI_API_KEY in .env."},
+                {"detail": "Menu extraction requires a Claude API key — set ANTHROPIC_API_KEY in .env."},
                 status=503,
             )
 
@@ -135,8 +202,10 @@ class IngredientViewSet(viewsets.ModelViewSet):
     def extract_from_slips(self, request):
         """OCR one or more slip images and return unique ingredient candidates.
 
-        Primary path: Claude vision (ai_extraction.extract_ingredients).
-        Fallback: Tesseract + CP-invoice filter (OcrUnavailable → 503).
+        Priority chain:
+          1. PaddleOCR PP-StructureV3  — table-aware; separates name/qty/unit columns
+          2. Claude vision              — semantic name matching + handles bad images
+          3. Tesseract                  — plain-text fallback (OcrUnavailable → 503)
         """
         files = request.FILES.getlist("slips") or request.FILES.getlist("slips[]")
         if not files:
@@ -149,8 +218,71 @@ class IngredientViewSet(viewsets.ModelViewSet):
             SupplierProductAlias.objects.filter(is_active=True).values_list("alias_text", flat=True)
         )
         all_known = list({*known_names, *known_aliases})
+        known_lower = {n.lower() for n in all_known}
 
-        # ── Primary: Claude vision ────────────────────────────────────────────
+        # ── 1. PaddleOCR PP-StructureV3 ─────────────────────────────────────
+        try:
+            from stock.ocr import (
+                PaddleOcrUnavailable, PreprocessingError,
+                available as paddle_available,
+                extract_ingredients_from_slip,
+            )
+            from stock.ocr.normalizer import (
+                suggest_clean_name, suggest_unit, suggest_pack_pieces,
+            )
+            from stock.extraction import build_existing_index, match_existing
+
+            if paddle_available():
+                index = build_existing_index()
+                agg: dict[str, dict] = {}
+                skipped_existing: set[str] = set()
+                processed = 0
+
+                for f in files:
+                    f.seek(0)
+                    raw_names = extract_ingredients_from_slip(f)
+                    processed += 1
+                    counted_this_slip: set[str] = set()
+                    for raw in raw_names:
+                        key = raw.lower().strip()
+                        if key in known_lower:
+                            skipped_existing.add(key)
+                            continue
+                        if match_existing(key, index):
+                            skipped_existing.add(key)
+                            continue
+                        if key not in agg:
+                            agg[key] = {
+                                "raw_text": raw,
+                                "suggested_name": suggest_clean_name(raw),
+                                "suggested_unit": suggest_unit(raw),
+                                "suggested_qty_per_pack": suggest_pack_pieces(raw),
+                                "cost_per_pack": None,
+                                "tracking_mode": "RECIPE_LINKED",
+                                "is_probably_not_ingredient": False,
+                                "seen_in_slips": 0,
+                            }
+                        if key not in counted_this_slip:
+                            agg[key]["seen_in_slips"] += 1
+                            counted_this_slip.add(key)
+
+                if agg or processed == len(files):
+                    return Response({
+                        "slips_processed": processed,
+                        "new_count": len(agg),
+                        "skipped_existing": len(skipped_existing),
+                        "candidates": list(agg.values()),
+                        "ocr_engine": "paddleocr",
+                    })
+                # If all slips returned zero rows, fall through to Claude.
+        except (PaddleOcrUnavailable, PreprocessingError):
+            pass
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+        # ── 2. Claude fallback ───────────────────────────────────────────────
         from catalog import ai_extraction
         from catalog.ai_extraction import LLMUnavailable
 
@@ -167,20 +299,17 @@ class IngredientViewSet(viewsets.ModelViewSet):
                         "new_count": len(candidates),
                         "skipped_existing": 0,
                         "candidates": candidates,
+                        "ocr_engine": "gemini",
                     }
                 )
             except LLMUnavailable as exc:
                 detail = str(exc)
                 if "quota" in detail.lower() or "429" in detail:
                     return Response({"detail": detail}, status=503)
-                pass  # other LLM failures → fall through to Tesseract
             except Exception as exc:
-                return Response(
-                    {"detail": f"Extraction failed: {exc}"},
-                    status=500,
-                )
+                return Response({"detail": f"Extraction failed: {exc}"}, status=500)
 
-        # ── Fallback: Tesseract + CP-invoice filter ───────────────────────────
+        # ── 3. Tesseract last resort ─────────────────────────────────────────
         from stock.extraction import (
             OcrUnavailable,
             build_existing_index,
@@ -188,11 +317,10 @@ class IngredientViewSet(viewsets.ModelViewSet):
             match_existing,
         )
 
-        known_lower = {n.lower() for n in all_known}
         index = build_existing_index()
-        agg: dict[str, dict] = {}
-        skipped_existing: set[str] = set()
-        processed = 0
+        agg2: dict[str, dict] = {}
+        skipped2: set[str] = set()
+        processed2 = 0
 
         for f in files:
             try:
@@ -207,15 +335,15 @@ class IngredientViewSet(viewsets.ModelViewSet):
                     },
                     status=503,
                 )
-            processed += 1
-            counted_this_slip: set[str] = set()
+            processed2 += 1
+            counted_this_slip2: set[str] = set()
             for name in names:
                 key = name.lower().strip()
                 if key in known_lower or match_existing(key, index):
-                    skipped_existing.add(key)
+                    skipped2.add(key)
                     continue
-                if key not in agg:
-                    agg[key] = {
+                if key not in agg2:
+                    agg2[key] = {
                         "raw_text": name,
                         "suggested_name": name,
                         "suggested_unit": "piece",
@@ -225,17 +353,17 @@ class IngredientViewSet(viewsets.ModelViewSet):
                         "is_probably_not_ingredient": False,
                         "seen_in_slips": 0,
                     }
-                if key not in counted_this_slip:
-                    agg[key]["seen_in_slips"] += 1
-                    counted_this_slip.add(key)
+                if key not in counted_this_slip2:
+                    agg2[key]["seen_in_slips"] += 1
+                    counted_this_slip2.add(key)
 
-        candidates = list(agg.values())
         return Response(
             {
-                "slips_processed": processed,
-                "new_count": len(candidates),
-                "skipped_existing": len(skipped_existing),
-                "candidates": candidates,
+                "slips_processed": processed2,
+                "new_count": len(agg2),
+                "skipped_existing": len(skipped2),
+                "candidates": list(agg2.values()),
+                "ocr_engine": "tesseract",
             }
         )
 
@@ -396,3 +524,46 @@ class RecipeViewSet(viewsets.ModelViewSet):
         if product:
             qs = qs.filter(product_id=product)
         return qs
+
+
+class RecipeProductComponentViewSet(viewsets.ModelViewSet):
+    queryset = RecipeProductComponent.objects.select_related("product", "component_product")
+    serializer_class = RecipeProductComponentSerializer
+    permission_classes = [IsOwnerOrReadOnly]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        product = self.request.query_params.get("product")
+        if product:
+            qs = qs.filter(product_id=product)
+        return qs
+
+
+class ProductPriceViewSet(viewsets.ModelViewSet):
+    """Direct CRUD on individual ProductPrice rows.
+
+    Use POST /products/{id}/set-price/ for the normal "change price going forward"
+    flow (auto-closes current). Use this ViewSet to add historical records or fix
+    existing entries without touching the close logic.
+    """
+
+    queryset = ProductPrice.objects.select_related("product", "changed_by").order_by("-effective_from")
+    serializer_class = ProductPriceSerializer
+    permission_classes = [IsOwnerOrReadOnly]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        product = self.request.query_params.get("product")
+        if product:
+            qs = qs.filter(product_id=product)
+        return qs
+
+    def _stamp_user(self, serializer):
+        user = self.request.user
+        serializer.save(changed_by=user if user.is_authenticated else None)
+
+    def perform_create(self, serializer):
+        self._stamp_user(serializer)
+
+    def perform_update(self, serializer):
+        self._stamp_user(serializer)

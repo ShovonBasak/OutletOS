@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, apiDownload, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useOperatingDay } from "@/lib/staffDay";
 import { shortDate, today } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
 import type { Ingredient, Paginated, StockInItem, StockInRecord } from "@/lib/types";
@@ -19,12 +20,122 @@ interface EditLine {
   wasUnrecognized: boolean;
   yieldPieces?: string;
   yieldCost?: string;
+  // Price fields — preserved from Excel/OCR import, absent for pure manual lines
+  rate?: string | null;
+  total_amount?: string | null;
+  sd_rate?: string | null;
+  sd_amount?: string | null;
+  vat_rate?: string | null;
+  vat_amount?: string | null;
+  line_total?: string | null;
+  unit_price?: string | null;
+}
+
+function StockInCard({
+  record,
+  onResume,
+  onDelete,
+}: {
+  record: StockInRecord;
+  onResume: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = record.invoice_number
+    ? record.invoice_number
+    : `#SI-${String(record.id).padStart(4, "0")}`;
+  const itemCount = record.items.length;
+
+  return (
+    <div className="rounded border border-[#d8cdb0] bg-paper">
+      <button
+        className="w-full px-3 pt-3 pb-2.5 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {/* Row 1: invoice label + status */}
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className="min-w-0">
+            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft mb-0.5">Invoice</p>
+            <p className="font-display text-sm font-bold text-ink truncate">{label}</p>
+          </div>
+          <Stamp status={record.status} flat />
+        </div>
+        {/* Row 2: meta fields + chevron */}
+        <div className="flex items-end gap-5">
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Date</p>
+            <p className="font-mono text-[11px] text-ink">{shortDate(record.stock_in_date)}</p>
+          </div>
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Items</p>
+            <p className="font-mono text-[11px] text-ink">
+              {itemCount} {itemCount === 1 ? "ingredient" : "ingredients"}
+            </p>
+          </div>
+          <span className="ml-auto font-mono text-[10px] text-ink-soft">
+            {open ? "▴ less" : "▾ details"}
+          </span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-[#d8cdb0] px-3 pb-3 pt-2">
+          {record.items.length === 0 ? (
+            <p className="font-mono text-[11px] text-ink-soft">No lines.</p>
+          ) : (
+            <div className="flex flex-col gap-0">
+              {record.items.map((it) => (
+                <div
+                  key={it.id}
+                  className="flex items-baseline justify-between border-b border-dotted border-[#e8e0cc] py-1.5 last:border-0"
+                >
+                  <span className="font-mono text-[11px] text-ink">
+                    {it.ingredient_name ?? `"${it.raw_extracted_text}"`}
+                    {it.source === "SLIP_EXTRACTED" && (
+                      <span className="ml-1 text-[9px] uppercase text-leaf-deep">slip</span>
+                    )}
+                  </span>
+                  <span className="ml-3 shrink-0 font-mono text-[11px] text-ink-soft">
+                    {Number(it.confirmed_quantity)}{" "}
+                    {it.unit_captured === "PACK" ? "pack(s)" : (it.base_unit ?? "")}
+                    {it.base_unit_quantity && it.unit_captured === "PACK" && (
+                      <span className="ml-1 text-[10px]">= {it.base_unit_quantity} {it.base_unit}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {record.status === "DRAFT" && (
+            <div className="mt-2 flex items-center gap-4">
+              <button
+                className="font-mono text-[11px] text-leaf-deep underline"
+                onClick={onResume}
+              >
+                Resume editing →
+              </button>
+              <button
+                className="font-mono text-[10px] text-chili underline"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              >
+                Delete draft
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StockInPage() {
   const { user } = useAuth();
+  const { day, workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
-  const fileRef = useRef<HTMLInputElement>(null);
+  const opDate = workDate || today();
+  const fileRef    = useRef<HTMLInputElement>(null);
+  const xlsRef     = useRef<HTMLInputElement>(null);
+  const xlsImgRef  = useRef<HTMLInputElement>(null);
   const aliasedRef = useRef<Set<string>>(new Set());
 
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -33,6 +144,9 @@ export default function StockInPage() {
   const [lines, setLines] = useState<EditLine[]>([]);
   const [busy, setBusy] = useState<string>("");
   const [msg, setMsg] = useState("");
+  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState("");
+  const [xlsImgFile, setXlsImgFile] = useState<File | null>(null);
 
   const ingById = useMemo(() => {
     const m = new Map<number, Ingredient>();
@@ -51,6 +165,14 @@ export default function StockInPage() {
       confirmed_quantity: String(it.confirmed_quantity),
       pack_definition: it.pack_definition,
       wasUnrecognized: it.ingredient == null,
+      rate: it.rate ?? null,
+      total_amount: it.total_amount ?? null,
+      sd_rate: it.sd_rate ?? null,
+      sd_amount: it.sd_amount ?? null,
+      vat_rate: it.vat_rate ?? null,
+      vat_amount: it.vat_amount ?? null,
+      line_total: it.line_total ?? null,
+      unit_price: it.unit_price ?? null,
     }));
   }
 
@@ -80,7 +202,7 @@ export default function StockInPage() {
     try {
       const rec = await api<StockInRecord>("/stock-in/", {
         method: "POST",
-        body: JSON.stringify({ outlet, stock_in_date: today(), items: [] }),
+        body: JSON.stringify({ outlet, stock_in_date: opDate, items: [] }),
       });
       setDraft(rec);
       setLines([]);
@@ -102,7 +224,7 @@ export default function StockInPage() {
         body: form,
       });
       setDraft(rec);
-      setMsg("Slip attached. Tap “Auto-read from slip”.");
+      setMsg('Slip attached. Tap "Auto-read from slip".');
     } finally {
       setBusy("");
     }
@@ -133,6 +255,48 @@ export default function StockInPage() {
       );
     } finally {
       setBusy("");
+    }
+  }
+
+  async function downloadTemplate() {
+    setMsg("");
+    try {
+      await apiDownload("/stock-in/sample-excel/", "stock_in_template.xlsx");
+    } catch {
+      setMsg("Could not download template.");
+    }
+  }
+
+  async function onXlsChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !draft) return;
+    setBusy("import");
+    setMsg("");
+    try {
+      const form = new FormData();
+      form.append("excel_file", file);
+      if (invoiceNo.trim())   form.append("invoice_number", invoiceNo.trim());
+      if (invoiceDate.trim()) form.append("stock_in_date",  invoiceDate.trim());
+      if (xlsImgFile)         form.append("slip_image",     xlsImgFile);
+      const rec = await api<StockInRecord & { imported_count: number; unresolved_names: string[] }>(
+        `/stock-in/${draft.id}/import-excel/`,
+        { method: "POST", body: form }
+      );
+      setDraft(rec);
+      setLines(toEditLines(rec.items));
+      const unres = rec.unresolved_names.length;
+      setMsg(
+        rec.imported_count > 0
+          ? `Imported ${rec.imported_count} line(s)${unres ? ` · ${unres} unrecognized — match below` : ""}.`
+          : "No lines found in the file."
+      );
+    } catch {
+      setMsg("Import failed — check the file uses the template format.");
+    } finally {
+      setBusy("");
+      if (xlsRef.current)    xlsRef.current.value = "";
+      if (xlsImgRef.current) xlsImgRef.current.value = "";
+      setXlsImgFile(null);
     }
   }
 
@@ -219,6 +383,14 @@ export default function StockInPage() {
         extracted_quantity: l.extracted_quantity,
         confirmed_quantity: l.confirmed_quantity,
         pack_definition: l.pack_definition,
+        rate: l.rate ?? null,
+        total_amount: l.total_amount ?? null,
+        sd_rate: l.sd_rate ?? null,
+        sd_amount: l.sd_amount ?? null,
+        vat_rate: l.vat_rate ?? null,
+        vat_amount: l.vat_amount ?? null,
+        line_total: l.line_total ?? null,
+        unit_price: l.unit_price ?? null,
       }));
     const rec = await api<StockInRecord>(`/stock-in/${draft.id}/`, {
       method: "PUT",
@@ -260,6 +432,17 @@ export default function StockInPage() {
     } finally {
       setBusy("");
     }
+  }
+
+  if (day?.status === "CLOSED") {
+    return (
+      <div className="flex flex-col gap-3 pt-4">
+        <h1 className="font-display text-xl font-bold">Stock In</h1>
+        <div className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-4 py-3 font-mono text-xs text-ink-soft">
+          🔒 Today&apos;s day is closed. Stock In is not available until the next day starts.
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -304,6 +487,91 @@ export default function StockInPage() {
             </div>
           </div>
 
+          {/* — or — */}
+          <div className="relative flex items-center">
+            <div className="flex-1 border-t border-dashed border-[#d8cdb0]" />
+            <span className="mx-2 font-mono text-[10px] uppercase text-ink-soft">or</span>
+            <div className="flex-1 border-t border-dashed border-[#d8cdb0]" />
+          </div>
+
+          {/* Excel import */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className="field-label">Import from Excel</span>
+              <button
+                type="button"
+                className="font-mono text-[10px] text-leaf-deep underline"
+                onClick={downloadTemplate}
+              >
+                Download template
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-[10px] uppercase text-ink-soft">Invoice no.</label>
+                <input
+                  type="text"
+                  className="field-input"
+                  placeholder="e.g. INV-2024-001"
+                  value={invoiceNo}
+                  onChange={(e) => setInvoiceNo(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-[10px] uppercase text-ink-soft">Invoice date</label>
+                <input
+                  type="date"
+                  className="field-input"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                />
+              </div>
+            </div>
+            {/* Optional invoice image alongside the Excel file */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-[10px] uppercase text-ink-soft">
+                Invoice image <span className="normal-case text-ink-soft/60">(optional)</span>
+              </label>
+              <input
+                ref={xlsImgRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => setXlsImgFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost !py-1.5 text-left font-mono text-[11px]"
+                onClick={() => xlsImgRef.current?.click()}
+              >
+                {xlsImgFile ? `📎 ${xlsImgFile.name}` : "+ Attach invoice image"}
+              </button>
+              {xlsImgFile && (
+                <button
+                  type="button"
+                  className="self-start font-mono text-[10px] text-chili underline"
+                  onClick={() => { setXlsImgFile(null); if (xlsImgRef.current) xlsImgRef.current.value = ""; }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <input
+              ref={xlsRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={onXlsChosen}
+            />
+            <button
+              className="btn btn-ghost"
+              disabled={busy === "import"}
+              onClick={() => xlsRef.current?.click()}
+            >
+              {busy === "import" ? "Importing…" : "Import Excel file"}
+            </button>
+          </div>
+
           {/* Editable ingredient lines */}
           <div className="flex flex-col gap-3">
             {lines.map((l, i) => {
@@ -318,7 +586,7 @@ export default function StockInPage() {
                 >
                   {l.raw_extracted_text && (
                     <p className="mb-1 font-mono text-[10px] text-ink-soft">
-                      slip: “{l.raw_extracted_text}”
+                      slip: "{l.raw_extracted_text}"
                     </p>
                   )}
                   {unrecognized ? (
@@ -373,8 +641,8 @@ export default function StockInPage() {
                     <span className="flex-1 text-right font-mono text-[9px] uppercase text-ink-soft">
                       {l.source === "SLIP_EXTRACTED" ? "slip" : "man"}
                     </span>
-                    <button className="font-mono text-ink-soft" onClick={() => removeLine(i)}>
-                      ✕
+                    <button className="font-mono text-[10px] text-chili underline" onClick={() => removeLine(i)}>
+                      Remove
                     </button>
                   </div>
 
@@ -422,32 +690,17 @@ export default function StockInPage() {
 
       {msg && <p className="font-mono text-xs text-ink-soft">{msg}</p>}
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {records.map((r) => (
-          <div key={r.id} className="ticket">
-            <div className="absolute right-3 top-3">
-              <Stamp status={r.status} />
-            </div>
-            <p className="mb-2 font-mono text-[11px] text-ink-soft">
-              {shortDate(r.stock_in_date)} · stock-in #{r.id}
-              {r.slip_image ? " · 📎 slip" : ""}
-            </p>
-            {r.items.map((it) => (
-              <div key={it.id} className="ticket-row">
-                <span>
-                  {it.ingredient_name ?? `“${it.raw_extracted_text}”`} — {it.confirmed_quantity}{" "}
-                  {it.unit_captured === "PACK" ? "pack(s)" : it.base_unit}
-                  {it.source === "SLIP_EXTRACTED" && (
-                    <span className="ml-1 text-[9px] uppercase text-leaf-deep">slip</span>
-                  )}
-                </span>
-                <span className="text-ink-soft">
-                  {it.base_unit_quantity} {it.base_unit}
-                </span>
-              </div>
-            ))}
-            {r.items.length === 0 && <p className="font-mono text-[11px] text-ink-soft">No lines.</p>}
-          </div>
+          <StockInCard
+            key={r.id}
+            record={r}
+            onResume={() => { setDraft(r); setLines(toEditLines(r.items)); }}
+            onDelete={async () => {
+              await api(`/stock-in/${r.id}/`, { method: "DELETE" });
+              refresh();
+            }}
+          />
         ))}
         {records.length === 0 && <p className="font-mono text-xs text-ink-soft">No stock-ins yet.</p>}
       </div>

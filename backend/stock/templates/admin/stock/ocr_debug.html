@@ -1,0 +1,140 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}OCR Debug | {{ site_title|default:"Django site admin" }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans "Home" %}</a>
+  › <a href="{% url 'admin:app_list' app_label='stock' %}">Stock</a>
+  › <a href="{% url 'admin:stock_stockinrecord_changelist' %}">Stock-in records</a>
+  › OCR Debug
+</div>
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<style>
+  pre { background:#f5f5f5; padding:.6em 1em; font-size:.8em; overflow-x:auto; max-height:400px; }
+  .stage { border:1px solid #ddd; border-radius:4px; padding:1em 1.5em; margin-bottom:1.5em; }
+  .stage h3 { margin-top:0; color:#7a2420; }
+  table.ocr { border-collapse:collapse; font-size:.85em; width:100%; }
+  table.ocr th, table.ocr td { border:1px solid #ccc; padding:.3em .6em; }
+  table.ocr th { background:#f0f0f0; }
+  .ok { color:#3f6b3f; font-weight:bold; }
+  .warn { color:#c9601c; font-weight:bold; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>OCR Debug — Raw Pipeline Output</h1>
+<p style="color:#666;">Upload a slip image to see exactly what each OCR stage extracts. Nothing is saved.</p>
+
+{% if not paddle_available %}
+<div class="errornote">PaddleOCR is not installed. Run: <code>pip install paddlepaddle paddleocr opencv-python-headless</code></div>
+{% endif %}
+
+<div class="module" style="padding:1em 1.5em;margin-bottom:1.5em;">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="file" name="image" accept="image/*" required style="margin-right:1em;">
+    <input type="submit" value="Run OCR →" class="default">
+  </form>
+</div>
+
+{% if debug %}
+<h2>{{ debug.filename }}
+  {% if debug.image_shape %}
+    <small style="color:#666;font-weight:normal;">
+      ({{ debug.image_shape.1 }}×{{ debug.image_shape.0 }} px)
+    </small>
+  {% endif %}
+</h2>
+
+{% if debug.error %}
+<div class="errornote">{{ debug.error }}</div>
+{% endif %}
+
+{% for stage in debug.stages %}
+<div class="stage">
+  <h3>Stage: {{ stage.name }}</h3>
+
+  {% if stage.error %}
+  <p class="warn">Error: {{ stage.error }}</p>
+
+  {% elif stage.name == "PP-Structure" %}
+    <h4>Regions detected ({{ stage.regions|length }})</h4>
+    {% if stage.regions %}
+    <table class="ocr">
+      <tr><th>#</th><th>Type</th><th>Bbox</th><th>Result preview</th></tr>
+      {% for r in stage.regions %}
+      <tr>
+        <td>{{ forloop.counter }}</td>
+        <td><strong>{{ r.type }}</strong></td>
+        <td style="font-family:monospace;font-size:.8em;">{{ r.bbox }}</td>
+        <td>{{ r.res_summary }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="warn">No regions detected.</p>
+    {% endif %}
+
+    <h4>Parsed output from PP-Structure</h4>
+    <p>Date: <strong>{{ stage.parsed.date|default:"None" }}</strong> |
+       Items: <strong>{{ stage.parsed.items|length }}</strong> |
+       Grand total: <strong>{{ stage.parsed.grand_total|default:"—" }}</strong></p>
+    {% if stage.parsed.items %}
+    <table class="ocr">
+      <tr><th>raw_text</th><th>quantity</th><th>unit</th><th>unit_price</th><th>line_total</th></tr>
+      {% for it in stage.parsed.items %}
+      <tr>
+        <td>{{ it.raw_text }}</td>
+        <td>{{ it.quantity|default:"—" }}</td>
+        <td>{{ it.unit }}</td>
+        <td>{{ it.unit_price|default:"—" }}</td>
+        <td>{{ it.line_total|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+  {% elif stage.name == "Text OCR" %}
+    <h4>Raw text lines ({{ stage.lines|length }}) — sorted by vertical position</h4>
+    {% if stage.lines %}
+    <table class="ocr">
+      <tr><th>x_c</th><th>y_c</th><th>text</th></tr>
+      {% for l in stage.lines %}
+      <tr>
+        <td>{{ l.bbox_x }}</td>
+        <td>{{ l.bbox_y }}</td>
+        <td>{{ l.text }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="warn">No text lines detected.</p>
+    {% endif %}
+
+    <h4>Parsed output from text OCR</h4>
+    <p>Date: <strong>{{ stage.parsed.date|default:"None" }}</strong> |
+       Items: <strong>{{ stage.parsed.items|length }}</strong> |
+       Grand total: <strong>{{ stage.parsed.grand_total|default:"—" }}</strong></p>
+    {% if stage.parsed.items %}
+    <table class="ocr">
+      <tr><th>raw_text</th><th>quantity</th><th>unit</th><th>unit_price</th><th>line_total</th></tr>
+      {% for it in stage.parsed.items %}
+      <tr>
+        <td>{{ it.raw_text }}</td>
+        <td>{{ it.quantity|default:"—" }}</td>
+        <td>{{ it.unit }}</td>
+        <td>{{ it.unit_price|default:"—" }}</td>
+        <td>{{ it.line_total|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

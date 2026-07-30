@@ -24,19 +24,26 @@ from .models import (
 
 
 def consume_for_preparation(outlet, product, pieces):
-    """Walk the product's Recipe and decrement RawStock per ingredient by
-    pieces × quantity_per_unit. Used by FRESH preparation entries."""
+    """Deduct all inputs needed to prepare `pieces` units of `product`:
+    - Raw ingredients (Recipe rows) → deducted from RawStock
+    - Prepared product components (RecipeProductComponent rows) → deducted from DisplayStock
+    """
     for row in product.recipes.select_related("ingredient"):
         delta = Decimal(pieces) * row.quantity_per_unit
         RawStock.adjust(outlet, row.ingredient, -delta)
+    for row in product.product_recipe_components.select_related("component_product"):
+        qty = int(Decimal(pieces) * row.quantity_per_unit)
+        DisplayStock.adjust(outlet, row.component_product, -qty)
 
 
 def restock_from_preparation(outlet, product, pieces):
-    """Inverse of consume_for_preparation — used when a FRESH prep entry is
-    deleted/reversed so raw stock is credited back."""
+    """Inverse of consume_for_preparation — credits back both raw and prepared inputs."""
     for row in product.recipes.select_related("ingredient"):
         delta = Decimal(pieces) * row.quantity_per_unit
         RawStock.adjust(outlet, row.ingredient, delta)
+    for row in product.product_recipe_components.select_related("component_product"):
+        qty = int(Decimal(pieces) * row.quantity_per_unit)
+        DisplayStock.adjust(outlet, row.component_product, qty)
 
 
 # ---------------------------------------------------------------------------
@@ -72,15 +79,16 @@ def carry_forward_candidates(operating_day):
 # ---------------------------------------------------------------------------
 # Periodic stock (packaging & supplies)
 # ---------------------------------------------------------------------------
-def stock_in_since(outlet, ingredient, since_dt):
+def stock_in_since(outlet, ingredient, since_dt=None):
     """Sum of approved stock-in base-unit quantities for an ingredient since a
-    given datetime — used to attribute consumption between periodic counts."""
+    given datetime. Pass since_dt=None to sum all approved stock-in ever."""
     items = StockInItem.objects.filter(
         stock_in_record__outlet=outlet,
         ingredient=ingredient,
         stock_in_record__status=StockInStatus.APPROVED,
-        stock_in_record__reviewed_at__gte=since_dt,
     ).select_related("pack_definition")
+    if since_dt is not None:
+        items = items.filter(stock_in_record__reviewed_at__gte=since_dt)
     total = Decimal("0")
     for item in items:
         total += item.base_unit_quantity()

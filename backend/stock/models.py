@@ -50,12 +50,11 @@ class OperatingDay(models.Model):
         return self.status in (
             OperatingDayStatus.STOCK_CONFIRMED,
             OperatingDayStatus.IN_PROGRESS,
-            OperatingDayStatus.CLOSED,
         )
 
     @property
     def full_unlocked(self):
-        return self.status in (OperatingDayStatus.IN_PROGRESS, OperatingDayStatus.CLOSED)
+        return self.status == OperatingDayStatus.IN_PROGRESS
 
 
 class DiscrepancyReason(models.TextChoices):
@@ -119,6 +118,7 @@ class UnitCaptured(models.TextChoices):
 class StockInRecord(models.Model):
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name="stock_ins")
     stock_in_date = models.DateField()
+    invoice_number = models.CharField(max_length=100, blank=True)
     submitted_by = models.ForeignKey(
         "accounts.User", on_delete=models.PROTECT, related_name="submitted_stock_ins"
     )
@@ -132,6 +132,10 @@ class StockInRecord(models.Model):
     reviewed_at = models.DateTimeField(null=True, blank=True)
     slip_image = models.ImageField(upload_to="slips/", null=True, blank=True)
     notes = models.TextField(blank=True)
+    # Financial summary extracted from the supplier slip (BDT)
+    slip_subtotal    = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_vat_total   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_grand_total = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -175,6 +179,19 @@ class StockInItem(models.Model):
     pack_definition = models.ForeignKey(
         PackDefinition, null=True, blank=True, on_delete=models.PROTECT
     )
+    # Price fields captured from the supplier slip (BDT).
+    # unit_price = after-tax cost per unit (= line_total / quantity).
+    # rate       = pre-tax per unit price (from "Per Unit Price" column).
+    # total_amount = pre-tax subtotal (= quantity × rate, "Total Amount" column).
+    # line_total = after-tax total for this line ("Total Value incl. VAT & Tax").
+    unit_price   = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    rate         = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    sd_rate      = models.DecimalField(max_digits=6,  decimal_places=2, null=True, blank=True)
+    sd_amount    = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    vat_rate     = models.DecimalField(max_digits=6,  decimal_places=2, null=True, blank=True)
+    vat_amount   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    line_total   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
 
     def base_unit_quantity(self):
         """confirmed_quantity converted to the ingredient's base unit."""
@@ -241,6 +258,10 @@ class PreparationLog(models.Model):
     logged_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     timestamp = models.DateTimeField(auto_now_add=True)
+    op_date = models.DateField(
+        null=True, blank=True,
+        help_text="Operational date this log belongs to (may differ from timestamp when back-entering data).",
+    )
     source = models.CharField(
         max_length=16, choices=PrepSource.choices, default=PrepSource.FRESH
     )

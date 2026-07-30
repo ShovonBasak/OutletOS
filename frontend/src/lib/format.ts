@@ -9,13 +9,40 @@ export function bdt2(value: string | number | null | undefined): string {
 }
 
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  // Parse date-only strings as local noon to avoid UTC-midnight-to-local-day-shift.
+  const d = iso.length === 10 ? new Date(`${iso}T12:00:00`) : new Date(iso);
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 export function timeOf(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Returns a human-readable pack breakdown for a raw quantity, e.g. "1 pack + 4 sticks".
+ * Returns null when less than one full pack — nothing useful to show.
+ * Both qty and piecesPerPack may be decimal strings from the API.
+ */
+export function packBreakdown(
+  qty: number | string | null | undefined,
+  piecesPerPack: number | string | null | undefined,
+  unit: string
+): string | null {
+  const q = Number(qty);
+  const p = Number(piecesPerPack);
+  if (!p || p <= 0 || !q || q < p) return null;
+  const fullPacks = Math.floor(q / p);
+  if (fullPacks === 0) return null;
+  // round remainder to avoid floating-point noise (e.g. 17.000000001)
+  const remainder = Math.round((q - fullPacks * p) * 1000) / 1000;
+  const packLabel = `${fullPacks} pack${fullPacks !== 1 ? "s" : ""}`;
+  return remainder > 0 ? `${packLabel} + ${remainder} ${unit}` : packLabel;
 }

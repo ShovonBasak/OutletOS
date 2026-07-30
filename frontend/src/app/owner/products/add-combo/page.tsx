@@ -22,6 +22,7 @@ export default function AddComboPage() {
   const [channels, setChannels] = useState<SalesChannel[]>([]);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [comps, setComps] = useState<CompRow[]>([{ product: "", qty: "1" }]);
   const [prices, setPrices] = useState<PriceRow[]>([]);
   const [active, setActive] = useState(true);
@@ -61,6 +62,7 @@ export default function AddComboPage() {
           product_type: "COMBO",
           requires_preparation: false,
           selling_price: price,
+          effective_from: effectiveFrom,
           is_active: active,
         }),
       });
@@ -113,6 +115,10 @@ export default function AddComboPage() {
         <label className="field">
           <span className="field-label">Combo price — walk-in (৳)</span>
           <input className="field-input" placeholder="e.g. 280" value={price} onChange={(e) => setPrice(e.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label">Effective from</span>
+          <input className="field-input" type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
         </label>
       </div>
 

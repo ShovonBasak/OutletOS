@@ -18,6 +18,7 @@ from catalog.models import (
     Outlet,
     PackDefinition,
     Product,
+    ProductPrice,
     ProductType,
     Recipe,
     SupplierProductAlias,
@@ -134,15 +135,23 @@ class Command(BaseCommand):
         ]
         product_objs = {}
         for name, cat, prep, price, recipe in products_spec:
-            p, _ = Product.objects.get_or_create(
+            p, created = Product.objects.get_or_create(
                 name=name,
                 defaults={
                     "category": cat,
                     "product_type": ProductType.SINGLE,
                     "requires_preparation": prep,
-                    "selling_price": Decimal(price),
                 },
             )
+            if created:
+                ProductPrice.objects.get_or_create(
+                    product=p,
+                    effective_to__isnull=True,
+                    defaults={
+                        "price": Decimal(price),
+                        "effective_from": date.today(),
+                    },
+                )
             product_objs[name] = p
             for ing_name, qty in recipe:
                 Recipe.objects.get_or_create(
@@ -151,15 +160,23 @@ class Command(BaseCommand):
                 )
 
         # A combo: Burger + Drink.
-        combo, _ = Product.objects.get_or_create(
+        combo, created = Product.objects.get_or_create(
             name="Buddy Combo",
             defaults={
                 "category": "Combo",
                 "product_type": ProductType.COMBO,
                 "requires_preparation": False,
-                "selling_price": Decimal("240"),
             },
         )
+        if created:
+            ProductPrice.objects.get_or_create(
+                product=combo,
+                effective_to__isnull=True,
+                defaults={
+                    "price": Decimal("240"),
+                    "effective_from": date.today(),
+                },
+            )
         ComboComponent.objects.get_or_create(
             combo_product=combo, component_product=product_objs["5★ Burger"],
             defaults={"quantity_per_combo": 1},
