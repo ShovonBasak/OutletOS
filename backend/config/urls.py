@@ -1,7 +1,12 @@
 from django.conf import settings
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path, re_path
 from django.views.static import serve
+
+
+def health(_request):
+    return JsonResponse({"status": "ok"})
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -87,6 +92,7 @@ router.register("capital-transactions", CapitalTransactionViewSet)
 router.register("account-balance-checks", AccountBalanceCheckViewSet)
 
 urlpatterns = [
+    path("health/", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/auth/login/", RoleTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

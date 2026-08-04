@@ -32,7 +32,10 @@ python manage.py migrate --noinput
 echo "Collecting static files…"
 python manage.py collectstatic --noinput
 
-echo "Seeding demo data (idempotent)…"
-python manage.py seed || echo "Seed step skipped/failed (non-fatal)."
+# Only seed demo data in non-production environments.
+if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
+  echo "Seeding demo data…"
+  python manage.py seed || echo "Seed step skipped/failed (non-fatal)."
+fi
 
 exec "$@"
