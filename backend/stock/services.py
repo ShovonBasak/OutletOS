@@ -71,7 +71,8 @@ def carry_forward_candidates(operating_day):
         return []
     return list(
         prev.daily_closing.stock_counts.select_related("product").filter(
-            remains_pieces__gt=0
+            remains_pieces__gt=0,
+            product__requires_preparation=True,
         )
     )
 

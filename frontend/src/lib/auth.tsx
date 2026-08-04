@@ -8,10 +8,16 @@ import type { User } from "./types";
 interface AuthState {
   user: User | null;
   loading: boolean;
+  setUser: (user: User | null) => void;
   logout: () => void;
 }
 
-const AuthContext = createContext<AuthState>({ user: null, loading: true, logout: () => {} });
+const AuthContext = createContext<AuthState>({
+  user: null,
+  loading: true,
+  setUser: () => {},
+  logout: () => {},
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -28,7 +34,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = "/login";
   };
 
-  return <AuthContext.Provider value={{ user, loading, logout }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ user, loading, setUser, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export const useAuth = () => useContext(AuthContext);

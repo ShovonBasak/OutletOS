@@ -66,9 +66,8 @@ export default function ClosingDetail() {
     .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.wastage_pieces * (priceMap[sc.product] ?? 0) }));
   const wastageTotal = wastageRows.reduce((s, r) => s + r.total, 0);
 
-  const cash = closing.payments.find((p) => p.method === "CASH");
-  const bkash = closing.payments.find((p) => p.method === "BKASH");
-  const card = closing.payments.find((p) => p.method === "CARD");
+  const cashEntry = closing.payments.find((p) => p.is_primary_cash);
+  const otherPayments = closing.payments.filter((p) => !p.is_primary_cash);
 
   return (
     <div className="flex flex-col gap-5 pb-4">
@@ -95,9 +94,10 @@ export default function ClosingDetail() {
         <Divider />
         <Row label="Net revenue" value={bdt(closing.channel_day_net_revenue)} bold />
         <Divider />
-        <Row label="Cash" value={bdt(cash?.amount ?? 0)} />
-        {Number(bkash?.amount ?? 0) > 0 && <Row label="bKash" value={bdt(bkash!.amount)} />}
-        {Number(card?.amount ?? 0) > 0 && <Row label="Card" value={bdt(card!.amount)} />}
+        {cashEntry && <Row label={cashEntry.account_name} value={bdt(cashEntry.amount)} />}
+        {otherPayments.map((p) => (
+          <Row key={p.id} label={p.account_name} value={bdt(p.amount)} />
+        ))}
       </Section>
 
       {/* Online sales by channel */}

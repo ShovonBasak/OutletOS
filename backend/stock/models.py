@@ -133,9 +133,14 @@ class StockInRecord(models.Model):
     slip_image = models.ImageField(upload_to="slips/", null=True, blank=True)
     notes = models.TextField(blank=True)
     # Financial summary extracted from the supplier slip (BDT)
-    slip_subtotal    = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    slip_vat_total   = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    slip_grand_total = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_subtotal       = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_discount_total = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_vat_total      = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    slip_grand_total    = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    paid_from_account = models.ForeignKey(
+        "finance.FinancialAccount", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="stock_ins",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -179,14 +184,20 @@ class StockInItem(models.Model):
     pack_definition = models.ForeignKey(
         PackDefinition, null=True, blank=True, on_delete=models.PROTECT
     )
+    # Supplier reference fields (audit / traceability only, no business logic).
+    sku_code = models.CharField(max_length=50, blank=True)
+    mrp      = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
     # Price fields captured from the supplier slip (BDT).
-    # unit_price = after-tax cost per unit (= line_total / quantity).
-    # rate       = pre-tax per unit price (from "Per Unit Price" column).
-    # total_amount = pre-tax subtotal (= quantity × rate, "Total Amount" column).
-    # line_total = after-tax total for this line ("Total Value incl. VAT & Tax").
+    # unit_price   = effective cost per unit (= line_total / quantity).
+    # rate         = pre-discount, pre-tax rate per pack/unit.
+    # total_amount = qty × rate (pre-discount, pre-tax subtotal).
+    # discount     = per-line discount amount (beverages use this instead of SD/VAT).
+    # line_total   = final net cost for this line (after discount + SD + VAT).
     unit_price   = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     rate         = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    discount     = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     sd_rate      = models.DecimalField(max_digits=6,  decimal_places=2, null=True, blank=True)
     sd_amount    = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     vat_rate     = models.DecimalField(max_digits=6,  decimal_places=2, null=True, blank=True)

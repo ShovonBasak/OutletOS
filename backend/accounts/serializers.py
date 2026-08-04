@@ -6,10 +6,11 @@ from .models import User
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    outlet_name = serializers.CharField(source="outlet.name", read_only=True, default=None)
 
     class Meta:
         model = User
-        fields = ["id", "name", "role", "outlet", "phone", "is_active", "password"]
+        fields = ["id", "name", "role", "outlet", "outlet_name", "phone", "is_active", "password"]
 
     def create(self, validated_data):
         password = validated_data.pop("password", None) or None

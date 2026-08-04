@@ -32,7 +32,8 @@ class StockInItemSerializer(serializers.ModelSerializer):
             "id", "ingredient", "ingredient_name", "base_unit", "raw_extracted_text",
             "source", "unit_captured", "extracted_quantity", "confirmed_quantity",
             "pack_definition", "pieces_per_pack", "base_unit_quantity",
-            "rate", "total_amount",
+            "sku_code", "mrp",
+            "rate", "total_amount", "discount",
             "sd_rate", "sd_amount", "vat_rate", "vat_amount",
             "unit_price", "line_total",
             "is_unrecognized", "needs_pack_yield",
@@ -55,6 +56,7 @@ class StockInItemSerializer(serializers.ModelSerializer):
 class StockInRecordSerializer(serializers.ModelSerializer):
     items = StockInItemSerializer(many=True, required=False)
     submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
+    paid_from_account_name = serializers.SerializerMethodField()
     unresolved_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -62,7 +64,8 @@ class StockInRecordSerializer(serializers.ModelSerializer):
         fields = [
             "id", "outlet", "stock_in_date", "invoice_number", "submitted_by", "submitted_by_name",
             "status", "reviewed_by", "reviewed_at", "slip_image", "notes",
-            "slip_subtotal", "slip_vat_total", "slip_grand_total",
+            "slip_subtotal", "slip_discount_total", "slip_vat_total", "slip_grand_total",
+            "paid_from_account", "paid_from_account_name",
             "created_at", "items", "unresolved_count",
         ]
         # slip_image is set via the dedicated multipart upload-slip action.
@@ -70,6 +73,9 @@ class StockInRecordSerializer(serializers.ModelSerializer):
             "status", "reviewed_by", "reviewed_at", "created_at",
             "submitted_by", "slip_image",
         ]
+
+    def get_paid_from_account_name(self, obj):
+        return obj.paid_from_account.name if obj.paid_from_account_id else None
 
     def get_unresolved_count(self, obj):
         return len(obj.unresolved_lines)
@@ -119,10 +125,16 @@ class PreparationLogSerializer(serializers.ModelSerializer):
 
 class RawStockSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
+    ingredient_group = serializers.CharField(source="ingredient.group", read_only=True)
+    ingredient_display_name = serializers.SerializerMethodField()
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
     tracking_mode = serializers.CharField(source="ingredient.tracking_mode", read_only=True)
     pieces_per_pack = serializers.SerializerMethodField()
     cost_per_base_unit = serializers.SerializerMethodField()
+
+    def get_ingredient_display_name(self, obj):
+        alias = obj.ingredient.aliases.filter(is_active=True).first()
+        return alias.alias_text if alias else obj.ingredient.name
 
     def get_pieces_per_pack(self, obj):
         pack = obj.ingredient.active_pack()
@@ -137,30 +149,39 @@ class RawStockSerializer(serializers.ModelSerializer):
     class Meta:
         model = RawStock
         fields = [
-            "id", "outlet", "ingredient", "ingredient_name", "base_unit",
-            "tracking_mode", "quantity_available", "pieces_per_pack", "cost_per_base_unit",
+            "id", "outlet", "ingredient", "ingredient_name", "ingredient_display_name",
+            "ingredient_group", "base_unit", "tracking_mode", "quantity_available",
+            "pieces_per_pack", "cost_per_base_unit",
         ]
 
 
 class DisplayStockSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    product_category = serializers.CharField(source="product.category", read_only=True)
 
     class Meta:
         model = DisplayStock
-        fields = ["id", "outlet", "product", "product_name", "pieces_available"]
+        fields = ["id", "outlet", "product", "product_name", "product_category", "pieces_available"]
 
 
 class DayStartStockCheckSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
+    ingredient_display_name = serializers.SerializerMethodField()
+    ingredient_group = serializers.CharField(source="ingredient.group", read_only=True)
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
     discrepancy_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, read_only=True
     )
 
+    def get_ingredient_display_name(self, obj):
+        alias = obj.ingredient.aliases.filter(is_active=True).first()
+        return alias.alias_text if alias else obj.ingredient.name
+
     class Meta:
         model = DayStartStockCheck
         fields = [
-            "id", "operating_day", "ingredient", "ingredient_name", "base_unit",
+            "id", "operating_day", "ingredient", "ingredient_name",
+            "ingredient_display_name", "ingredient_group", "base_unit",
             "system_carried_qty", "confirmed_qty", "discrepancy_qty",
             "discrepancy_reason", "note",
         ]

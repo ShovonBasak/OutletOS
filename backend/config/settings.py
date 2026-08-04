@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     "sales",
     "closing",
     "costs",
+    "income",
+    "finance",
     "reports",
 ]
 

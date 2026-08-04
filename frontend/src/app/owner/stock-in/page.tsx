@@ -5,7 +5,8 @@ import { api, apiDownload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { today } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
-import type { Ingredient, Paginated, StockInRecord, StockInItem } from "@/lib/types";
+import AccountPicker from "@/components/AccountPicker";
+import type { FinancialAccount, Ingredient, Paginated, StockInRecord, StockInItem } from "@/lib/types";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,15 +116,20 @@ function ItemTable({ items }: { items: StockInItem[] }) {
 function InvoiceRow({
   r,
   busy,
+  accounts,
   onAct,
   onResume,
 }: {
   r: StockInRecord;
   busy: boolean;
-  onAct: (id: number, action: "approve" | "reject" | "delete") => void;
+  accounts: FinancialAccount[];
+  onAct: (id: number, action: "approve" | "reject" | "delete", accountId?: number | null) => void;
   onResume?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [approvalAccount, setApprovalAccount] = useState(
+    r.paid_from_account ? String(r.paid_from_account) : ""
+  );
   const invoiceLabel = r.invoice_number
     ? r.invoice_number
     : `#SI-${String(r.id).padStart(4, "0")}`;
@@ -179,22 +185,53 @@ function InvoiceRow({
           ) : (
             <ItemTable items={r.items} />
           )}
+
+          {r.slip_image && (
+            <div className="mt-3">
+              <p className="mb-1.5 font-mono text-[9px] uppercase tracking-wide text-ink-soft">Delivery slip</p>
+              <a href={r.slip_image} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={r.slip_image}
+                  alt="Delivery slip"
+                  className="max-h-64 w-full rounded border border-[#d8cdb0] object-contain bg-[#faf7ee] cursor-zoom-in"
+                />
+                <p className="mt-1 font-mono text-[10px] text-leaf-deep underline">Open full size ↗</p>
+              </a>
+            </div>
+          )}
+
           {r.status === "PENDING" && (
-            <div className="mt-3 flex gap-2">
-              <button
-                className="rounded-sm bg-leaf px-3 py-1 font-mono text-[11px] uppercase text-white disabled:opacity-50"
-                disabled={busy}
-                onClick={(e) => { e.stopPropagation(); onAct(r.id, "approve"); }}
-              >
-                Approve
-              </button>
-              <button
-                className="rounded-sm border border-chili px-3 py-1 font-mono text-[11px] uppercase text-chili-deep disabled:opacity-50"
-                disabled={busy}
-                onClick={(e) => { e.stopPropagation(); onAct(r.id, "reject"); }}
-              >
-                Reject
-              </button>
+            <div className="mt-3 flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] uppercase text-ink-soft">Paid from account</span>
+                <AccountPicker
+                  accounts={accounts.filter((a) => a.is_active)}
+                  value={approvalAccount}
+                  onChange={setApprovalAccount}
+                  showBalance
+                  placeholder="— not specified —"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-sm bg-leaf px-3 py-1 font-mono text-[11px] uppercase text-white disabled:opacity-50"
+                  disabled={busy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAct(r.id, "approve", approvalAccount ? Number(approvalAccount) : null);
+                  }}
+                >
+                  Approve
+                </button>
+                <button
+                  className="rounded-sm border border-chili px-3 py-1 font-mono text-[11px] uppercase text-chili-deep disabled:opacity-50"
+                  disabled={busy}
+                  onClick={(e) => { e.stopPropagation(); onAct(r.id, "reject"); }}
+                >
+                  Reject
+                </button>
+              </div>
             </div>
           )}
           {r.status === "DRAFT" && (
@@ -272,6 +309,7 @@ export default function StockInApprovals() {
 
   // list state
   const [records, setRecords] = useState<StockInRecord[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [actBusy, setActBusy] = useState<number | null>(null);
@@ -307,12 +345,14 @@ export default function StockInApprovals() {
 
   async function refresh() {
     const qs = status ? `?status=${status}` : "";
-    const [ing, recs] = await Promise.all([
+    const [ing, recs, acc] = await Promise.all([
       api<Paginated<Ingredient>>("/ingredients/?active=true"),
       api<Paginated<StockInRecord>>(`/stock-in/${qs}`),
+      api<Paginated<FinancialAccount>>("/financial-accounts/"),
     ]);
     setIngredients(ing.results);
     setRecords(recs.results);
+    setAccounts(acc.results);
     if (!manualIng && ing.results.length) setManualIng(ing.results[0].id);
   }
 
@@ -321,11 +361,16 @@ export default function StockInApprovals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  async function act(id: number, action: "approve" | "reject" | "delete") {
+  async function act(id: number, action: "approve" | "reject" | "delete", accountId?: number | null) {
     setActBusy(id);
     try {
       if (action === "delete") {
         await api(`/stock-in/${id}/`, { method: "DELETE" });
+      } else if (action === "approve") {
+        await api(`/stock-in/${id}/approve/`, {
+          method: "POST",
+          body: JSON.stringify({ paid_from_account: accountId ?? null }),
+        });
       } else {
         await api(`/stock-in/${id}/${action}/`, { method: "POST" });
       }
@@ -901,6 +946,7 @@ export default function StockInApprovals() {
             key={r.id}
             r={r}
             busy={actBusy === r.id}
+            accounts={accounts}
             onAct={act}
             onResume={r.status === "DRAFT" ? () => resumeDraft(r) : undefined}
           />

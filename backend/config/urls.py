@@ -34,11 +34,23 @@ from sales.views import (
 )
 from closing.views import DailyClosingViewSet, ChannelSettlementViewSet
 from costs.views import CostCategoryViewSet, ExpenseViewSet
+from finance.views import (
+    FinancialAccountViewSet,
+    AccountTransactionViewSet,
+    AccountTransferViewSet,
+    CapitalTransactionViewSet,
+    AccountBalanceCheckViewSet,
+)
+from income.views import OtherIncomeCategoryViewSet, OtherIncomeViewSet
 from reports.views import (
     pnl_report,
     settlement_report,
     dashboard_summary,
     packaging_report,
+    product_performance,
+    channel_breakdown,
+    stock_value,
+    daily_trend,
 )
 
 router = DefaultRouter()
@@ -66,6 +78,13 @@ router.register("daily-closings", DailyClosingViewSet)
 router.register("channel-settlements", ChannelSettlementViewSet)
 router.register("cost-categories", CostCategoryViewSet)
 router.register("expenses", ExpenseViewSet)
+router.register("income-categories", OtherIncomeCategoryViewSet)
+router.register("other-incomes", OtherIncomeViewSet)
+router.register("financial-accounts", FinancialAccountViewSet, basename="financial-accounts")
+router.register("account-transactions", AccountTransactionViewSet)
+router.register("account-transfers", AccountTransferViewSet)
+router.register("capital-transactions", CapitalTransactionViewSet)
+router.register("account-balance-checks", AccountBalanceCheckViewSet)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -77,6 +96,10 @@ urlpatterns = [
     path("api/reports/settlements/", settlement_report, name="settlement_report"),
     path("api/reports/dashboard/", dashboard_summary, name="dashboard_summary"),
     path("api/reports/packaging/", packaging_report, name="packaging_report"),
+    path("api/reports/product-performance/", product_performance, name="product_performance"),
+    path("api/reports/channel-breakdown/", channel_breakdown, name="channel_breakdown"),
+    path("api/reports/stock-value/", stock_value, name="stock_value"),
+    path("api/reports/daily-trend/", daily_trend, name="daily_trend"),
     path("api/", include(router.urls)),
 ]
 

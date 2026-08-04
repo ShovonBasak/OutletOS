@@ -9,13 +9,22 @@ import {
 } from "@/lib/operatingDay";
 import { useOperatingDay } from "@/lib/staffDay";
 import { packBreakdown } from "@/lib/format";
-import type { DayStartStockRow, DiscrepancyReason } from "@/lib/types";
+import type { DayStartStockRow, DiscrepancyReason, IngredientGroup } from "@/lib/types";
 
 const REASONS: { value: DiscrepancyReason; label: string }[] = [
   { value: "SPOILED", label: "Spoiled" },
   { value: "MISCOUNTED_YESTERDAY", label: "Miscounted yesterday" },
   { value: "SURPLUS_FOUND", label: "Surplus found" },
   { value: "OTHER", label: "Other" },
+];
+
+const GROUPS: { key: IngredientGroup; label: string; icon: string }[] = [
+  { key: "CHICKEN_PIECE", label: "Chicken — Main",    icon: "🍗" },
+  { key: "SNACK",         label: "Snacks & Balls",    icon: "🍡" },
+  { key: "BURGER_WRAP",   label: "Burgers & Wraps",   icon: "🍔" },
+  { key: "BEVERAGE",      label: "Beverages",          icon: "🥤" },
+  { key: "SUPPLY",        label: "Supplies",           icon: "📦" },
+  { key: "OTHER",         label: "Other",              icon: "🗂" },
 ];
 
 export default function DayStartStock() {
@@ -39,17 +48,16 @@ export default function DayStartStock() {
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, note: value } : row)));
   }
   function replicate() {
-    setRows((r) => r.map((row) => ({ ...row, confirmed_qty: row.system_carried_qty, discrepancy_reason: "", note: "" })));
+    setRows((r) => r.map((row) => ({ ...row, confirmed_qty: row.system_carried_qty, discrepancy_reason: "" as DiscrepancyReason, note: "" })));
   }
 
   async function submit() {
     setErr("");
-    // Local guard mirrors the backend: any discrepancy needs a reason.
     const missing = rows.find(
       (r) => Number(r.system_carried_qty) !== Number(r.confirmed_qty) && !r.discrepancy_reason
     );
     if (missing) {
-      setErr(`"${missing.ingredient_name}" has a discrepancy — pick a reason.`);
+      setErr(`"${missing.ingredient_display_name}" has a discrepancy — pick a reason.`);
       return;
     }
     setBusy(true);
@@ -66,6 +74,10 @@ export default function DayStartStock() {
 
   if (!day) return <p className="font-mono text-xs text-ink-soft">Loading…</p>;
 
+  const flaggedCount = rows.filter(
+    (r) => Number(r.system_carried_qty) !== Number(r.confirmed_qty)
+  ).length;
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -75,85 +87,126 @@ export default function DayStartStock() {
         </p>
       </div>
 
-      <button className="chip chip-active self-start" onClick={replicate}>
-        ↺ Replicate all (accept system)
-      </button>
-
-      <div className="flex flex-col gap-2">
-        {rows.map((row, i) => {
-          const diff = Number(row.system_carried_qty) - Number(row.confirmed_qty);
-          const flagged = diff !== 0;
-          const systemPacks = packBreakdown(row.system_carried_qty, row.pieces_per_pack, row.base_unit);
-          const countedPacks = packBreakdown(row.confirmed_qty, row.pieces_per_pack, row.base_unit);
-          return (
-            <div
-              key={row.ingredient}
-              className={`rounded border px-3 py-2.5 ${
-                flagged ? "border-chili/50 bg-chili/10" : "border-leaf/40 bg-leaf/10"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-display text-sm font-bold">{row.ingredient_name}</span>
-                <div className="text-right shrink-0">
-                  <p className="font-mono text-[10px] text-ink-soft">
-                    system {Number(row.system_carried_qty)} {row.base_unit}
-                  </p>
-                  {systemPacks && (
-                    <p className="font-mono text-[10px] text-ink-soft/60">= {systemPacks}</p>
-                  )}
-                </div>
-              </div>
-              <div className="mt-1.5 flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="field-label">Counted</span>
-                  <input
-                    type="number"
-                    className="field-input w-24"
-                    value={row.confirmed_qty}
-                    onChange={(e) => setConfirmed(i, Number(e.target.value))}
-                  />
-                  <span className="font-mono text-[11px] text-ink-soft">{row.base_unit}</span>
-                  {flagged && (
-                    <span className="font-mono text-[10px] text-chili">
-                      Δ {diff > 0 ? "−" : "+"}
-                      {Math.abs(diff)}
-                    </span>
-                  )}
-                </div>
-                {countedPacks && (
-                  <p className="font-mono text-[10px] text-ink-soft/60 pl-[3.75rem]">
-                    = {countedPacks}
-                  </p>
-                )}
-              </div>
-              {flagged && (
-                <div className="mt-2 flex flex-col gap-1">
-                  <select
-                    className="field-input"
-                    value={row.discrepancy_reason}
-                    onChange={(e) => setReason(i, e.target.value as DiscrepancyReason)}
-                  >
-                    <option value="">Pick a reason…</option>
-                    {REASONS.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                  {row.discrepancy_reason === "OTHER" && (
-                    <input
-                      className="field-input"
-                      placeholder="Note (required for Other)"
-                      value={row.note}
-                      onChange={(e) => setNote(i, e.target.value)}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="flex items-center justify-between">
+        <button className="chip chip-active self-start" onClick={replicate}>
+          ↺ Accept all (replicate system)
+        </button>
+        {flaggedCount > 0 && (
+          <span className="font-mono text-[11px] text-chili">
+            {flaggedCount} mismatch{flaggedCount > 1 ? "es" : ""}
+          </span>
+        )}
       </div>
+
+      {GROUPS.map(({ key, label, icon }) => {
+        const groupRows = rows
+          .map((row, i) => ({ row, i }))
+          .filter(({ row }) => row.ingredient_group === key);
+        if (groupRows.length === 0) return null;
+
+        return (
+          <div key={key} className="flex flex-col gap-2">
+            {/* Group header */}
+            <div className="flex items-center gap-1.5 border-b border-dotted border-[#d8cdb0] pb-1">
+              <span className="text-sm">{icon}</span>
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
+                {label}
+              </p>
+              <span className="font-mono text-[10px] text-ink-soft/50">
+                · {groupRows.length} item{groupRows.length > 1 ? "s" : ""}
+              </span>
+            </div>
+
+            {groupRows.map(({ row, i }) => {
+              const diff = Number(row.system_carried_qty) - Number(row.confirmed_qty);
+              const flagged = diff !== 0;
+              const systemPacks = packBreakdown(row.system_carried_qty, row.pieces_per_pack, row.base_unit);
+              const countedPacks = packBreakdown(row.confirmed_qty, row.pieces_per_pack, row.base_unit);
+
+              return (
+                <div
+                  key={row.ingredient}
+                  className={`rounded border px-3 py-2.5 ${
+                    flagged ? "border-chili/50 bg-chili/10" : "border-leaf/40 bg-leaf/10"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-display text-sm font-bold">
+                        {row.ingredient_display_name}
+                      </span>
+                      {row.ingredient_display_name !== row.ingredient_name && (
+                        <p className="font-mono text-[9px] text-ink-soft/50 leading-tight mt-0.5">
+                          {row.ingredient_name}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-mono text-[10px] text-ink-soft">
+                        system {Number(row.system_carried_qty)} {row.base_unit}
+                      </p>
+                      {systemPacks && (
+                        <p className="font-mono text-[10px] text-ink-soft/60">= {systemPacks}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-1.5 flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="field-label">Counted</span>
+                      <input
+                        type="number"
+                        className="field-input w-24"
+                        value={row.confirmed_qty}
+                        onChange={(e) => setConfirmed(i, Number(e.target.value))}
+                      />
+                      <span className="font-mono text-[11px] text-ink-soft">{row.base_unit}</span>
+                      {flagged && (
+                        <span className="font-mono text-[10px] text-chili">
+                          Δ {diff > 0 ? "−" : "+"}
+                          {Math.abs(diff)}
+                        </span>
+                      )}
+                    </div>
+                    {countedPacks && (
+                      <p className="font-mono text-[10px] text-ink-soft/60 pl-[3.75rem]">
+                        = {countedPacks}
+                      </p>
+                    )}
+                  </div>
+
+                  {flagged && (
+                    <div className="mt-2 flex flex-col gap-1">
+                      <select
+                        className="field-input"
+                        value={row.discrepancy_reason}
+                        onChange={(e) => setReason(i, e.target.value as DiscrepancyReason)}
+                      >
+                        <option value="">Pick a reason…</option>
+                        {REASONS.map((r) => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                      {row.discrepancy_reason === "OTHER" && (
+                        <input
+                          className="field-input"
+                          placeholder="Note (required for Other)"
+                          value={row.note}
+                          onChange={(e) => setNote(i, e.target.value)}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {rows.length === 0 && (
+        <p className="font-mono text-xs text-ink-soft">No stock to check.</p>
+      )}
 
       {err && <p className="font-mono text-xs text-chili-deep">{err}</p>}
       <button className="btn btn-primary" disabled={busy} onClick={submit}>

@@ -18,6 +18,7 @@ from .constants import (
     COL_ROLE_MAP,
     CP_SUPPLIER_RE,
     CUSTOMER_LABEL_RE,
+    DISCOUNT_TOTAL_RE,
     GRAND_TOTAL_RE,
     INVOICE_NO_RE,
     NAME_KW,
@@ -265,16 +266,18 @@ def _rows_to_items(rows: list[list[str]]) -> list[dict]:
 
 
 def _extract_slip_totals(all_rows: list[list[str]]) -> dict:
-    subtotal = vat = grand_total = None
+    subtotal = discount_total = vat = grand_total = None
     for row in all_rows:
         text = " ".join(row)
         if GRAND_TOTAL_RE.search(text):
             grand_total = _rightmost_number(row) or grand_total
+        elif DISCOUNT_TOTAL_RE.search(text):
+            discount_total = discount_total or _rightmost_number(row)
         elif SUBTOTAL_RE.search(text):
             subtotal = _rightmost_number(row) or subtotal
         elif VAT_TOTAL_RE.search(text) and grand_total is None:
             vat = vat or _rightmost_number(row)
-    return {"subtotal": subtotal, "vat": vat, "grand_total": grand_total}
+    return {"subtotal": subtotal, "discount_total": discount_total, "vat": vat, "grand_total": grand_total}
 
 
 # ---------------------------------------------------------------------------

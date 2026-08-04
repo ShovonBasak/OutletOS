@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, apiDownload, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useOperatingDay } from "@/lib/staffDay";
 import { shortDate, today } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
-import type { Ingredient, Paginated, StockInItem, StockInRecord } from "@/lib/types";
+import AccountPicker from "@/components/AccountPicker";
+import IngredientPicker from "@/components/IngredientPicker";
+import type { FinancialAccountName, Ingredient, Paginated, StockInItem, StockInRecord } from "@/lib/types";
 
 interface EditLine {
   ingredient: number | null;
@@ -134,19 +136,16 @@ export default function StockInPage() {
   const outlet = user?.outlet ?? 1;
   const opDate = workDate || today();
   const fileRef    = useRef<HTMLInputElement>(null);
-  const xlsRef     = useRef<HTMLInputElement>(null);
-  const xlsImgRef  = useRef<HTMLInputElement>(null);
   const aliasedRef = useRef<Set<string>>(new Set());
 
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccountName[]>([]);
   const [records, setRecords] = useState<StockInRecord[]>([]);
   const [draft, setDraft] = useState<StockInRecord | null>(null);
   const [lines, setLines] = useState<EditLine[]>([]);
+  const [accountId, setAccountId] = useState("");
   const [busy, setBusy] = useState<string>("");
   const [msg, setMsg] = useState("");
-  const [invoiceNo, setInvoiceNo] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState("");
-  const [xlsImgFile, setXlsImgFile] = useState<File | null>(null);
 
   const ingById = useMemo(() => {
     const m = new Map<number, Ingredient>();
@@ -177,12 +176,16 @@ export default function StockInPage() {
   }
 
   async function refresh() {
-    const [ing, r] = await Promise.all([
+    const [ing, r, acc] = await Promise.all([
       api<Paginated<Ingredient>>("/ingredients/?active=true"),
       api<Paginated<StockInRecord>>(`/stock-in/?outlet=${outlet}`),
+      api<Paginated<FinancialAccountName>>("/financial-accounts/"),
     ]);
     setIngredients(ing.results);
     setRecords(r.results);
+    const activeAccounts = acc.results.filter((a) => a.is_active);
+    setAccounts(activeAccounts);
+    if (!accountId && activeAccounts[0]) setAccountId(String(activeAccounts[0].id));
     return r.results;
   }
   useEffect(() => {
@@ -255,48 +258,6 @@ export default function StockInPage() {
       );
     } finally {
       setBusy("");
-    }
-  }
-
-  async function downloadTemplate() {
-    setMsg("");
-    try {
-      await apiDownload("/stock-in/sample-excel/", "stock_in_template.xlsx");
-    } catch {
-      setMsg("Could not download template.");
-    }
-  }
-
-  async function onXlsChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !draft) return;
-    setBusy("import");
-    setMsg("");
-    try {
-      const form = new FormData();
-      form.append("excel_file", file);
-      if (invoiceNo.trim())   form.append("invoice_number", invoiceNo.trim());
-      if (invoiceDate.trim()) form.append("stock_in_date",  invoiceDate.trim());
-      if (xlsImgFile)         form.append("slip_image",     xlsImgFile);
-      const rec = await api<StockInRecord & { imported_count: number; unresolved_names: string[] }>(
-        `/stock-in/${draft.id}/import-excel/`,
-        { method: "POST", body: form }
-      );
-      setDraft(rec);
-      setLines(toEditLines(rec.items));
-      const unres = rec.unresolved_names.length;
-      setMsg(
-        rec.imported_count > 0
-          ? `Imported ${rec.imported_count} line(s)${unres ? ` · ${unres} unrecognized — match below` : ""}.`
-          : "No lines found in the file."
-      );
-    } catch {
-      setMsg("Import failed — check the file uses the template format.");
-    } finally {
-      setBusy("");
-      if (xlsRef.current)    xlsRef.current.value = "";
-      if (xlsImgRef.current) xlsImgRef.current.value = "";
-      setXlsImgFile(null);
     }
   }
 
@@ -394,7 +355,12 @@ export default function StockInPage() {
       }));
     const rec = await api<StockInRecord>(`/stock-in/${draft.id}/`, {
       method: "PUT",
-      body: JSON.stringify({ outlet, stock_in_date: draft.stock_in_date, items }),
+      body: JSON.stringify({
+        outlet,
+        stock_in_date: draft.stock_in_date,
+        paid_from_account: accountId ? Number(accountId) : null,
+        items,
+      }),
     });
     setDraft(rec);
     setLines(toEditLines(rec.items));
@@ -487,89 +453,15 @@ export default function StockInPage() {
             </div>
           </div>
 
-          {/* — or — */}
-          <div className="relative flex items-center">
-            <div className="flex-1 border-t border-dashed border-[#d8cdb0]" />
-            <span className="mx-2 font-mono text-[10px] uppercase text-ink-soft">or</span>
-            <div className="flex-1 border-t border-dashed border-[#d8cdb0]" />
-          </div>
-
-          {/* Excel import */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="field-label">Import from Excel</span>
-              <button
-                type="button"
-                className="font-mono text-[10px] text-leaf-deep underline"
-                onClick={downloadTemplate}
-              >
-                Download template
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex flex-col gap-1">
-                <label className="font-mono text-[10px] uppercase text-ink-soft">Invoice no.</label>
-                <input
-                  type="text"
-                  className="field-input"
-                  placeholder="e.g. INV-2024-001"
-                  value={invoiceNo}
-                  onChange={(e) => setInvoiceNo(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <label className="font-mono text-[10px] uppercase text-ink-soft">Invoice date</label>
-                <input
-                  type="date"
-                  className="field-input"
-                  value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
-                />
-              </div>
-            </div>
-            {/* Optional invoice image alongside the Excel file */}
-            <div className="flex flex-col gap-1">
-              <label className="font-mono text-[10px] uppercase text-ink-soft">
-                Invoice image <span className="normal-case text-ink-soft/60">(optional)</span>
-              </label>
-              <input
-                ref={xlsImgRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => setXlsImgFile(e.target.files?.[0] ?? null)}
-              />
-              <button
-                type="button"
-                className="btn btn-ghost !py-1.5 text-left font-mono text-[11px]"
-                onClick={() => xlsImgRef.current?.click()}
-              >
-                {xlsImgFile ? `📎 ${xlsImgFile.name}` : "+ Attach invoice image"}
-              </button>
-              {xlsImgFile && (
-                <button
-                  type="button"
-                  className="self-start font-mono text-[10px] text-chili underline"
-                  onClick={() => { setXlsImgFile(null); if (xlsImgRef.current) xlsImgRef.current.value = ""; }}
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-            <input
-              ref={xlsRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={onXlsChosen}
+          {/* Payment account */}
+          <div className="flex flex-col gap-1">
+            <span className="field-label">Paid from account</span>
+            <AccountPicker
+              accounts={accounts}
+              value={accountId}
+              onChange={setAccountId}
+              placeholder="— not specified —"
             />
-            <button
-              className="btn btn-ghost"
-              disabled={busy === "import"}
-              onClick={() => xlsRef.current?.click()}
-            >
-              {busy === "import" ? "Importing…" : "Import Excel file"}
-            </button>
           </div>
 
           {/* Editable ingredient lines */}
@@ -592,33 +484,20 @@ export default function StockInPage() {
                   {unrecognized ? (
                     <div className="mb-1.5">
                       <span className="font-mono text-[10px] uppercase text-chili">Unrecognized — match it</span>
-                      <select
-                        className="field-input mt-1"
-                        value=""
-                        onChange={(e) => setLineIngredient(i, Number(e.target.value))}
-                      >
-                        <option value="" disabled>
-                          Choose ingredient…
-                        </option>
-                        {ingredients.map((ing) => (
-                          <option key={ing.id} value={ing.id}>
-                            {ing.name}
-                          </option>
-                        ))}
-                      </select>
+                      <IngredientPicker
+                        ingredients={ingredients}
+                        value={null}
+                        onChange={(id) => setLineIngredient(i, id)}
+                        placeholder="Choose ingredient…"
+                        className="mt-1"
+                      />
                     </div>
                   ) : (
-                    <select
-                      className="field-input !px-1.5 !py-1"
-                      value={l.ingredient ?? ""}
-                      onChange={(e) => setLineIngredient(i, Number(e.target.value))}
-                    >
-                      {ingredients.map((ing) => (
-                        <option key={ing.id} value={ing.id}>
-                          {ing.name}
-                        </option>
-                      ))}
-                    </select>
+                    <IngredientPicker
+                      ingredients={ingredients}
+                      value={l.ingredient}
+                      onChange={(id) => setLineIngredient(i, id)}
+                    />
                   )}
 
                   <div className="mt-1.5 flex items-center gap-1.5">

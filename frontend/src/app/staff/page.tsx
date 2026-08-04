@@ -17,7 +17,7 @@ import type {
 
 export default function StaffHome() {
   const { user } = useAuth();
-  const { day, workDate, setWorkDate } = useOperatingDay();
+  const { day, refreshDay, workDate, setWorkDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
 
   const [outletObj, setOutletObj] = useState<Outlet | null>(null);
@@ -25,6 +25,7 @@ export default function StaffHome() {
   const [stockInStatus, setStockInStatus] = useState("None today");
   const [preparedToday, setPreparedToday] = useState(0);
   const [closingStatus, setClosingStatus] = useState("Not started");
+  const [skipping, setSkipping] = useState(false);
 
   useEffect(() => {
     const t = workDate || today();
@@ -55,20 +56,67 @@ export default function StaffHome() {
   const readyPieces = displayStock.reduce((s, d) => s + d.pieces_available, 0);
   const readyProducts = displayStock.filter((d) => d.pieces_available > 0);
 
+  // A stale day is one where the backend returned a previous (unclosed) day
+  // instead of creating today's day.
+  const isStaleDay = !!day && day.date !== today();
+
   const closingColor =
     closingStatus === "Locked" ? "text-leaf-deep font-semibold" :
     closingStatus === "Submitted" ? "text-leaf" :
     "text-ink-soft";
 
+  async function handleSkipDay() {
+    if (!day) return;
+    setSkipping(true);
+    try {
+      await api(`/operating-days/${day.id}/force-close/`, { method: "POST" });
+      await refreshDay();
+    } finally {
+      setSkipping(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="font-display text-xl font-bold">{outletObj?.name ?? "outlet"}</h1>
-        <p className="text-xs text-ink-soft">{shortDate(workDate || today())}</p>
+        <p className="text-xs text-ink-soft">{shortDate(day?.date || workDate || today())}</p>
       </div>
 
-      {/* Gated start-of-day wizard */}
-      {status !== "IN_PROGRESS" && status !== "CLOSED" && (
+      {/* Stale-day warning — shown when a previous day is blocking today */}
+      {isStaleDay && (
+        <div className="rounded border border-chili/50 bg-chili/10 px-4 py-3 flex flex-col gap-2">
+          <p className="font-mono text-xs font-semibold text-chili">
+            Day of {shortDate(day!.date)} is not closed
+          </p>
+          {status === "NOT_STARTED" || status === "STOCK_CONFIRMED" ? (
+            <>
+              <p className="font-mono text-[11px] text-ink-soft">
+                This day was not fully started. Skip it to begin today.
+              </p>
+              <button
+                className="btn btn-primary self-start !py-1.5 !px-4 !text-xs"
+                disabled={skipping}
+                onClick={handleSkipDay}
+              >
+                {skipping ? "Skipping…" : "Skip this day"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="font-mono text-[11px] text-ink-soft">
+                Complete and submit the daily closing to start today.
+              </p>
+              <Link href="/staff/closing" className="btn btn-primary self-start !py-1.5 !px-4 !text-xs text-center">
+                Go to closing
+              </Link>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Gated start-of-day wizard — only when not blocked by a stale day */}
+      {!isStaleDay && status !== "IN_PROGRESS" && status !== "CLOSED" && (
         <div className="flex flex-col gap-3">
           {status === "NOT_STARTED" && (
             <>
@@ -208,6 +256,10 @@ export default function StaffHome() {
             <Link href="/staff/expense" className="tile">
               <span className="n">+</span>
               <span className="l">Add expense</span>
+            </Link>
+            <Link href="/staff/other-income" className="tile">
+              <span className="n">+</span>
+              <span className="l">Other income</span>
             </Link>
           </div>
         </>

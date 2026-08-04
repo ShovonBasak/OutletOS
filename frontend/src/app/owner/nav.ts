@@ -33,7 +33,9 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Manage",
     items: [
+      { href: "/owner/accounts", label: "Accounts" },
       { href: "/owner/expenses", label: "Expenses" },
+      { href: "/owner/other-income", label: "Other income" },
       { href: "/owner/products", label: "Products & recipes" },
       { href: "/owner/team", label: "Team & outlets" },
       { href: "/owner/settings", label: "Settings & promotions" },
@@ -90,7 +92,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   },
   {
     tab: "/owner/more",
-    prefixes: ["/owner/more", "/owner/expenses", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
+    prefixes: ["/owner/more", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
   },
 ];
 

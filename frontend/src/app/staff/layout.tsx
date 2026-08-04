@@ -71,7 +71,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     <OperatingDayContext.Provider value={{ day, refreshDay, workDate, setWorkDate }}>
       <div className="mx-auto flex min-h-screen w-full max-w-[420px] flex-col bg-paper shadow-xl">
         <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper">
-          <Brand />
+          <Brand name={user?.outlet_name} />
           <button
             onClick={logout}
             className="rounded-full border border-white/20 px-2.5 py-1 font-mono text-[10px] text-white/70"

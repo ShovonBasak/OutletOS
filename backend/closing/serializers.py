@@ -46,9 +46,13 @@ class ChannelDiscountSerializer(serializers.ModelSerializer):
 
 
 class PaymentEntrySerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source="account.name", read_only=True)
+    account_type = serializers.CharField(source="account.account_type", read_only=True)
+    is_primary_cash = serializers.BooleanField(source="account.is_primary_cash", read_only=True)
+
     class Meta:
         model = PaymentEntry
-        fields = ["id", "method", "amount"]
+        fields = ["id", "account", "account_name", "account_type", "is_primary_cash", "amount"]
 
 
 class DailyClosingSerializer(serializers.ModelSerializer):

@@ -11,8 +11,53 @@ import { ProductListFilter } from "@/components/ProductListFilter";
 import type { DailyClosing, DisplayStock, Paginated, Product } from "@/lib/types";
 
 interface Row {
-  wastage_pieces: string;
-  remains_pieces: string;
+  wastage: number;
+  remains: number;
+}
+
+function Stepper({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="w-16 font-mono text-[11px] uppercase tracking-wide text-ink-soft">
+        {label}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded border border-[#d8cdb0] bg-paper font-mono text-base text-ink active:bg-paper-dim disabled:opacity-40"
+          onClick={() => onChange(Math.max(0, value - 1))}
+          disabled={value <= 0}
+        >
+          −
+        </button>
+        <input
+          className="field-input h-9 !w-16 !px-0 text-center font-mono text-sm font-semibold"
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            if (!isNaN(n) && n >= 0) onChange(n);
+            else if (e.target.value === "") onChange(0);
+          }}
+        />
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded border border-[#d8cdb0] bg-paper font-mono text-base text-ink active:bg-paper-dim"
+          onClick={() => onChange(value + 1)}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function CountScreen() {
@@ -25,6 +70,7 @@ export default function CountScreen() {
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [displayStock, setDisplayStock] = useState<Record<number, number>>({});
   const [rows, setRows] = useState<Record<number, Row>>({});
+  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -41,43 +87,38 @@ export default function CountScreen() {
       setDisplayStock(dsMap);
 
       const countedIds = new Set(c.stock_counts.map((s) => s.product));
-      // Only show products that were prepared today or already have a count entry.
       const prepared = p.results.filter(
         (prod) => (dsMap[prod.id] ?? 0) > 0 || countedIds.has(prod.id)
       );
       setProducts(prepared);
+      setSavedIds(new Set(c.stock_counts.map((s) => s.product)));
 
       const seed: Record<number, Row> = {};
       for (const prod of prepared) {
         const existing = c.stock_counts.find((s) => s.product === prod.id);
         seed[prod.id] = {
-          wastage_pieces: existing ? String(existing.wastage_pieces) : "0",
-          remains_pieces: existing ? String(existing.remains_pieces) : "0",
+          wastage: existing ? existing.wastage_pieces : 0,
+          remains: existing ? existing.remains_pieces : 0,
         };
       }
       setRows(seed);
     })();
   }, [outlet, opDate]);
 
-  function set(pid: number, key: keyof Row, val: string) {
+  function setField(pid: number, key: keyof Row, val: number) {
     setRows((r) => ({ ...r, [pid]: { ...r[pid], [key]: val } }));
   }
 
-  const isDone = (p: Product) => {
-    const r = rows[p.id];
-    return !!r && r.remains_pieces !== "";
-  };
+  const isDone = (p: Product) => savedIds.has(p.id);
 
   async function save() {
     if (!closing) return;
     setBusy(true);
-    const items = products
-      .filter(isDone)
-      .map((p) => ({
-        product: p.id,
-        wastage_pieces: Number(rows[p.id].wastage_pieces || 0),
-        remains_pieces: Number(rows[p.id].remains_pieces || 0),
-      }));
+    const items = products.map((p) => ({
+      product: p.id,
+      wastage_pieces: rows[p.id]?.wastage ?? 0,
+      remains_pieces: rows[p.id]?.remains ?? 0,
+    }));
     try {
       await api(`/daily-closings/${closing.id}/stock-count/`, {
         method: "POST",
@@ -89,62 +130,95 @@ export default function CountScreen() {
     }
   }
 
+  const totalWalkin = products.reduce((sum, p) => {
+    const available = displayStock[p.id] ?? 0;
+    const r = rows[p.id] ?? { wastage: 0, remains: 0 };
+    const sold = available - r.wastage - r.remains;
+    return sum + Math.max(0, sold);
+  }, 0);
+
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="font-display text-xl font-bold">Count remains & wastage</h1>
-        <p className="text-xs text-ink-soft">Step 1 · enter wastage and remains for each item</p>
+        <p className="text-xs text-ink-soft">Enter wastage and remaining pieces for each item</p>
       </div>
 
-      <div className="rounded border border-leaf/40 bg-leaf/10 px-3 py-2 text-xs text-ink-soft">
-        <p><span className="font-semibold">Available</span> is filled by the system from today&apos;s prep. You only count:</p>
-        <p className="mt-0.5"><span className="font-semibold">Waste</span> — pieces being binned now &nbsp;·&nbsp; <span className="font-semibold">Remains</span> — pieces left over (counter / shelf)</p>
-      </div>
-
-      <div className="grid grid-cols-[1fr_40px_44px_44px] gap-1 px-1 font-mono text-[9px] uppercase tracking-wide text-ink-soft">
-        <span>Product</span>
-        <span className="text-center">Avail</span>
-        <span className="text-center">Waste</span>
-        <span className="text-center">Remain</span>
+      {/* Summary strip */}
+      <div className="flex gap-2">
+        <div className="ticket-chip flex-1 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Products</span>
+          <span className="font-mono text-lg font-bold text-ink">{products.length}</span>
+        </div>
+        <div className="ticket-chip flex-1 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Walk-in sold</span>
+          <span className="font-mono text-lg font-bold text-leaf-deep">{totalWalkin}</span>
+        </div>
+        <div className="ticket-chip flex-1 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Counted</span>
+          <span className="font-mono text-lg font-bold text-gold-deep">{savedIds.size}/{products.length}</span>
+        </div>
       </div>
 
       <ProductListFilter
         products={products}
         isDone={isDone}
-        doneLabel={(d, t) => `${d}/${t} counted`}
+        doneLabel={(d, t) => `${d}/${t} saved`}
         renderRow={(p) => {
-          const r = rows[p.id] ?? { wastage_pieces: "0", remains_pieces: "0" };
+          const r = rows[p.id] ?? { wastage: 0, remains: 0 };
           const available = displayStock[p.id] ?? 0;
-          const waste = Number(r.wastage_pieces || 0);
-          const remains = Number(r.remains_pieces || 0);
-          const impliedSold = available - waste - remains;
-          const flagged = r.remains_pieces !== "" && impliedSold < 0;
+          const impliedSold = available - r.wastage - r.remains;
+          const flagged = impliedSold < 0;
+
           return (
-            <div className="flex flex-col gap-0.5">
-              <div className="grid grid-cols-[1fr_40px_44px_44px] items-center gap-1">
-                <span className="font-mono text-xs">{p.name}</span>
-                {/* Available — system value, read-only */}
-                <span className="text-center font-mono text-xs text-ink-soft">{available}</span>
-                <input
-                  className="field-input !px-1 !py-1 text-center"
-                  inputMode="numeric"
-                  value={r.wastage_pieces}
-                  onChange={(e) => set(p.id, "wastage_pieces", e.target.value)}
-                />
-                <input
-                  className={`field-input !px-1 !py-1 text-center ${flagged ? "border-chili" : ""}`}
-                  inputMode="numeric"
-                  value={r.remains_pieces}
-                  onChange={(e) => set(p.id, "remains_pieces", e.target.value)}
-                />
+            <div className={`ticket overflow-hidden !p-0 ${flagged ? "border-chili/60" : ""}`}>
+              {/* Card header */}
+              <div className={`flex items-center justify-between px-3 py-2.5 ${flagged ? "bg-chili/5" : "bg-[#f5f0e8]"}`}>
+                <span className="font-display text-sm font-bold text-ink leading-tight">
+                  {p.name}
+                </span>
+                <span className="ml-2 shrink-0 rounded-full bg-paper px-2.5 py-0.5 font-mono text-[11px] text-ink-soft border border-[#d8cdb0]">
+                  Avail&nbsp;<span className="font-bold text-ink">{available}</span>
+                </span>
               </div>
-              {r.remains_pieces !== "" && (
-                <p className={`pl-1 font-mono text-[10px] ${flagged ? "text-chili" : "text-ink-soft/60"}`}>
-                  {flagged
-                    ? `⚠ waste + remains (${waste + remains}) exceeds available (${available})`
-                    : `walk-in sold ≈ ${impliedSold}`}
-                </p>
-              )}
+
+              {/* Card body */}
+              <div className="flex items-stretch gap-0 px-3 py-3">
+                {/* Left: steppers */}
+                <div className="flex flex-1 flex-col gap-2.5">
+                  <Stepper
+                    label="Wastage"
+                    value={r.wastage}
+                    onChange={(v) => setField(p.id, "wastage", v)}
+                  />
+                  <Stepper
+                    label="Remains"
+                    value={r.remains}
+                    onChange={(v) => setField(p.id, "remains", v)}
+                  />
+                </div>
+
+                {/* Right: walk-in auto count */}
+                <div className="ml-3 flex w-20 shrink-0 flex-col items-center justify-center border-l border-dashed border-[#d8cdb0] pl-3">
+                  <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">
+                    Walk-in
+                  </span>
+                  <span
+                    className={`font-mono text-3xl font-bold leading-tight ${
+                      flagged ? "text-chili" : "text-leaf-deep"
+                    }`}
+                  >
+                    {flagged ? "!" : impliedSold}
+                  </span>
+                  {flagged ? (
+                    <span className="mt-0.5 text-center font-mono text-[9px] text-chili">
+                      over by {Math.abs(impliedSold)}
+                    </span>
+                  ) : (
+                    <span className="mt-0.5 font-mono text-[9px] text-ink-soft/50">sold</span>
+                  )}
+                </div>
+              </div>
             </div>
           );
         }}

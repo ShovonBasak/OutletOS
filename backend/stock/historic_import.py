@@ -103,12 +103,14 @@ def import_stock_in_slip(
     Each item dict expects:
       ingredient_id (int|None), raw_text (str), quantity (str|float),
       unit (PACK|PIECE), pack_definition_id (int|None),
+      sku_code (str|None), mrp (str|float|None),
       unit_price (str|float|None), rate (str|float|None),
-      total_amount (str|float|None), sd_rate (str|float|None),
-      sd_amount (str|float|None), vat_rate (str|float|None),
-      vat_amount (str|float|None), line_total (str|float|None)
+      total_amount (str|float|None), discount (str|float|None),
+      sd_rate (str|float|None), sd_amount (str|float|None),
+      vat_rate (str|float|None), vat_amount (str|float|None),
+      line_total (str|float|None)
 
-    slip_totals (optional): {"subtotal", "vat_total", "grand_total"} — stored on the record.
+    slip_totals (optional): {"subtotal", "discount_total", "vat_total", "grand_total"} — stored on the record.
 
     Returns (record, warnings) where warnings lists unresolved lines.
     """
@@ -123,6 +125,7 @@ def import_stock_in_slip(
         reviewed_at=timezone.now(),
         notes=f"Historic import via admin on {timezone.localdate()}",
         slip_subtotal=_decimal_or_none(totals.get("subtotal")),
+        slip_discount_total=_decimal_or_none(totals.get("discount_total")),
         slip_vat_total=_decimal_or_none(totals.get("vat_total")),
         slip_grand_total=_decimal_or_none(totals.get("grand_total")),
     )
@@ -137,14 +140,21 @@ def import_stock_in_slip(
         unit     = item.get("unit", UnitCaptured.PACK)
         pack_id  = item.get("pack_definition_id") or None
 
+        sku_code     = item.get("sku_code") or ""
+        mrp          = _decimal_or_none(item.get("mrp"))
         unit_price   = _decimal_or_none(item.get("unit_price"))
         rate         = _decimal_or_none(item.get("rate"))
         total_amount = _decimal_or_none(item.get("total_amount"))
+        discount     = _decimal_or_none(item.get("discount"))
         sd_rate      = _decimal_or_none(item.get("sd_rate"))
         sd_amount    = _decimal_or_none(item.get("sd_amount"))
         vat_rate     = _decimal_or_none(item.get("vat_rate"))
         vat_amount   = _decimal_or_none(item.get("vat_amount"))
         line_total   = _decimal_or_none(item.get("line_total"))
+
+        # Fallback: derive line_total from rate/qty/discount when not explicit.
+        if line_total is None and rate and qty:
+            line_total = (rate * qty - (discount or Decimal("0"))).quantize(Decimal("0.01"))
 
         si_item = StockInItem.objects.create(
             stock_in_record=record,
@@ -155,9 +165,12 @@ def import_stock_in_slip(
             extracted_quantity=qty,
             confirmed_quantity=qty,
             pack_definition_id=pack_id,
+            sku_code=sku_code,
+            mrp=mrp,
             unit_price=unit_price,
             rate=rate,
             total_amount=total_amount,
+            discount=discount,
             sd_rate=sd_rate,
             sd_amount=sd_amount,
             vat_rate=vat_rate,

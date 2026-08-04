@@ -7,7 +7,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { shortDate, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
-import type { CostCategory, Paginated } from "@/lib/types";
+import AccountSelect from "@/components/AccountSelect";
+import type { CostCategory, FinancialAccountName, Paginated } from "@/lib/types";
 
 export default function StaffAddExpense() {
   const router = useRouter();
@@ -16,8 +17,10 @@ export default function StaffAddExpense() {
   const outlet = user?.outlet ?? 1;
   const opDate = workDate || today();
   const [categories, setCategories] = useState<CostCategory[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccountName[]>([]);
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +29,11 @@ export default function StaffAddExpense() {
     api<Paginated<CostCategory>>("/cost-categories/").then((d) => {
       setCategories(d.results);
       if (d.results[0]) setCategory(String(d.results[0].id));
+    });
+    api<Paginated<FinancialAccountName>>("/financial-accounts/").then((d) => {
+      // Staff sees names only — backend returns FinancialAccountNameSerializer
+      setAccounts(d.results.filter((a) => a.is_active));
+      if (d.results[0]) setAccountId(String(d.results[0].id));
     });
   }, []);
 
@@ -39,7 +47,14 @@ export default function StaffAddExpense() {
     try {
       await api("/expenses/", {
         method: "POST",
-        body: JSON.stringify({ outlet, date: opDate, category: Number(category), amount, description: note }),
+        body: JSON.stringify({
+          outlet,
+          date: opDate,
+          category: Number(category),
+          amount,
+          paid_from_account: accountId ? Number(accountId) : null,
+          description: note,
+        }),
       });
       router.push("/staff");
     } catch {
@@ -62,16 +77,32 @@ export default function StaffAddExpense() {
         <span className="field-label">Category</span>
         <select className="field-input" value={category} onChange={(e) => setCategory(e.target.value)}>
           {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
+            <option key={c.id} value={c.id}>{c.name}</option>
           ))}
         </select>
       </label>
+
       <label className="field">
         <span className="field-label">Amount (৳)</span>
-        <input className="field-input" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input
+          className="field-input"
+          type="number"
+          min="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
       </label>
+
+      <label className="field">
+        <span className="field-label">Paid from</span>
+        <AccountSelect
+          accounts={accounts}
+          value={accountId}
+          onChange={setAccountId}
+          placeholder=""
+        />
+      </label>
+
       <label className="field">
         <span className="field-label">Note</span>
         <input className="field-input" value={note} onChange={(e) => setNote(e.target.value)} />

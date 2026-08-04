@@ -25,11 +25,17 @@ export default function SettingsPage() {
   const [offers, setOffers] = useState<OrderLevelOffer[]>([]);
   const [categories, setCategories] = useState<CostCategory[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [outletDraft, setOutletDraft] = useState<{ name: string; address: string } | null>(null);
+  const [outletSaving, setOutletSaving] = useState(false);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [flagSaving, setFlagSaving] = useState(false);
 
   useEffect(() => {
-    api<Paginated<Outlet>>("/outlets/").then((d) => setOutlet(d.results[0] ?? null));
+    api<Paginated<Outlet>>("/outlets/").then((d) => {
+      const o = d.results[0] ?? null;
+      setOutlet(o);
+      if (o) setOutletDraft({ name: o.name, address: o.address });
+    });
     api<Paginated<SalesChannel>>("/sales-channels/").then((d) => setChannels(d.results));
     api<Paginated<ChannelPrice>>("/channel-prices/").then((d) => setPrices(d.results)).catch(() => {});
     api<Paginated<ChannelPromotion>>("/channel-promotions/").then((d) => setPromos(d.results)).catch(() => {});
@@ -37,6 +43,21 @@ export default function SettingsPage() {
     api<Paginated<CostCategory>>("/cost-categories/").then((d) => setCategories(d.results)).catch(() => {});
     api<Paginated<Product>>("/products/").then((d) => setProducts(d.results)).catch(() => {});
   }, []);
+
+  async function saveOutlet() {
+    if (!outlet || !outletDraft) return;
+    setOutletSaving(true);
+    try {
+      const updated = await api<Outlet>(`/outlets/${outlet.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: outletDraft.name, address: outletDraft.address }),
+      });
+      setOutlet(updated);
+      setOutletDraft({ name: updated.name, address: updated.address });
+    } finally {
+      setOutletSaving(false);
+    }
+  }
 
   async function toggleFlag(field: keyof Outlet, value: boolean) {
     if (!outlet) return;
@@ -73,6 +94,40 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Outlet info */}
+      <section className="flex flex-col gap-3">
+        <h2 className="sec">Outlet</h2>
+        {outletDraft ? (
+          <div className="flex flex-col gap-2">
+            <label className="field">
+              <span className="field-label">Name</span>
+              <input
+                className="field-input"
+                value={outletDraft.name}
+                onChange={(e) => setOutletDraft((d) => d && { ...d, name: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Address</span>
+              <input
+                className="field-input"
+                value={outletDraft.address}
+                onChange={(e) => setOutletDraft((d) => d && { ...d, address: e.target.value })}
+              />
+            </label>
+            <button
+              className="btn btn-primary w-28 self-start"
+              disabled={outletSaving || !outletDraft.name.trim()}
+              onClick={saveOutlet}
+            >
+              {outletSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        ) : (
+          <p className="font-mono text-xs text-ink-soft">Loading…</p>
+        )}
+      </section>
+
       {/* Staff controls */}
       <section className="flex flex-col gap-3">
         <h2 className="sec">Staff controls</h2>

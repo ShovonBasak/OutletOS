@@ -5,14 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { today } from "@/lib/format";
+import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Product } from "@/lib/types";
-
-const CATEGORIES = ["Sandwich", "Fried chicken", "Sides", "Drinks", "Sauces", "Other"];
 
 export default function AddProductPage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [category, setCategory] = useState<string>(PRODUCT_CATEGORIES[0]);
   const [price, setPrice] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [prepared, setPrepared] = useState(true);
@@ -62,7 +61,7 @@ export default function AddProductPage() {
         <label className="field">
           <span className="field-label">Category</span>
           <select className="field-input" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map((c) => (
+            {PRODUCT_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>

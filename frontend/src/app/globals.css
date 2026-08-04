@@ -33,6 +33,9 @@ body {
   .ticket-total {
     @apply mt-1 flex justify-between border-t border-ink pt-2 font-mono text-sm font-semibold;
   }
+  .ticket-chip {
+    @apply flex flex-col gap-0.5 rounded border border-[#d8cdb0] bg-paper px-3 py-2;
+  }
 
   /* Rotated ink-stamp status badges. */
   .stamp {

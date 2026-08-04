@@ -62,7 +62,7 @@ class IngredientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ingredient
         fields = [
-            "id", "name", "base_unit", "tracking_mode", "is_active",
+            "id", "name", "base_unit", "tracking_mode", "group", "is_active",
             "active_pack", "aliases",
         ]
 

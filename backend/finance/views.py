@@ -1,0 +1,190 @@
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from accounts.permissions import IsOwner, IsOwnerOrReadOnly
+from .models import (
+    FinancialAccount, AccountTransaction, AccountTransfer,
+    CapitalTransaction, AccountBalanceCheck,
+)
+from .serializers import (
+    FinancialAccountSerializer, FinancialAccountNameSerializer,
+    AccountTransactionSerializer, AccountTransferSerializer,
+    CapitalTransactionSerializer, AccountBalanceCheckSerializer,
+)
+
+
+class FinancialAccountViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.user.is_owner:
+            return FinancialAccountSerializer
+        return FinancialAccountNameSerializer
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated()]
+        return [IsOwner()]
+
+    def get_queryset(self):
+        qs = FinancialAccount.objects.all()
+        # Detail actions (retrieve/update/destroy) must see all accounts so that
+        # inactive accounts can be fetched and reactivated — only filter on list.
+        if self.action != "list":
+            return qs
+        if not self.request.user.is_owner:
+            return qs.filter(is_active=True)
+        if self.request.query_params.get("is_active") != "all":
+            return qs.filter(is_active=True)
+        return qs
+
+    def partial_update(self, request, *args, **kwargs):
+        # Enforce single primary-cash account: unset all others before saving.
+        if request.data.get("is_primary_cash"):
+            FinancialAccount.objects.exclude(pk=kwargs["pk"]).update(is_primary_cash=False)
+        return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], permission_classes=[IsOwner])
+    def summary(self, request):
+        """All active accounts with current balances — owner dashboard."""
+        accounts = FinancialAccount.objects.filter(is_active=True)
+        data = FinancialAccountSerializer(accounts, many=True).data
+        return Response(data)
+
+
+class AccountTransactionViewSet(viewsets.ModelViewSet):
+    """
+    Read-only by default; manual ADJUSTMENT entries can be created by the owner.
+    Expense/transfer/capital actions auto-create their transactions elsewhere.
+    """
+    queryset = AccountTransaction.objects.select_related("account", "entered_by")
+    serializer_class = AccountTransactionSerializer
+    permission_classes = [IsOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        p = self.request.query_params
+        if p.get("account"):
+            qs = qs.filter(account_id=p["account"])
+        if p.get("date_from"):
+            qs = qs.filter(date__gte=p["date_from"])
+        if p.get("date_to"):
+            qs = qs.filter(date__lte=p["date_to"])
+        if p.get("transaction_type"):
+            qs = qs.filter(transaction_type=p["transaction_type"])
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(entered_by=self.request.user, source_type="MANUAL")
+
+
+class AccountTransferViewSet(viewsets.ModelViewSet):
+    queryset = AccountTransfer.objects.select_related("from_account", "to_account", "entered_by")
+    serializer_class = AccountTransferSerializer
+    permission_classes = [IsOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        p = self.request.query_params
+        if p.get("date_from"):
+            qs = qs.filter(date__gte=p["date_from"])
+        if p.get("date_to"):
+            qs = qs.filter(date__lte=p["date_to"])
+        return qs
+
+    def perform_create(self, serializer):
+        transfer = serializer.save(entered_by=self.request.user)
+        AccountTransaction.objects.create(
+            account=transfer.from_account,
+            transaction_type="TRANSFER_OUT",
+            amount=-transfer.amount,
+            date=transfer.date,
+            source_type="ACCOUNT_TRANSFER",
+            source_id=transfer.id,
+            entered_by=self.request.user,
+            note=transfer.note or f"Transfer to {transfer.to_account.name}",
+        )
+        AccountTransaction.objects.create(
+            account=transfer.to_account,
+            transaction_type="TRANSFER_IN",
+            amount=transfer.amount,
+            date=transfer.date,
+            source_type="ACCOUNT_TRANSFER",
+            source_id=transfer.id,
+            entered_by=self.request.user,
+            note=transfer.note or f"Transfer from {transfer.from_account.name}",
+        )
+
+    def perform_destroy(self, instance):
+        AccountTransaction.objects.filter(
+            source_type="ACCOUNT_TRANSFER", source_id=instance.id
+        ).delete()
+        instance.delete()
+
+
+class CapitalTransactionViewSet(viewsets.ModelViewSet):
+    queryset = CapitalTransaction.objects.select_related("account", "entered_by")
+    serializer_class = CapitalTransactionSerializer
+    permission_classes = [IsOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        p = self.request.query_params
+        if p.get("date_from"):
+            qs = qs.filter(date__gte=p["date_from"])
+        if p.get("date_to"):
+            qs = qs.filter(date__lte=p["date_to"])
+        return qs
+
+    def perform_create(self, serializer):
+        cap = serializer.save(entered_by=self.request.user)
+        signed_amount = cap.amount if cap.direction == "INJECTION" else -cap.amount
+        txn_type = "CAPITAL_INJECTION" if cap.direction == "INJECTION" else "OWNER_WITHDRAWAL"
+        AccountTransaction.objects.create(
+            account=cap.account,
+            transaction_type=txn_type,
+            amount=signed_amount,
+            date=cap.date,
+            source_type="CAPITAL_TRANSACTION",
+            source_id=cap.id,
+            entered_by=self.request.user,
+            note=cap.note or cap.get_direction_display(),
+        )
+
+    def perform_destroy(self, instance):
+        AccountTransaction.objects.filter(
+            source_type="CAPITAL_TRANSACTION", source_id=instance.id
+        ).delete()
+        instance.delete()
+
+
+class AccountBalanceCheckViewSet(viewsets.ModelViewSet):
+    queryset = AccountBalanceCheck.objects.select_related("account", "checked_by")
+    serializer_class = AccountBalanceCheckSerializer
+    permission_classes = [IsOwner]
+
+    def perform_create(self, serializer):
+        account = serializer.validated_data["account"]
+        system_balance = account.current_balance
+        actual_balance = serializer.validated_data["actual_balance"]
+        discrepancy = actual_balance - system_balance
+
+        check = serializer.save(
+            checked_by=self.request.user,
+            system_balance=system_balance,
+            discrepancy=discrepancy,
+        )
+
+        if discrepancy != 0:
+            AccountTransaction.objects.create(
+                account=account,
+                transaction_type="ADJUSTMENT",
+                amount=discrepancy,
+                date=check.checked_at.date(),
+                source_type="ACCOUNT_BALANCE_CHECK",
+                source_id=check.id,
+                entered_by=self.request.user,
+                note=f"Balance reconciliation: {check.get_reason_display() or 'Adjustment'}",
+            )

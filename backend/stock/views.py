@@ -320,12 +320,24 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
         Also price-versions PackDefinition for any line that carries price data
         from the slip so that future COGS calculations use the current purchase cost.
+        Accepts optional paid_from_account in request body to override the account.
         """
         from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
+        from finance.models import AccountTransaction, FinancialAccount
+        from decimal import Decimal
 
         record = self.get_object()
         if record.status != StockInStatus.PENDING:
             raise ValidationError("Only PENDING records can be approved.")
+
+        # Allow owner to override or set the payment account at approval time.
+        account_id = request.data.get("paid_from_account")
+        if account_id is not None:
+            try:
+                record.paid_from_account = FinancialAccount.objects.get(pk=account_id) if account_id else None
+            except FinancialAccount.DoesNotExist:
+                raise ValidationError("Invalid account.")
+
         for item in record.items.select_related("ingredient", "pack_definition"):
             if not item.ingredient_id:
                 continue
@@ -348,6 +360,28 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         record.reviewed_by = request.user
         record.reviewed_at = timezone.now()
         record.save()
+
+        # Deduct from the payment account if one is set.
+        if record.paid_from_account_id:
+            total = record.slip_grand_total or Decimal(
+                sum(
+                    Decimal(item.line_total or "0")
+                    for item in record.items.all()
+                )
+            )
+            if total > 0:
+                AccountTransaction.objects.create(
+                    account=record.paid_from_account,
+                    transaction_type="SUPPLIER_ORDER_DEDUCTION",
+                    amount=-total,
+                    date=record.stock_in_date,
+                    source_type="STOCK_IN_RECORD",
+                    source_id=record.id,
+                    entered_by=request.user,
+                    note=f"Stock-in {record.invoice_number or f'#{record.id}'} approved",
+                )
+
+        _initialize_direct_stock(record.outlet)
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwner])
@@ -377,16 +411,19 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         ws.title = "Stock In"
 
         headers = [
+            "Product Code",
             "Product / Service Name",
             "Quantity",
             "Unit (PACK/PIECE)",
+            "MRP per Piece (BDT)",
             "Per Unit Rate (BDT)",
             "Total Amount (BDT)",
+            "Discount (BDT)",
             "SD Rate (%)",
             "SD Amount (BDT)",
             "VAT Rate (%)",
             "VAT Amount (BDT)",
-            "Total Value incl. VAT & TAX (BDT)",
+            "Total Value incl. Discount, VAT & TAX (BDT)",
         ]
         header_fill = PatternFill(start_color="7A2420", end_color="7A2420", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True)
@@ -396,17 +433,17 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             cell.fill = header_fill
             cell.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
 
-        # Two example rows so the user can see expected data shapes
+        # Example rows: one food slip line, one beverage challan line
         examples = [
-            ["Chicken Thigh (Raw)", 2, "PACK", 850.00, 1700.00, "", "", 15, 255.00, 1955.00],
-            ["Mayonnaise (Portion)", 100, "PIECE", 5.00, 500.00, "", "", 15, 75.00, 575.00],
+            ["",       "Chicken Thigh (Raw)",      2,   "PACK",  "",  850.00, 1700.00, "",    "", "", 15, 255.00, 1955.00],
+            ["738803", "CCZS PET 250ML 1X24",       1,  "PACK",  20,  432.00,  432.00, 38.90, "", "", "",     "", 393.10],
         ]
         for r, row_data in enumerate(examples, 2):
             for c, val in enumerate(row_data, 1):
                 ws.cell(row=r, column=c, value=val if val != "" else None)
 
         for col, width in enumerate(
-            [38, 12, 18, 22, 22, 14, 18, 14, 18, 38], 1
+            [16, 38, 12, 18, 18, 22, 22, 16, 14, 18, 14, 18, 42], 1
         ):
             ws.column_dimensions[get_column_letter(col)].width = width
         ws.row_dimensions[1].height = 42
@@ -492,20 +529,24 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                     return i
             return None
 
-        col_name      = _find(["product"]) or _find(["service"]) or _find(["name"], ["ingredient", "base"])
-        col_qty       = _find(["quantity"]) or _find(["qty"])
-        col_unit      = _find(["unit"], exclude=["per unit", "vat", "sd", "rate"])
+        col_sku       = _find(["product code"]) or _find(["sku"]) or _find(["পণ্য কোড"])
+        col_name      = _find(["product / service"]) or _find(["product"], ["code", "sku"]) or _find(["service"]) or _find(["name"], ["ingredient", "base"])
+        col_qty       = _find(["quantity"]) or _find(["qty"]) or _find(["পরিমাণ"])
+        col_unit      = _find(["unit"], exclude=["per unit", "vat", "sd", "rate", "mrp"])
+        col_mrp       = _find(["mrp"])
         col_rate      = (
             _find(["per unit rate"]) or _find(["per unit price"]) or
             _find(["unit rate"]) or _find(["unit price"], ["vat", "sd", "total"]) or
-            _find(["rate"], ["vat", "sd", "total", "per unit"])
+            _find(["rate"], ["vat", "sd", "total", "per unit", "mrp"]) or
+            _find(["রেট"])
         )
-        col_total_amt = _find(["total amount"], ["vat", "tax", "incl"])
+        col_total_amt = _find(["total amount"], ["vat", "tax", "incl", "discount"])
+        col_discount  = _find(["discount"]) or _find(["ডিসকাউন্ট"])
         col_sd_rate   = _find(["sd", "rate"])
         col_sd_amt    = _find(["sd", "amount"])
         col_vat_rate  = _find(["vat", "rate"]) or _find(["tax", "rate"])
         col_vat_amt   = _find(["vat", "amount"]) or _find(["tax", "amount"])
-        col_line_total = _find(["total value"]) or _find(["grand total"]) or _find(["total", "vat"])
+        col_line_total = _find(["total value"]) or _find(["total", "discount", "vat"]) or _find(["grand total"]) or _find(["মোট"], ["ডিসকাউন্ট"])
 
         if col_name is None:
             raise ValidationError(
@@ -596,13 +637,20 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 unit_raw and str(unit_raw).strip().upper() == "PIECE"
             ) else UnitCaptured.PACK
 
+            sku_code   = str(_cell(row, col_sku) or "").strip()
+            mrp        = _decimal(_cell(row, col_mrp))
             rate       = _decimal(_cell(row, col_rate))
             total_amt  = _decimal(_cell(row, col_total_amt))
+            discount   = _decimal(_cell(row, col_discount))
             sd_rate    = _decimal(_pct_cell(row, col_sd_rate))
             sd_amt     = _decimal(_cell(row, col_sd_amt))
             vat_rate   = _decimal(_pct_cell(row, col_vat_rate))
             vat_amt    = _decimal(_cell(row, col_vat_amt))
             line_total = _decimal(_cell(row, col_line_total))
+
+            # Fallback: derive line_total from rate/discount when column absent.
+            if line_total is None and rate and qty:
+                line_total = (rate * qty - (discount or Decimal("0"))).quantize(Decimal("0.01"))
 
             unit_price = None
             if line_total and qty:
@@ -626,9 +674,12 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 extracted_quantity=qty,
                 confirmed_quantity=qty,
                 pack_definition_id=pack_definition_id,
+                sku_code=sku_code,
+                mrp=mrp,
                 unit_price=unit_price,
                 rate=rate,
                 total_amount=total_amt,
+                discount=discount,
                 sd_rate=sd_rate,
                 sd_amount=sd_amt,
                 vat_rate=vat_rate,
@@ -764,6 +815,31 @@ class DisplayStockViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
 
+def _initialize_direct_stock(outlet):
+    """Set DisplayStock for non-prep (beverage) products from current RawStock.
+
+    Called when the operating day moves to IN_PROGRESS and on every stock-in
+    approval, so DisplayStock stays in sync with whatever is physically available.
+    """
+    from catalog.models import Product
+    for product in Product.objects.filter(
+        requires_preparation=False, is_active=True
+    ).prefetch_related("recipes__ingredient"):
+        recipes = list(product.recipes.all())
+        if not recipes:
+            continue
+        cap = None
+        for r in recipes:
+            raw = RawStock.objects.filter(outlet=outlet, ingredient=r.ingredient).first()
+            available = raw.quantity_available if raw else Decimal("0")
+            qty_per = r.quantity_per_unit or Decimal("1")
+            pieces = int(available / qty_per)
+            cap = pieces if cap is None else min(cap, pieces)
+        ds, _ = DisplayStock.objects.get_or_create(outlet=outlet, product=product)
+        ds.pieces_available = cap or 0
+        ds.save(update_fields=["pieces_available"])
+
+
 class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
     """Gates the staff daily flow. Read + custom transitions (start, confirm)."""
 
@@ -791,8 +867,10 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get", "post"])
     def today(self, request):
         """Get (or lazily create) an OperatingDay. Accepts ?date=YYYY-MM-DD;
-        defaults to today when omitted."""
+        defaults to today when omitted. If a previous day is not yet CLOSED,
+        returns it instead of creating a new day (day boundary enforcement)."""
         from datetime import date as dt_date
+        outlet = self._outlet(request)
         on_date = None
         raw_date = request.query_params.get("date")
         if raw_date:
@@ -800,7 +878,27 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
                 on_date = dt_date.fromisoformat(raw_date)
             except ValueError:
                 pass
-        day = get_or_create_today(self._outlet(request), on_date=on_date)
+
+        # Day boundary guard: applies when requesting today (explicit or implicit).
+        # Explicit past dates (backdating for historical entry) bypass the guard.
+        actual_date = timezone.localdate()
+        if on_date is None or on_date == actual_date:
+            latest = OperatingDay.objects.filter(outlet=outlet).order_by("-date").first()
+            if latest and latest.date < actual_date and latest.status != OperatingDayStatus.CLOSED:
+                return Response(self.get_serializer(latest).data)
+
+        day = get_or_create_today(outlet, on_date=on_date)
+        return Response(self.get_serializer(day).data)
+
+    @action(detail=True, methods=["post"], url_path="force-close")
+    def force_close(self, request, pk=None):
+        """Force-close a stuck operating day that was never properly closed
+        (e.g., outlet didn't operate that day). Moves status directly to CLOSED."""
+        day = self.get_object()
+        if day.status == OperatingDayStatus.CLOSED:
+            return Response(self.get_serializer(day).data)
+        day.status = OperatingDayStatus.CLOSED
+        day.save(update_fields=["status"])
         return Response(self.get_serializer(day).data)
 
     @action(detail=True, methods=["post"])
@@ -828,10 +926,13 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
             carried = rs.quantity_available if rs else Decimal("0")
             check = existing.get(ing.id)
             active_pack = ing.active_pack()
+            alias = ing.aliases.filter(is_active=True).first()
             rows.append(
                 {
                     "ingredient": ing.id,
                     "ingredient_name": ing.name,
+                    "ingredient_display_name": alias.alias_text if alias else ing.name,
+                    "ingredient_group": ing.group,
                     "base_unit": ing.base_unit,
                     "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
                     "system_carried_qty": carried,
@@ -924,6 +1025,7 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         day.status = OperatingDayStatus.IN_PROGRESS
         day.carry_forward_confirmed_at = timezone.now()
         day.save()
+        _initialize_direct_stock(day.outlet)
         return Response(self.get_serializer(day).data)
 
 

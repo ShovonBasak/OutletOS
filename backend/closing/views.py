@@ -19,7 +19,6 @@ from .models import (
     DailyClosingStockCount,
     LineSource,
     PaymentEntry,
-    PaymentMethod,
 )
 from .serializers import (
     ChannelSettlementSerializer,
@@ -73,7 +72,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
     def stock_count(self, request, pk=None):
         """Bulk upsert stock counts. Body: {"items": [{product, wastage_pieces,
         remains_pieces}, ...]}. available_pieces is auto-filled from DisplayStock."""
-        from stock.models import DisplayStock
+        from stock.models import DisplayStock, RawStock
         closing = self.get_object()
         self._guard_editable(closing)
         for row in request.data.get("items", []):
@@ -87,6 +86,15 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             obj.wastage_pieces = row.get("wastage_pieces", obj.wastage_pieces)
             obj.remains_pieces = row.get("remains_pieces", obj.remains_pieces)
             obj.save()
+            # For direct-sale products (beverages), sync RawStock to remains.
+            if not product.requires_preparation:
+                remains = Decimal(row.get("remains_pieces", 0))
+                for recipe in product.recipes.select_related("ingredient"):
+                    RawStock.set_to(
+                        closing.outlet,
+                        recipe.ingredient,
+                        remains * recipe.quantity_per_unit,
+                    )
         recompute_closing(closing)
         return self._fresh_response(closing)
 
@@ -137,27 +145,53 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             obj.save()
         return self._fresh_response(closing)
 
-    # ---- Step 4: Payments (bKash/Card typed; cash computed) ----
+    # ---- Step 4: Payments (per-account amounts; primary cash is computed) ----
     @action(detail=True, methods=["post"])
     def payments(self, request, pk=None):
-        """Body: {"bkash": <amt>, "card": <amt>}. Cash is computed and stored."""
+        """Body: {"entries": [{"account_id": N, "amount": X}, ...]}.
+        The primary-cash account is excluded from entries — its amount is the remainder."""
+        from finance.models import FinancialAccount
         closing = self.get_object()
         self._guard_editable(closing)
         recompute_closing(closing)
-        for method, key in ((PaymentMethod.BKASH, "bkash"), (PaymentMethod.CARD, "card")):
-            amount = Decimal(str(request.data.get(key, 0) or 0))
+
+        primary_cash = (
+            FinancialAccount.objects.filter(is_primary_cash=True).first()
+            or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
+        )
+
+        # Rebuild non-cash entries from scratch (handles deletions cleanly).
+        if primary_cash:
+            closing.payments.exclude(account=primary_cash).delete()
+        else:
+            closing.payments.all().delete()
+
+        for entry in request.data.get("entries", []):
+            acc_id = entry.get("account_id")
+            if not acc_id:
+                continue
+            amount = Decimal(str(entry.get("amount", 0) or 0))
+            try:
+                account = FinancialAccount.objects.get(pk=acc_id)
+            except FinancialAccount.DoesNotExist:
+                continue
+            if primary_cash and account.pk == primary_cash.pk:
+                continue  # cash is computed, not manually entered
             obj, _ = PaymentEntry.objects.get_or_create(
-                daily_closing=closing, method=method
+                daily_closing=closing, account=account
             )
             obj.amount = amount
             obj.save()
-        # Re-fetch so computed_cash reflects the just-rebuilt sales lines/payments.
-        closing = self.get_queryset().get(pk=closing.pk)
-        cash_obj, _ = PaymentEntry.objects.get_or_create(
-            daily_closing=closing, method=PaymentMethod.CASH
-        )
-        cash_obj.amount = closing.computed_cash
-        cash_obj.save()
+
+        # Recompute and save primary cash remainder.
+        if primary_cash:
+            closing_fresh = self.get_queryset().get(pk=closing.pk)
+            cash_obj, _ = PaymentEntry.objects.get_or_create(
+                daily_closing=closing_fresh, account=primary_cash
+            )
+            cash_obj.amount = closing_fresh.computed_cash
+            cash_obj.save()
+
         return self._fresh_response(closing)
 
     @action(detail=True, methods=["post"])
@@ -174,6 +208,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             closing.status = ClosingStatus.LOCKED
             self._close_operating_day(closing)
         closing.save()
+        self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwner])
@@ -183,7 +218,28 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         closing.status = ClosingStatus.LOCKED
         closing.save()
         self._close_operating_day(closing)
+        self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
+
+    @staticmethod
+    def _record_account_transactions(closing, user):
+        """Idempotently write SALES_COLLECTION transactions for each payment entry."""
+        from finance.models import AccountTransaction, SourceType, TransactionType
+        AccountTransaction.objects.filter(
+            source_type=SourceType.DAILY_CLOSING,
+            source_id=closing.id,
+        ).delete()
+        for payment in closing.payments.select_related("account").filter(amount__gt=0):
+            AccountTransaction.objects.create(
+                account=payment.account,
+                transaction_type=TransactionType.SALES_COLLECTION,
+                amount=payment.amount,
+                date=closing.closing_date,
+                source_type=SourceType.DAILY_CLOSING,
+                source_id=closing.id,
+                entered_by=user,
+                note=f"Day closing — {closing.closing_date}",
+            )
 
     @staticmethod
     def _close_operating_day(closing):

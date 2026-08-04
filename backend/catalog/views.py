@@ -47,10 +47,19 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrReadOnly]
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(is_active=True)
-        ptype = self.request.query_params.get("product_type")
+        qs = super().get_queryset()
+        p = self.request.query_params
+        # Detail actions must see all products so inactive ones can be reactivated.
+        if self.action != "list":
+            return qs
+        if not (self.request.user.is_owner and p.get("include_inactive") == "1"):
+            qs = qs.filter(is_active=True)
+        ptype = p.get("product_type")
         if ptype:
             qs = qs.filter(product_type=ptype)
+        category = p.get("category")
+        if category:
+            qs = qs.filter(category=category)
         return qs
 
     def get_serializer_context(self):

@@ -87,6 +87,15 @@ class TrackingMode(models.TextChoices):
     ONE_TIME       = "ONE_TIME",       "One-time purchase"
 
 
+class IngredientGroup(models.TextChoices):
+    BEVERAGE = "BEVERAGE", "Beverages"
+    CHICKEN_PIECE = "CHICKEN_PIECE", "Chicken (Main)"
+    SNACK = "SNACK", "Snacks & Balls"
+    BURGER_WRAP = "BURGER_WRAP", "Burgers & Wraps"
+    SUPPLY = "SUPPLY", "Supplies"
+    OTHER = "OTHER", "Other"
+
+
 class Ingredient(models.Model):
     """The canonical, internal name for a raw material — one row per real-world
     thing you buy, regardless of what a supplier calls it. Stock (RawStock) and
@@ -98,6 +107,9 @@ class Ingredient(models.Model):
     base_unit = models.CharField(max_length=30, default="piece")
     tracking_mode = models.CharField(
         max_length=15, choices=TrackingMode.choices, default=TrackingMode.RECIPE_LINKED
+    )
+    group = models.CharField(
+        max_length=20, choices=IngredientGroup.choices, default=IngredientGroup.OTHER
     )
     is_active = models.BooleanField(default=True)
 

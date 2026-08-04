@@ -15,7 +15,7 @@ import {
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
   const { loading } = useRequireRole("OWNER");
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const pathname = usePathname();
 
   // Collapsible accordion: groups start collapsed, the active group auto-opens.
@@ -62,7 +62,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <aside className="sidebar hidden md:flex">
           <div className="sidebrand">
             <span className="inline-block h-3.5 w-3.5 flex-shrink-0 rounded-full bg-red" />
-            <span className="font-display text-[13px] font-bold text-gold">CP FIVE STAR</span>
+            <span className="font-display text-[13px] font-bold text-gold">{user?.outlet_name ?? "CP FIVE STAR"}</span>
           </div>
           <nav className="flex flex-1 flex-col overflow-y-auto">
             {OWNER_NAV.map((g) =>
@@ -114,7 +114,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="desktoptop hidden md:flex">
             <h1>{titleFor(pathname)}</h1>
-            <div className="date">Dhanmondi outlet</div>
+            <div className="date">{user?.outlet_name ?? "Outlet"}</div>
           </div>
           <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-6">{children}</main>
         </div>

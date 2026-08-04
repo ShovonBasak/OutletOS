@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
+import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Paginated, PreparationLog, Product, RawStock, DisplayStock } from "@/lib/types";
 
 /** Max whole pieces that can be prepared given current raw + component stock. */
@@ -82,6 +83,8 @@ export default function PrepPage() {
   const [readyPieces, setReadyPieces] = useState(0);
 
   const [productId, setProductId] = useState<number | "">("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [unit, setUnit] = useState<"PACK" | "PIECE">("PIECE");
   const [packs, setPacks] = useState(1);
   const [pieces, setPieces] = useState(1);
@@ -246,23 +249,30 @@ export default function PrepPage() {
         </div>
       ) : (
         <>
-          <label className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1">
             <span className="field-label">Product</span>
-            <select
-              className="field-input"
-              value={productId}
-              onChange={(e) => setProductId(Number(e.target.value))}
+            <button
+              ref={triggerRef}
+              type="button"
+              className="field-input flex items-center justify-between text-left"
+              onClick={() => setPickerOpen(true)}
             >
-              {products.map((p) => {
-                const max = maxPreparablePieces(p, rawByIngredient, displayByProduct);
-                return (
-                  <option key={p.id} value={p.id}>
-                    {p.name} (max {max} pcs)
-                  </option>
-                );
-              })}
-            </select>
-          </label>
+              <span className={product ? "text-ink" : "text-ink-soft"}>
+                {product ? product.name : "Select a product…"}
+              </span>
+              <span className="font-mono text-[11px] text-ink-soft">▾</span>
+            </button>
+          </div>
+
+          <ProductPickerSheet
+            isOpen={pickerOpen}
+            onClose={() => setPickerOpen(false)}
+            products={products}
+            selectedId={productId}
+            onSelect={(id) => { setProductId(id); setPickerOpen(false); }}
+            maxPieces={(p) => maxPreparablePieces(p, rawByIngredient, displayByProduct)}
+            triggerRef={triggerRef}
+          />
 
           {/* Stock breakdown for selected product */}
           {product && (
@@ -398,6 +408,149 @@ export default function PrepPage() {
       <Link href="/staff/prep/carry-forward" className="btn btn-ghost text-center">
         Carry-forward from yesterday
       </Link>
+    </div>
+  );
+}
+
+type PickerPos = { top: number; left: number; width: number; maxH: number };
+
+function ProductPickerSheet({
+  isOpen,
+  onClose,
+  products,
+  selectedId,
+  onSelect,
+  maxPieces,
+  triggerRef,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  products: Product[];
+  selectedId: number | "";
+  onSelect: (id: number) => void;
+  maxPieces: (p: Product) => number;
+  triggerRef: RefObject<HTMLButtonElement>;
+}) {
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [pos, setPos] = useState<PickerPos | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSearch("");
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const GAP = 4;
+        const MARGIN = 16;
+        const maxViewH = window.innerHeight * 0.7;
+        const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+        const spaceAbove = rect.top - MARGIN;
+        if (spaceBelow >= 160 || spaceBelow >= spaceAbove) {
+          setPos({ top: rect.bottom + GAP, left: rect.left, width: rect.width, maxH: Math.min(spaceBelow, maxViewH) });
+        } else {
+          const maxH = Math.min(spaceAbove, maxViewH);
+          setPos({ top: rect.top - maxH - GAP, left: rect.left, width: rect.width, maxH });
+        }
+      }
+      setTimeout(() => inputRef.current?.focus(), 60);
+    }
+  }, [isOpen, triggerRef]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return q ? products.filter((p) => p.name.toLowerCase().includes(q)) : products;
+  }, [products, search]);
+
+  // Group by category — only show headers if 2+ distinct categories.
+  const groups = useMemo(() => {
+    const map = new Map<string, Product[]>();
+    filtered.forEach((p) => {
+      const cat = p.category || "Other";
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(p);
+    });
+    const order = (cat: string) => {
+      const i = PRODUCT_CATEGORIES.indexOf(cat as never);
+      return i === -1 ? 999 : i;
+    };
+    return [...map.entries()].sort(([a], [b]) => order(a) - order(b));
+  }, [filtered]);
+  const showCategories = groups.length > 1;
+
+  if (!isOpen || !pos) return null;
+
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      {/* light backdrop so tapping outside closes */}
+      <div className="absolute inset-0 bg-ink/20" />
+
+      {/* dropdown panel anchored to trigger */}
+      <div
+        className="absolute flex flex-col overflow-hidden rounded-xl border border-[#d8cdb0] bg-paper shadow-xl"
+        style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* search */}
+        <div className="border-b border-[#d8cdb0] px-3 py-2">
+          <input
+            ref={inputRef}
+            className="field-input w-full"
+            placeholder="Search…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        {/* list */}
+        <div className="overflow-y-auto">
+          {filtered.length === 0 && (
+            <p className="px-4 py-6 text-center font-mono text-xs text-ink-soft">No matches.</p>
+          )}
+          {groups.map(([cat, items]) => (
+            <div key={cat}>
+              {showCategories && (
+                <p className="sticky top-0 bg-paper px-4 py-1.5 font-mono text-[10px] uppercase tracking-wide text-ink-soft">
+                  {cat}
+                </p>
+              )}
+              {items.map((p) => {
+                const max = maxPieces(p);
+                const isSelected = p.id === selectedId;
+                const pillColor =
+                  max <= 3
+                    ? "bg-chili/15 text-chili"
+                    : max <= 9
+                    ? "bg-gold/20 text-gold-deep"
+                    : "bg-leaf/15 text-leaf-deep";
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`flex w-full items-center justify-between border-b border-dotted border-[#d8cdb0] px-4 py-3 text-left transition-colors active:bg-paper-dim ${
+                      isSelected ? "bg-action/10" : ""
+                    }`}
+                    onClick={() => onSelect(p.id)}
+                  >
+                    <span className={`font-mono text-sm ${isSelected ? "font-semibold text-ink" : "text-ink"}`}>
+                      {p.name}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold ${pillColor}`}>
+                        max {max}
+                      </span>
+                      {isSelected && (
+                        <span className="font-mono text-[11px] text-chrome">✓</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          {/* bottom safe area */}
+          <div className="h-4" />
+        </div>
+      </div>
     </div>
   );
 }

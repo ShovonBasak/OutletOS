@@ -63,8 +63,9 @@ class DailyClosing(models.Model):
 
     @property
     def computed_cash(self):
+        """Offline sales minus all non-primary-cash payment entries."""
         typed = sum(
-            (p.amount for p in self.payments.exclude(method=PaymentMethod.CASH)),
+            (p.amount for p in self.payments.filter(account__is_primary_cash=False)),
             Decimal("0"),
         )
         return self.total_offline_sales - typed
@@ -149,23 +150,20 @@ class DailyChannelDiscount(models.Model):
         unique_together = ("daily_closing", "channel")
 
 
-class PaymentMethod(models.TextChoices):
-    CASH = "CASH", "Cash"
-    BKASH = "BKASH", "bKash"
-    CARD = "CARD", "Card"
-
-
 class PaymentEntry(models.Model):
-    """bKash/Card typed in; Cash is system-computed (see DailyClosing.computed_cash)."""
+    """Staff-entered amounts received into each financial account at day-end.
+    The primary-cash account amount is auto-computed as the remainder."""
 
     daily_closing = models.ForeignKey(
         DailyClosing, on_delete=models.CASCADE, related_name="payments"
     )
-    method = models.CharField(max_length=6, choices=PaymentMethod.choices)
+    account = models.ForeignKey(
+        "finance.FinancialAccount", on_delete=models.PROTECT, related_name="daily_payments"
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     class Meta:
-        unique_together = ("daily_closing", "method")
+        unique_together = ("daily_closing", "account")
 
 
 class SettlementStatus(models.TextChoices):

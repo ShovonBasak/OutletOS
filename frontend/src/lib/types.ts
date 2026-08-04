@@ -5,6 +5,7 @@ export interface User {
   name: string;
   role: Role;
   outlet: number | null;
+  outlet_name: string | null;
   phone: string;
   is_active: boolean;
 }
@@ -45,6 +46,7 @@ export interface Ingredient {
   name: string;
   base_unit: string;
   tracking_mode: TrackingMode;
+  group: IngredientGroup;
   is_active: boolean;
   active_pack: PackDefinition | null;
   aliases: SupplierProductAlias[];
@@ -105,10 +107,22 @@ export interface ProductPrice {
   is_active: boolean;
 }
 
+export const PRODUCT_CATEGORIES = [
+  "Fried Chicken",
+  "Snacks",
+  "Light Snacks",
+  "Meals",
+  "Rice & Sides",
+  "Beverages",
+  "Add-on",
+  "Combo",
+] as const;
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
 export interface Product {
   id: number;
   name: string;
-  category: string;
+  category: ProductCategory | string;
   product_type: ProductType;
   requires_preparation: boolean;
   /** Computed from the active ProductPrice — read-only in GET responses. */
@@ -179,6 +193,8 @@ export interface OperatingDay {
 export interface DayStartStockRow {
   ingredient: number;
   ingredient_name: string;
+  ingredient_display_name: string;
+  ingredient_group: IngredientGroup;
   base_unit: string;
   pieces_per_pack: string | null;
   system_carried_qty: number;
@@ -238,6 +254,8 @@ export interface StockInRecord {
   slip_image: string | null;
   notes: string;
   slip_vat_total?: string | null;
+  paid_from_account: number | null;
+  paid_from_account_name: string | null;
   created_at: string;
   items: StockInItem[];
   unresolved_count: number;
@@ -262,10 +280,14 @@ export interface PreparationLog {
   wastage_pieces: number | null;
 }
 
+export type IngredientGroup = "BEVERAGE" | "CHICKEN_PIECE" | "SNACK" | "BURGER_WRAP" | "SUPPLY" | "OTHER";
+
 export interface RawStock {
   id: number;
   ingredient: number;
   ingredient_name: string;
+  ingredient_display_name: string;
+  ingredient_group: IngredientGroup;
   base_unit: string;
   tracking_mode: TrackingMode;
   quantity_available: string;
@@ -277,6 +299,7 @@ export interface DisplayStock {
   id: number;
   product: number;
   product_name: string;
+  product_category: string;
   pieces_available: number;
 }
 
@@ -352,7 +375,10 @@ export interface SalesLine {
 
 export interface PaymentEntry {
   id: number;
-  method: "CASH" | "BKASH" | "CARD";
+  account: number;
+  account_name: string;
+  account_type: string;
+  is_primary_cash: boolean;
   amount: string;
 }
 
@@ -377,6 +403,50 @@ export interface DailyClosing {
   has_flag: boolean;
 }
 
+export interface ProductPerformanceRow {
+  product_id: number;
+  product_name: string;
+  category: string;
+  units_sold: number;
+  gross_revenue: string;
+  net_revenue: string;
+  cogs: string;
+  gross_profit: string;
+  margin_pct: string;
+}
+
+export interface ChannelBreakdownRow {
+  channel_id: number;
+  channel_name: string;
+  units_sold: number;
+  gross_revenue: string;
+  commission: string;
+  discount: string;
+  net_revenue: string;
+}
+
+export interface StockValueRow {
+  ingredient_id: number;
+  ingredient_name: string;
+  display_name: string;
+  group: IngredientGroup;
+  quantity: string;
+  base_unit: string;
+  cost_per_unit: string;
+  value: string;
+}
+
+export interface StockValueReport {
+  total_value: string;
+  rows: StockValueRow[];
+}
+
+export interface DailyTrendRow {
+  date: string;
+  units_sold: number;
+  revenue: string;
+}
+
 export interface Pnl {
   start: string;
   end: string;
@@ -389,6 +459,7 @@ export interface Pnl {
   fixed_costs: string;
   variable_costs: string;
   adhoc_costs: string;
+  other_income: string;
   net_profit: string;
 }
 
@@ -440,6 +511,8 @@ export interface CostCategory {
   cost_type: "FIXED" | "VARIABLE" | "ADHOC";
 }
 
+export type ExpenseSource = "CASH" | "BKASH";
+
 export interface Expense {
   id: number;
   outlet: number;
@@ -448,8 +521,121 @@ export interface Expense {
   category_name: string;
   cost_type: string;
   amount: string;
+  source: ExpenseSource;
+  paid_from_account: number | null;
+  paid_from_account_name: string | null;
   description: string;
   recurring: boolean;
+}
+
+// ---- Financial Accounts ----------------------------------------------------
+
+export type AccountType = "BANK" | "MOBILE_WALLET" | "CASH" | "SUPPLIER_CREDIT";
+
+export interface FinancialAccount {
+  id: number;
+  outlet: number | null;
+  account_type: AccountType;
+  account_type_display: string;
+  name: string;
+  provider: string;
+  opening_balance: string;
+  opening_balance_date: string;
+  is_active: boolean;
+  is_primary_cash: boolean;
+  current_balance: string;
+}
+
+export interface FinancialAccountName {
+  id: number;
+  account_type: AccountType;
+  name: string;
+  is_active: boolean;
+  is_primary_cash: boolean;
+}
+
+export type TransactionType =
+  | "SALES_COLLECTION"
+  | "EXPENSE_PAYMENT"
+  | "TRANSFER_IN"
+  | "TRANSFER_OUT"
+  | "CAPITAL_INJECTION"
+  | "OWNER_WITHDRAWAL"
+  | "ADJUSTMENT"
+  | "SUPPLIER_ORDER_DEDUCTION"
+  | "OTHER_INCOME";
+
+export interface AccountTransaction {
+  id: number;
+  account: number;
+  account_name: string;
+  transaction_type: TransactionType;
+  transaction_type_display: string;
+  amount: string;
+  date: string;
+  source_type: string;
+  source_id: number | null;
+  entered_by: number;
+  entered_by_name: string;
+  note: string;
+}
+
+export interface AccountTransfer {
+  id: number;
+  from_account: number;
+  from_account_name: string;
+  to_account: number;
+  to_account_name: string;
+  amount: string;
+  date: string;
+  note: string;
+  entered_by: number;
+  entered_by_name: string;
+}
+
+export interface CapitalTransaction {
+  id: number;
+  account: number;
+  account_name: string;
+  direction: "INJECTION" | "WITHDRAWAL";
+  direction_display: string;
+  amount: string;
+  date: string;
+  note: string;
+  entered_by: number;
+  entered_by_name: string;
+}
+
+export interface AccountBalanceCheck {
+  id: number;
+  account: number;
+  account_name: string;
+  checked_at: string;
+  checked_by: number;
+  checked_by_name: string;
+  system_balance: string;
+  actual_balance: string;
+  discrepancy: string;
+  reason: string;
+  reason_display: string;
+  note: string;
+}
+
+export interface OtherIncomeCategory {
+  id: number;
+  name: string;
+}
+
+export interface OtherIncome {
+  id: number;
+  outlet: number;
+  date: string;
+  category: number;
+  category_name: string;
+  amount: string;
+  received_into_account: number | null;
+  received_into_account_name: string | null;
+  description: string;
 }
 
 export interface Paginated<T> {

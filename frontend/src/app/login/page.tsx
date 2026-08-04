@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { login } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Brand } from "@/components/Brand";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { setUser } = useAuth();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,6 +20,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const user = await login(phone, password);
+      setUser(user);
       router.replace(user.role === "OWNER" ? "/owner" : "/staff");
     } catch {
       setError("Invalid phone or password.");

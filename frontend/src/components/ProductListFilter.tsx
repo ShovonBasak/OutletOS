@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Product } from "@/lib/types";
 
 /**
@@ -24,8 +25,10 @@ export function ProductListFilter({
   const [cat, setCat] = useState<string>("ALL");
 
   const categories = useMemo(() => {
-    const set = new Set(products.map((p) => p.category || "Other"));
-    return ["ALL", ...Array.from(set)];
+    const present = new Set(products.map((p) => p.category || "Other"));
+    const ordered = PRODUCT_CATEGORIES.filter((c) => present.has(c));
+    const rest = Array.from(present).filter((c) => !PRODUCT_CATEGORIES.includes(c as never)).sort();
+    return ["ALL", ...ordered, ...rest];
   }, [products]);
 
   const visible = products.filter((p) => {

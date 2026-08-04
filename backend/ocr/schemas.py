@@ -20,14 +20,17 @@ class InvoiceItem:
 
     quantity: Optional[float]
     unit: str                    # e.g. "PACK", "PIECE", "Kg"
-    unit_price: Optional[float]              # after-tax per unit = total ÷ qty
-    rate: Optional[float] = None            # pre-tax per unit price ("Per Unit Price")
-    amount: Optional[float] = None          # pre-tax subtotal = qty × rate ("Total Amount")
+    unit_price: Optional[float]              # effective cost per unit = line_total ÷ qty
+    sku_code: Optional[str] = None          # supplier product code (পণ্য কোড)
+    mrp: Optional[float] = None             # MRP per piece (beverages)
+    rate: Optional[float] = None            # pre-discount, pre-tax rate per pack/unit
+    amount: Optional[float] = None          # pre-discount subtotal = qty × rate
+    discount: Optional[float] = None        # per-line discount amount (beverages)
     sd_rate: Optional[float] = None         # Supplementary Duty %
     sd_amount: Optional[float] = None       # Supplementary Duty amount
     vat_rate: Optional[float] = None        # VAT % (e.g. 15.0 for 15%)
     vat: Optional[float] = None             # VAT amount
-    total: Optional[float] = None           # after-tax total (incl. SD + VAT)
+    total: Optional[float] = None           # final net total (after discount + SD + VAT)
 
     is_flagged: bool = False
     """True when a validation rule fires for this item."""
@@ -40,9 +43,10 @@ class InvoiceItem:
 class InvoiceSummary:
     """Slip-level financial totals."""
 
-    subtotal: Optional[float]    # sum of all line amounts before VAT
-    vat: Optional[float]         # total VAT
-    grand_total: Optional[float] # subtotal + vat
+    subtotal: Optional[float]         # sum of all line amounts before discount/VAT
+    discount_total: Optional[float]   # total discount (beverages: মোট ডিসকাউন্ট)
+    vat: Optional[float]              # total VAT
+    grand_total: Optional[float]      # final payable amount
 
 
 @dataclass
@@ -74,8 +78,11 @@ class InvoiceOCRResult:
                     "quantity": it.quantity,
                     "unit": it.unit,
                     "unit_price": it.unit_price,
+                    "sku_code": it.sku_code,
+                    "mrp": it.mrp,
                     "rate": it.rate,
                     "amount": it.amount,
+                    "discount": it.discount,
                     "sd_rate": it.sd_rate,
                     "sd_amount": it.sd_amount,
                     "vat_rate": it.vat_rate,
@@ -88,6 +95,7 @@ class InvoiceOCRResult:
             ],
             "summary": {
                 "subtotal": self.summary.subtotal,
+                "discount_total": self.summary.discount_total,
                 "vat": self.summary.vat,
                 "grand_total": self.summary.grand_total,
             },

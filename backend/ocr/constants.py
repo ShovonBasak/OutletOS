@@ -49,9 +49,10 @@ COL_ROLE_MAP: list[tuple[frozenset, str]] = [
 # Row-level skip patterns (summary / footer rows)
 # ---------------------------------------------------------------------------
 
-GRAND_TOTAL_RE = re.compile(r"\bgrand\s*total\b", re.I)
-SUBTOTAL_RE = re.compile(r"\bsub\s*-?\s*total\b|\bsubtotal\b", re.I)
-VAT_TOTAL_RE = re.compile(r"\bvat\b|\btax\b", re.I)
+GRAND_TOTAL_RE    = re.compile(r"\bgrand\s*total\b|\bমোট\s*চালান\b|\bমোট\s*মূল্য\b", re.I)
+SUBTOTAL_RE       = re.compile(r"\bsub\s*-?\s*total\b|\bsubtotal\b", re.I)
+VAT_TOTAL_RE      = re.compile(r"\bvat\b|\btax\b", re.I)
+DISCOUNT_TOTAL_RE = re.compile(r"\btotal\s*discount\b|\bমোট\s*ডিসকাউন্ট\b", re.I)
 SKIP_ROW_RE = re.compile(
     r"\b(total|vat|tax|sub\s*-?\s*total|grand|discount|"
     r"delivery|charge|shipping|freight|service)\b",

@@ -7,9 +7,19 @@ import type {
   ExtractCandidate,
   ExtractResult,
   Ingredient,
+  IngredientGroup,
   Paginated,
   TrackingMode,
 } from "@/lib/types";
+
+const GROUPS: { value: IngredientGroup; label: string }[] = [
+  { value: "CHICKEN_PIECE", label: "Chicken — Main" },
+  { value: "SNACK",         label: "Snacks & Balls" },
+  { value: "BURGER_WRAP",   label: "Burgers & Wraps" },
+  { value: "BEVERAGE",      label: "Beverages" },
+  { value: "SUPPLY",        label: "Supplies" },
+  { value: "OTHER",         label: "Other" },
+];
 
 const UNITS = ["piece", "portion", "gram", "ml", "bag"];
 
@@ -28,6 +38,7 @@ interface EditDraft {
   name: string;
   base_unit: string;
   tracking_mode: TrackingMode;
+  group: IngredientGroup;
   pieces_per_pack: string;
   cost_per_pack: string;
 }
@@ -55,9 +66,13 @@ export default function ExtractIngredients() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [showManual, setShowManual] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED", pieces_per_pack: "", cost_per_pack: "" });
+  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED", group: "OTHER", pieces_per_pack: "", cost_per_pack: "" });
   const [editOrigPack, setEditOrigPack] = useState<{ pieces_per_pack: string; cost_per_pack: string }>({ pieces_per_pack: "", cost_per_pack: "" });
+  const [editAliasId, setEditAliasId] = useState<number | null>(null);
+  const [editAliasText, setEditAliasText] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+  const [sortCol, setSortCol] = useState<"name" | "tracking_mode" | "base_unit">("tracking_mode");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   async function refresh() {
     const d = await api<Paginated<Ingredient>>("/ingredients/");
@@ -114,18 +129,27 @@ export default function ExtractIngredients() {
 
   const selectedCount = rows.filter((r) => r.include && r.name.trim()).length;
 
+  function toggleSort(col: typeof sortCol) {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
   function startEdit(ing: Ingredient) {
     setEditId(ing.id);
     const origPieces = ing.active_pack?.pieces_per_pack ?? "";
     const origCost   = ing.active_pack?.cost_per_pack   ?? "";
+    const firstAlias = ing.aliases[0];
     setEditDraft({
       name: ing.name,
       base_unit: ing.base_unit,
       tracking_mode: ing.tracking_mode,
+      group: ing.group,
       pieces_per_pack: origPieces,
       cost_per_pack: origCost,
     });
     setEditOrigPack({ pieces_per_pack: origPieces, cost_per_pack: origCost });
+    setEditAliasId(firstAlias?.id ?? null);
+    setEditAliasText(firstAlias?.alias_text ?? "");
   }
 
   async function saveEdit() {
@@ -138,6 +162,7 @@ export default function ExtractIngredients() {
           name: editDraft.name,
           base_unit: editDraft.base_unit,
           tracking_mode: editDraft.tracking_mode,
+          group: editDraft.group,
         }),
       });
 
@@ -155,6 +180,21 @@ export default function ExtractIngredients() {
             effective_from: today(),
           }),
         });
+      }
+
+      // Save alias: update existing or create new
+      if (editAliasText.trim()) {
+        if (editAliasId) {
+          await api(`/supplier-aliases/${editAliasId}/`, {
+            method: "PATCH",
+            body: JSON.stringify({ alias_text: editAliasText.trim() }),
+          });
+        } else {
+          await api("/supplier-aliases/", {
+            method: "POST",
+            body: JSON.stringify({ ingredient: editId, alias_text: editAliasText.trim() }),
+          });
+        }
       }
 
       setEditId(null);
@@ -372,20 +412,34 @@ export default function ExtractIngredients() {
 
       <h2 className="sec">Ingredients ({ingredients.length})</h2>
       <div className="overflow-x-auto">
-        <table className="datatable min-w-[620px]">
+        <table className="datatable min-w-[700px]">
           <thead>
             <tr>
-              <th>Ingredient</th>
-              <th>Base unit</th>
-              <th>Tracking</th>
+              {(["name", "base_unit", "tracking_mode"] as const).map((col) => (
+                <th
+                  key={col}
+                  className="cursor-pointer select-none whitespace-nowrap"
+                  onClick={() => toggleSort(col)}
+                >
+                  {col === "name" ? "Ingredient" : col === "base_unit" ? "Unit" : "Tracking"}
+                  {sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : " ↕"}
+                </th>
+              ))}
+              <th>Group</th>
+              <th>Alias (display name)</th>
               <th>Qty / pack</th>
               <th>Cost / pack (৳)</th>
-              <th>Aliases</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {ingredients.map((ing) => (
+            {[...ingredients]
+              .sort((a, b) => {
+                const av = a[sortCol].toLowerCase();
+                const bv = b[sortCol].toLowerCase();
+                return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+              })
+              .map((ing) =>
               editId === ing.id ? (
                 <tr key={ing.id} className="bg-[#fffdf7]">
                   <td>
@@ -416,6 +470,25 @@ export default function ExtractIngredients() {
                     </select>
                   </td>
                   <td>
+                    <select
+                      className="field-input !py-0.5 !text-xs w-full"
+                      value={editDraft.group}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, group: e.target.value as IngredientGroup }))}
+                    >
+                      {GROUPS.map((g) => (
+                        <option key={g.value} value={g.value}>{g.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      className="field-input !py-0.5 !text-xs w-full"
+                      placeholder="e.g. Zinger Fillet"
+                      value={editAliasText}
+                      onChange={(e) => setEditAliasText(e.target.value)}
+                    />
+                  </td>
+                  <td>
                     <input
                       className="field-input !py-0.5 !text-xs w-full"
                       inputMode="decimal"
@@ -433,7 +506,6 @@ export default function ExtractIngredients() {
                       onChange={(e) => setEditDraft((d) => ({ ...d, cost_per_pack: e.target.value }))}
                     />
                   </td>
-                  <td className="font-mono text-[10px] text-ink-soft">{ing.aliases.map((a) => a.alias_text).join(", ") || "—"}</td>
                   <td>
                     <div className="flex gap-2">
                       <button
@@ -443,10 +515,7 @@ export default function ExtractIngredients() {
                       >
                         {editBusy ? "…" : "Save"}
                       </button>
-                      <button
-                        className="font-mono text-[11px] text-ink-soft"
-                        onClick={() => setEditId(null)}
-                      >
+                      <button className="font-mono text-[11px] text-ink-soft" onClick={() => setEditId(null)}>
                         Cancel
                       </button>
                     </div>
@@ -454,37 +523,37 @@ export default function ExtractIngredients() {
                 </tr>
               ) : (
                 <tr key={ing.id}>
-                  <td>{ing.name}</td>
+                  <td className="text-ink-soft text-[11px]">{ing.name}</td>
                   <td>{ing.base_unit}</td>
-                  <td className="capitalize">{ing.tracking_mode.replace("_", " ").toLowerCase()}</td>
+                  <td>
+                    <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                      ing.tracking_mode === "RECIPE_LINKED" ? "bg-leaf-deep/10 text-leaf-deep" :
+                      ing.tracking_mode === "PERIODIC_COUNT" ? "bg-gold/20 text-gold-deep" :
+                      "bg-paper-dim text-ink-soft"
+                    }`}>
+                      {ing.tracking_mode === "RECIPE_LINKED" ? "Recipe" :
+                       ing.tracking_mode === "PERIODIC_COUNT" ? "Periodic" : "One-time"}
+                    </span>
+                  </td>
+                  <td className="font-mono text-[10px] text-ink-soft">
+                    {GROUPS.find((g) => g.value === ing.group)?.label ?? ing.group}
+                  </td>
+                  <td className="font-mono font-medium text-ink">
+                    {ing.aliases[0]?.alias_text || <span className="text-ink-soft/50">—</span>}
+                  </td>
                   <td className="font-mono text-xs">{ing.active_pack?.pieces_per_pack ?? "—"}</td>
                   <td className="font-mono text-xs">{ing.active_pack?.cost_per_pack ? `৳${ing.active_pack.cost_per_pack}` : "—"}</td>
-                  <td className="font-mono text-[10px]">{ing.aliases.map((a) => a.alias_text).join(", ") || "—"}</td>
                   <td>
                     <div className="flex gap-3">
-                      <button
-                        className="font-mono text-[11px] text-gold-deep"
-                        onClick={() => startEdit(ing)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="font-mono text-[11px] text-chili"
-                        onClick={() => deleteIngredient(ing.id)}
-                      >
-                        Delete
-                      </button>
+                      <button className="font-mono text-[11px] text-gold-deep" onClick={() => startEdit(ing)}>Edit</button>
+                      <button className="font-mono text-[11px] text-chili" onClick={() => deleteIngredient(ing.id)}>Delete</button>
                     </div>
                   </td>
                 </tr>
               )
-            ))}
+            )}
             {ingredients.length === 0 && (
-              <tr>
-                <td colSpan={6} className="text-ink-soft">
-                  No ingredients yet.
-                </td>
-              </tr>
+              <tr><td colSpan={8} className="text-ink-soft">No ingredients yet.</td></tr>
             )}
           </tbody>
         </table>

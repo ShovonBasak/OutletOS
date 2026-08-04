@@ -21,11 +21,24 @@ class CostCategory(models.Model):
         return f"{self.name} ({self.cost_type})"
 
 
+class ExpenseSource(models.TextChoices):
+    CASH = "CASH", "Cash"
+    BKASH = "BKASH", "bKash"
+
+
 class Expense(models.Model):
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name="expenses")
     date = models.DateField()
     category = models.ForeignKey(CostCategory, on_delete=models.PROTECT, related_name="expenses")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # source is kept for legacy display; new entries use paid_from_account instead
+    source = models.CharField(max_length=10, choices=ExpenseSource.choices, default=ExpenseSource.CASH)
+    paid_from_account = models.ForeignKey(
+        "finance.FinancialAccount",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="expenses",
+    )
     description = models.TextField(blank=True)
     entered_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     recurring = models.BooleanField(default=False)

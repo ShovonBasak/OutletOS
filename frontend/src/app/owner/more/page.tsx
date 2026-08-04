@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 
 const TILES = [
+  { href: "/owner/accounts", icon: "⇌", label: "Accounts" },
   { href: "/owner/expenses", icon: "৳", label: "Expenses" },
+  { href: "/owner/other-income", icon: "+৳", label: "Other income" },
   { href: "/owner/products", icon: "≡", label: "Products & recipes" },
   { href: "/owner/team", icon: "◈", label: "Team & outlets" },
   { href: "/owner/settings", icon: "⚙", label: "Settings & promos" },

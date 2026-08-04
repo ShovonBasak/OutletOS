@@ -46,32 +46,41 @@ export default function OnlineSellScreen() {
       ds.results.forEach((d) => { dsMap[d.product] = d.pieces_available; });
       setMaxQty(dsMap);
 
-      // Only show products that have been prepared today.
-      setProducts(p.results.filter((prod) => (dsMap[prod.id] ?? 0) > 0));
-
       const fp = ch.results.find(
         (x) => x.is_active && x.name.toLowerCase().includes("foodpanda")
       ) ?? null;
       setChannel(fp);
       channelRef.current = fp;
 
+      const productMap: Record<number, Product> = {};
+      p.results.forEach((prod) => { productMap[prod.id] = prod; });
+
       if (fp) {
-        const seed: Record<number, number> = {};
-        const staleItems: { product: number; channel: number; quantity_sold: number }[] = [];
-        for (const l of c.sales_lines.filter(
+        const fpLines = c.sales_lines.filter(
           (l) => l.source === "STAFF_ENTRY" && l.channel === fp.id
-        )) {
-          if ((dsMap[l.product] ?? 0) > 0) {
-            seed[l.product] = l.quantity_sold;
-          } else {
-            staleItems.push({ product: l.product, channel: fp.id, quantity_sold: 0 });
+        );
+        const seed: Record<number, number> = {};
+
+        if (c.status !== "DRAFT") {
+          // Read-only (LOCKED/SUBMITTED): show products from saved sales lines.
+          const lineProducts = fpLines
+            .map((l) => productMap[l.product])
+            .filter(Boolean) as Product[];
+          setProducts(lineProducts);
+          fpLines.forEach((l) => { seed[l.product] = l.quantity_sold; });
+        } else {
+          // DRAFT: show prepared products; clean up stale lines one by one.
+          setProducts(p.results.filter((prod) => (dsMap[prod.id] ?? 0) > 0));
+          for (const l of fpLines) {
+            if ((dsMap[l.product] ?? 0) > 0) {
+              seed[l.product] = l.quantity_sold;
+            } else {
+              await api(`/daily-closings/${c.id}/online-sell/`, {
+                method: "POST",
+                body: JSON.stringify({ items: [{ product: l.product, channel: fp.id, quantity_sold: 0 }] }),
+              });
+            }
           }
-        }
-        if (staleItems.length) {
-          await api(`/daily-closings/${c.id}/online-sell/`, {
-            method: "POST",
-            body: JSON.stringify({ items: staleItems }),
-          });
         }
         setQty(seed);
 
@@ -87,6 +96,7 @@ export default function OnlineSellScreen() {
     const c = closingRef.current;
     const ch = channelRef.current;
     if (!c || !ch) return;
+    if (c.status !== "DRAFT") return;
     setSaveStatus("saving");
     try {
       const items = Object.entries(currentQty)
@@ -133,6 +143,8 @@ export default function OnlineSellScreen() {
 
   const totalOrders = Object.values(qty).reduce((s, v) => s + v, 0);
 
+  const isReadOnly = closing ? closing.status !== "DRAFT" : false;
+
   if (!channel) {
     return (
       <div className="flex flex-col gap-3">
@@ -151,7 +163,9 @@ export default function OnlineSellScreen() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="font-display text-xl font-bold">Online sell</h1>
-          <p className="text-xs text-ink-soft">Step 2 · Foodpanda · tap + after each order</p>
+          <p className="text-xs text-ink-soft">
+            {isReadOnly ? `View only · ${closing?.status}` : "Step 2 · Foodpanda · tap + after each order"}
+          </p>
         </div>
         <span className={`font-mono text-[10px] transition-opacity ${
           saveStatus === "saving" ? "text-ink-soft" :
@@ -178,6 +192,7 @@ export default function OnlineSellScreen() {
             count={qty[p.id] ?? 0}
             max={maxQty[p.id] ?? 0}
             onAdjust={(d) => adjust(p.id, d)}
+            readOnly={isReadOnly}
           />
         ))}
       </div>
@@ -203,9 +218,11 @@ export default function OnlineSellScreen() {
         </div>
       </div>
 
-      <button className="btn btn-primary" disabled={busy} onClick={finish}>
-        {busy ? "Saving…" : "Done — back to checklist"}
-      </button>
+      {!isReadOnly && (
+        <button className="btn btn-primary" disabled={busy} onClick={finish}>
+          {busy ? "Saving…" : "Done — back to checklist"}
+        </button>
+      )}
 
     </div>
   );
@@ -216,11 +233,13 @@ function ProductRow({
   count,
   max,
   onAdjust,
+  readOnly,
 }: {
   name: string;
   count: number;
   max: number;
   onAdjust: (delta: number) => void;
+  readOnly?: boolean;
 }) {
   const atMax = count >= max;
   return (
@@ -229,30 +248,34 @@ function ProductRow({
         <span className={`font-mono text-sm ${count > 0 ? "font-semibold text-ink" : "text-ink-soft"}`}>
           {name}
         </span>
-        {max > 0 && (
+        {max > 0 && !readOnly && (
           <span className="font-mono text-[10px] text-ink-soft/60">{max} prepared</span>
         )}
       </div>
       <div className="flex items-center gap-3">
-        <button
-          className={`h-7 w-7 rounded-full border font-mono text-sm leading-none transition-opacity ${
-            count > 0 ? "border-ink/40 opacity-100" : "border-transparent opacity-0 pointer-events-none"
-          }`}
-          onClick={() => onAdjust(-1)}
-          tabIndex={count > 0 ? 0 : -1}
-        >
-          −
-        </button>
+        {!readOnly && (
+          <button
+            className={`h-7 w-7 rounded-full border font-mono text-sm leading-none transition-opacity ${
+              count > 0 ? "border-ink/40 opacity-100" : "border-transparent opacity-0 pointer-events-none"
+            }`}
+            onClick={() => onAdjust(-1)}
+            tabIndex={count > 0 ? 0 : -1}
+          >
+            −
+          </button>
+        )}
         <span className={`num min-w-[1.5rem] text-center text-sm ${count > 0 ? "font-bold" : "text-ink-soft/30"}`}>
           {count}
         </span>
-        <button
-          disabled={atMax}
-          className="h-7 w-7 rounded-full bg-chrome font-mono text-sm leading-none text-paper disabled:opacity-30"
-          onClick={() => onAdjust(1)}
-        >
-          +
-        </button>
+        {!readOnly && (
+          <button
+            disabled={atMax}
+            className="h-7 w-7 rounded-full bg-chrome font-mono text-sm leading-none text-paper disabled:opacity-30"
+            onClick={() => onAdjust(1)}
+          >
+            +
+          </button>
+        )}
       </div>
     </div>
   );

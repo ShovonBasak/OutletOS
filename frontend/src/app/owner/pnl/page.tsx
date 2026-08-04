@@ -1,43 +1,157 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { bdt, today } from "@/lib/format";
 import type { Pnl } from "@/lib/types";
 
-type Period = "today" | "week" | "month";
+type Preset = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
 
-function rangeFor(period: Period): { start: string; end: string } {
-  const end = today();
-  const d = new Date();
-  if (period === "today") return { start: end, end };
-  if (period === "week") {
-    d.setDate(d.getDate() - 6);
-    return { start: d.toISOString().slice(0, 10), end };
-  }
-  return { start: end.slice(0, 8) + "01", end };
+function isoDate(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
+function rangeFor(preset: Preset, customStart: string, customEnd: string): { start: string; end: string } {
+  const now = new Date();
+  const end = today();
+
+  if (preset === "today") return { start: end, end };
+
+  if (preset === "yesterday") {
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    const s = isoDate(y);
+    return { start: s, end: s };
+  }
+
+  if (preset === "this_week") {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 6);
+    return { start: isoDate(d), end };
+  }
+
+  if (preset === "last_week") {
+    const d = new Date(now);
+    // last Mon–Sun
+    const day = d.getDay() || 7;
+    d.setDate(d.getDate() - day - 6);
+    const s = isoDate(d);
+    d.setDate(d.getDate() + 6);
+    return { start: s, end: isoDate(d) };
+  }
+
+  if (preset === "this_month") {
+    return { start: end.slice(0, 8) + "01", end };
+  }
+
+  if (preset === "last_month") {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { start: isoDate(d), end: isoDate(last) };
+  }
+
+  return { start: customStart, end: customEnd };
+}
+
+const PRESETS: { value: Preset; label: string }[] = [
+  { value: "today",       label: "Today" },
+  { value: "yesterday",   label: "Yesterday" },
+  { value: "this_week",   label: "This week" },
+  { value: "last_week",   label: "Last week" },
+  { value: "this_month",  label: "This month" },
+  { value: "last_month",  label: "Last month" },
+  { value: "custom",      label: "Custom range" },
+];
+
 export default function PnlPage() {
-  const [period, setPeriod] = useState<Period>("today");
+  const [preset, setPreset] = useState<Preset>("this_month");
+  const [customStart, setCustomStart] = useState(today().slice(0, 8) + "01");
+  const [customEnd, setCustomEnd] = useState(today());
   const [pnl, setPnl] = useState<Pnl | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const { start, end } = rangeFor(preset, customStart, customEnd);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api<Pnl>(`/reports/pnl/?outlet=1&start=${start}&end=${end}`);
+      setPnl(data);
+    } finally {
+      setLoading(false);
+    }
+  }, [start, end]);
 
   useEffect(() => {
-    const { start, end } = rangeFor(period);
-    api<Pnl>(`/reports/pnl/?outlet=1&start=${start}&end=${end}`).then(setPnl);
-  }, [period]);
+    if (preset !== "custom") load();
+  }, [preset, load]);
+
+  const grossMarginPct = pnl && Number(pnl.revenue) > 0
+    ? (Number(pnl.gross_profit) / Number(pnl.revenue) * 100).toFixed(1) + "%"
+    : null;
+
+  const netColor = pnl
+    ? Number(pnl.net_profit) >= 0 ? "pos" : "neg"
+    : "";
+
+  const labelFor = PRESETS.find((p) => p.value === preset)?.label ?? preset;
+  const rangeLabel = preset === "custom"
+    ? `${customStart} → ${customEnd}`
+    : `${labelFor} · ${start}${start !== end ? ` → ${end}` : ""}`;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="filterbar">
-        <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}>
-          <option value="today">Today</option>
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-        </select>
+      <div>
+        <h1 className="font-display text-xl font-bold">Profit &amp; loss</h1>
+        <p className="font-mono text-[11px] text-ink-soft">{rangeLabel}</p>
       </div>
 
-      {pnl && (
+      {/* Preset chips */}
+      <div className="flex flex-wrap gap-1.5">
+        {PRESETS.map((p) => (
+          <button
+            key={p.value}
+            onClick={() => setPreset(p.value)}
+            className={`rounded-full border px-3 py-1 font-mono text-[11px] transition-colors ${
+              preset === p.value
+                ? "border-action bg-action text-gold"
+                : "border-[#d8cdb0] text-ink-soft hover:border-action/50"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Custom range inputs */}
+      {preset === "custom" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            className="field-input !py-1 !text-xs"
+            value={customStart}
+            onChange={(e) => setCustomStart(e.target.value)}
+          />
+          <span className="font-mono text-xs text-ink-soft">→</span>
+          <input
+            type="date"
+            className="field-input !py-1 !text-xs"
+            value={customEnd}
+            onChange={(e) => setCustomEnd(e.target.value)}
+          />
+          <button
+            className="btn btn-primary !py-1 !px-3 !text-xs"
+            disabled={loading}
+            onClick={load}
+          >
+            {loading ? "…" : "Apply"}
+          </button>
+        </div>
+      )}
+
+      {loading && <p className="font-mono text-xs text-ink-soft">Loading…</p>}
+
+      {pnl && !loading && (
         <table className="ledger max-w-[520px]">
           <tbody>
             <tr>
@@ -49,7 +163,7 @@ export default function PnlPage() {
               <td className="neg">− {bdt(pnl.cogs)}</td>
             </tr>
             <tr className="subtotal">
-              <td>Gross profit</td>
+              <td>Gross profit{grossMarginPct ? ` (${grossMarginPct})` : ""}</td>
               <td>{bdt(pnl.gross_profit)}</td>
             </tr>
             <tr className="section">
@@ -64,7 +178,7 @@ export default function PnlPage() {
               <td className="neg">− {bdt(pnl.shrinkage_cost)}</td>
             </tr>
             <tr>
-              <td>Packaging &amp; supplies (separate line)</td>
+              <td>Packaging &amp; supplies</td>
               <td>{bdt(pnl.packaging_cost)}</td>
             </tr>
             <tr className="section">
@@ -82,9 +196,20 @@ export default function PnlPage() {
               <td>Adhoc (repairs)</td>
               <td className="neg">− {bdt(pnl.adhoc_costs)}</td>
             </tr>
+            {Number(pnl.other_income) !== 0 && (
+              <>
+                <tr className="section">
+                  <td colSpan={2}>Other income</td>
+                </tr>
+                <tr>
+                  <td>Other income (oil, recyclables, etc.)</td>
+                  <td className="pos">+ {bdt(pnl.other_income)}</td>
+                </tr>
+              </>
+            )}
             <tr className="net">
               <td>Net profit</td>
-              <td className="pos">{bdt(pnl.net_profit)}</td>
+              <td className={netColor}>{bdt(pnl.net_profit)}</td>
             </tr>
           </tbody>
         </table>
