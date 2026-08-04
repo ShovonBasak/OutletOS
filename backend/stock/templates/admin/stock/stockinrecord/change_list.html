@@ -18,11 +18,6 @@
       ↑ Import via OCR (Slips)
     </a>
   </li>
-  <li>
-    <a href="{% url 'admin:stock_stockinrecord_ocr_debug' %}" class="addlink">
-      OCR Debug
-    </a>
-  </li>
   {% if has_add_permission %}
   <li>
     {% url cl.opts|admin_urlname:'add' as add_url %}

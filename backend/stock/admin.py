@@ -271,11 +271,6 @@ class StockInRecordAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.download_sample_excel),
                 name="stock_stockinrecord_sample_excel",
             ),
-            path(
-                "ocr-debug/",
-                self.admin_site.admin_view(self.ocr_debug),
-                name="stock_stockinrecord_ocr_debug",
-            ),
         ]
         return custom + urls
 
@@ -289,9 +284,6 @@ class StockInRecordAdmin(admin.ModelAdmin):
         )
         extra_context["sample_excel_url"] = reverse(
             "admin:stock_stockinrecord_sample_excel"
-        )
-        extra_context["ocr_debug_url"] = reverse(
-            "admin:stock_stockinrecord_ocr_debug"
         )
         return super().changelist_view(request, extra_context)
 
@@ -414,80 +406,7 @@ class StockInRecordAdmin(admin.ModelAdmin):
             reverse("admin:stock_stockinrecord_import_historic_confirm")
         )
 
-    # -- OCR diagnostics ------------------------------------------------------
-
-    def ocr_debug(self, request):
-        """Upload one slip image and see the raw OCR output at every pipeline stage."""
-        import io as _io
-        from stock.ocr import available as paddle_available
-        from stock.ocr._exceptions import PaddleOcrUnavailable, PreprocessingError
-
-        ctx = {
-            **self.admin_site.each_context(request),
-            "title": "OCR Debug",
-            "opts": StockInRecord._meta,
-            "paddle_available": paddle_available(),
-            "debug": None,
-        }
-
-        if request.method == "POST" and request.FILES.get("image"):
-            img_bytes = request.FILES["image"].read()
-            debug = {"filename": request.FILES["image"].name, "stages": []}
-
-            try:
-                from stock.ocr.preprocessing import load_and_preprocess
-                from stock.ocr.engine import run, run_text_ocr
-                from stock.ocr.slip_parser import parse_structure_result, parse_text_ocr_lines
-
-                image_bgr = load_and_preprocess(_io.BytesIO(img_bytes))
-                debug["image_shape"] = list(image_bgr.shape)
-
-                # Stage 1: PP-Structure
-                try:
-                    pp_result = run(image_bgr)
-                    regions = []
-                    for r in pp_result:
-                        regions.append({
-                            "type": r.get("type"),
-                            "bbox": r.get("bbox"),
-                            "res_summary": str(r.get("res", ""))[:200],
-                        })
-                    pp_parsed = parse_structure_result(pp_result)
-                    debug["stages"].append({
-                        "name": "PP-Structure",
-                        "regions": regions,
-                        "parsed": pp_parsed,
-                    })
-                except PaddleOcrUnavailable as e:
-                    debug["stages"].append({"name": "PP-Structure", "error": str(e)})
-                    pp_parsed = {"items": [], "date": None}
-
-                # Stage 2: basic text OCR (only if PP-Structure found nothing)
-                try:
-                    ocr_lines = run_text_ocr(image_bgr)
-                    line_summary = [
-                        {"text": (l[1][0] if isinstance(l[1], (list, tuple)) else str(l[1])),
-                         "bbox_y": round(sum(p[1] for p in l[0]) / 4, 1),
-                         "bbox_x": round(sum(p[0] for p in l[0]) / 4, 1)}
-                        for l in ocr_lines if l
-                    ]
-                    text_parsed = parse_text_ocr_lines(ocr_lines)
-                    debug["stages"].append({
-                        "name": "Text OCR",
-                        "lines": line_summary,
-                        "parsed": text_parsed,
-                    })
-                except PaddleOcrUnavailable as e:
-                    debug["stages"].append({"name": "Text OCR", "error": str(e)})
-
-            except PreprocessingError as e:
-                debug["error"] = f"Preprocessing failed: {e}"
-
-            ctx["debug"] = debug
-
-        return render(request, "admin/stock/ocr_debug.html", ctx)
-
-    # -- Step 1: upload + OCR extract (PaddleOCR only — no Claude) ------------
+    # -- Step 1: upload + AI extract ------------------------------------------
 
     def import_historic_upload(self, request):
         use_ai = ai_available()

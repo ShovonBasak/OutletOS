@@ -13,14 +13,4 @@ anthropic>=0.117
 openpyxl>=3.1
 django-storages[s3]>=1.14
 boto3>=1.34
-google-genai>=0.8  # legacy — only used by the orphaned ocr/llm_refiner.py
-# OCR — PaddleOCR PP-StructureV3 (primary) + Tesseract (fallback)
-# Install CPU build: pip install paddlepaddle paddleocr opencv-python-headless
-# For GPU:          pip install paddlepaddle-gpu paddleocr opencv-python-headless
-paddlepaddle>=2.6.2
-paddleocr>=3.7.0   # 3.x required for PP-OCRv6; pulls in paddlex automatically
-opencv-python-headless>=4.8.0
-# Tesseract kept as last-resort fallback (binary must also be installed via OS package)
-pytesseract>=0.3.10
-# Product name fuzzy-matching (used by ocr.matcher.ProductMatcher)
 rapidfuzz>=3.6.0

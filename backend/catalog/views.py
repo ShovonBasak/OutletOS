@@ -209,13 +209,10 @@ class IngredientViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def extract_from_slips(self, request):
-        """OCR one or more slip images and return unique ingredient candidates.
+        """OCR one or more slip images with Claude AI and return unique ingredient candidates."""
+        from catalog import ai_extraction
+        from catalog.ai_extraction import LLMUnavailable
 
-        Priority chain:
-          1. PaddleOCR PP-StructureV3  — table-aware; separates name/qty/unit columns
-          2. Claude vision              — semantic name matching + handles bad images
-          3. Tesseract                  — plain-text fallback (OcrUnavailable → 503)
-        """
         files = request.FILES.getlist("slips") or request.FILES.getlist("slips[]")
         if not files:
             raise ValidationError("Attach at least one slip image (field 'slips').")
@@ -227,221 +224,26 @@ class IngredientViewSet(viewsets.ModelViewSet):
             SupplierProductAlias.objects.filter(is_active=True).values_list("alias_text", flat=True)
         )
         all_known = list({*known_names, *known_aliases})
-        known_lower = {n.lower() for n in all_known}
 
-        # ── 1. PaddleOCR PP-StructureV3 ─────────────────────────────────────
+        images = [f.read() for f in files]
         try:
-            from stock.ocr import (
-                PaddleOcrUnavailable, PreprocessingError,
-                available as paddle_available,
-                extract_ingredients_from_slip,
+            candidates = ai_extraction.extract_ingredients(images, all_known)
+        except LLMUnavailable as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "ocr_available": False,
+                },
+                status=503,
             )
-            from stock.ocr.normalizer import (
-                suggest_clean_name, suggest_unit, suggest_pack_pieces,
-            )
-            from stock.extraction import build_existing_index, match_existing
-
-            if paddle_available():
-                index = build_existing_index()
-                agg: dict[str, dict] = {}
-                skipped_existing: set[str] = set()
-                processed = 0
-
-                for f in files:
-                    f.seek(0)
-                    raw_names = extract_ingredients_from_slip(f)
-                    processed += 1
-                    counted_this_slip: set[str] = set()
-                    for raw in raw_names:
-                        key = raw.lower().strip()
-                        if key in known_lower:
-                            skipped_existing.add(key)
-                            continue
-                        if match_existing(key, index):
-                            skipped_existing.add(key)
-                            continue
-                        if key not in agg:
-                            agg[key] = {
-                                "raw_text": raw,
-                                "suggested_name": suggest_clean_name(raw),
-                                "suggested_unit": suggest_unit(raw),
-                                "suggested_qty_per_pack": suggest_pack_pieces(raw),
-                                "cost_per_pack": None,
-                                "tracking_mode": "RECIPE_LINKED",
-                                "is_probably_not_ingredient": False,
-                                "seen_in_slips": 0,
-                            }
-                        if key not in counted_this_slip:
-                            agg[key]["seen_in_slips"] += 1
-                            counted_this_slip.add(key)
-
-                if agg or processed == len(files):
-                    return Response({
-                        "slips_processed": processed,
-                        "new_count": len(agg),
-                        "skipped_existing": len(skipped_existing),
-                        "candidates": list(agg.values()),
-                        "ocr_engine": "paddleocr",
-                    })
-                # If all slips returned zero rows, fall through to Claude.
-        except (PaddleOcrUnavailable, PreprocessingError):
-            pass
-        except ImportError:
-            pass
-        except Exception:
-            pass
-
-        # ── 2. Claude fallback ───────────────────────────────────────────────
-        from catalog import ai_extraction
-        from catalog.ai_extraction import LLMUnavailable
-
-        if ai_extraction.available():
-            try:
-                images = []
-                for f in files:
-                    f.seek(0)
-                    images.append(f.read())
-                candidates = ai_extraction.extract_ingredients(images, all_known)
-                return Response(
-                    {
-                        "slips_processed": len(files),
-                        "new_count": len(candidates),
-                        "skipped_existing": 0,
-                        "candidates": candidates,
-                        "ocr_engine": "gemini",
-                    }
-                )
-            except LLMUnavailable as exc:
-                detail = str(exc)
-                if "quota" in detail.lower() or "429" in detail:
-                    return Response({"detail": detail}, status=503)
-            except Exception as exc:
-                return Response({"detail": f"Extraction failed: {exc}"}, status=500)
-
-        # ── 3. Tesseract last resort ─────────────────────────────────────────
-        from stock.extraction import (
-            OcrUnavailable,
-            build_existing_index,
-            extract_invoice_product_names,
-            match_existing,
-        )
-
-        index = build_existing_index()
-        agg2: dict[str, dict] = {}
-        skipped2: set[str] = set()
-        processed2 = 0
-
-        for f in files:
-            try:
-                f.seek(0)
-                names = extract_invoice_product_names(f)
-            except OcrUnavailable as exc:
-                return Response(
-                    {
-                        "detail": "OCR is unavailable — add ingredients manually below.",
-                        "reason": str(exc),
-                        "ocr_available": False,
-                    },
-                    status=503,
-                )
-            processed2 += 1
-            counted_this_slip2: set[str] = set()
-            for name in names:
-                key = name.lower().strip()
-                if key in known_lower or match_existing(key, index):
-                    skipped2.add(key)
-                    continue
-                if key not in agg2:
-                    agg2[key] = {
-                        "raw_text": name,
-                        "suggested_name": name,
-                        "suggested_unit": "piece",
-                        "suggested_qty_per_pack": None,
-                        "cost_per_pack": None,
-                        "tracking_mode": "RECIPE_LINKED",
-                        "is_probably_not_ingredient": False,
-                        "seen_in_slips": 0,
-                    }
-                if key not in counted_this_slip2:
-                    agg2[key]["seen_in_slips"] += 1
-                    counted_this_slip2.add(key)
 
         return Response(
             {
-                "slips_processed": processed2,
-                "new_count": len(agg2),
-                "skipped_existing": len(skipped2),
-                "candidates": list(agg2.values()),
-                "ocr_engine": "tesseract",
-            }
-        )
-
-        # ── Legacy generic Tesseract path (unreachable, kept for reference) ──
-        from stock.extraction import (  # noqa: F401
-            candidate_lines,
-            dedup_key,
-            ocr_text_from_fileobj,
-            suggest_name,
-            suggest_unit,
-            _looks_like_non_ingredient,
-        )
-
-        index = build_existing_index()
-        agg2: dict[str, dict] = {}
-        skipped2: set[str] = set()
-        processed2 = 0
-
-        for f in files:
-            try:
-                f.seek(0)
-                text = ocr_text_from_fileobj(f)
-            except OcrUnavailable as exc:
-                return Response(
-                    {
-                        "detail": "OCR is unavailable — add ingredients manually below.",
-                        "reason": str(exc),
-                        "ocr_available": False,
-                    },
-                    status=503,
-                )
-            processed += 1
-            counted_this_slip: set[str] = set()
-            for c in candidate_lines(text):
-                norm = c["norm"]
-                if match_existing(norm, index):
-                    skipped_existing.add(dedup_key(norm))
-                    continue
-                key = dedup_key(norm)
-                if not key:
-                    continue
-                row = agg.get(key)
-                if row is None:
-                    row = {
-                        "raw_text": c["raw_text"],
-                        "suggested_name": suggest_name(c["raw_text"]),
-                        "suggested_unit": suggest_unit(c["raw_text"]),
-                        "suggested_qty_per_pack": c["pack_pieces"],
-                        "cost_per_pack": None,
-                        "is_probably_not_ingredient": _looks_like_non_ingredient(norm),
-                        "seen_in_slips": 0,
-                    }
-                    agg[key] = row
-                if key not in counted_this_slip:
-                    row["seen_in_slips"] += 1
-                    counted_this_slip.add(key)
-                if row["suggested_qty_per_pack"] is None and c["pack_pieces"] is not None:
-                    row["suggested_qty_per_pack"] = c["pack_pieces"]
-
-        candidates = sorted(
-            agg.values(),
-            key=lambda r: (r["is_probably_not_ingredient"], -r["seen_in_slips"]),
-        )
-        return Response(
-            {
-                "slips_processed": processed,
+                "slips_processed": len(files),
                 "new_count": len(candidates),
-                "skipped_existing": len(skipped_existing),
+                "skipped_existing": 0,
                 "candidates": candidates,
+                "ocr_engine": "claude",
             }
         )
 

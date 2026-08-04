@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from accounts.permissions import IsOwner
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
-from .extraction import OcrUnavailable, extract_from_slip
+from .extraction import ExtractedLine
 from .models import (
     DayStartStockCheck,
     DisplayStock,
@@ -96,111 +96,56 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def extract(self, request, pk=None):
-        """OCR the attached slip → create/refresh SLIP_EXTRACTED lines.
-
-        Priority chain:
-          1. PaddleOCR PP-StructureV3  — table-aware; resolves qty, unit, date
-          2. Claude vision              — handles degraded / ambiguous images
-          3. Tesseract                  — last resort plain-text OCR
+        """OCR the attached slip image with Claude → create/refresh SLIP_EXTRACTED lines.
 
         Unmatched lines become 'Unrecognized' rows (ingredient=None) for staff
         to resolve. Existing slip-extracted lines are replaced; manual lines kept.
         """
-        from .extraction import ExtractedLine
+        from catalog import ai_extraction
+        from catalog.ai_extraction import LLMUnavailable
 
         record = self.get_object()
         self._guard_editable(record)
         if not record.slip_image:
             raise ValidationError("Attach a slip image before extracting.")
 
-        lines = None
+        known_names = list(
+            Ingredient.objects.filter(is_active=True).values_list("name", flat=True)
+        )
+        with open(record.slip_image.path, "rb") as fh:
+            image_data = fh.read()
 
-        # ── 1. PaddleOCR PP-StructureV3 ─────────────────────────────────────
         try:
-            from stock.ocr import PaddleOcrUnavailable, PreprocessingError, extract_slip
+            llm_items = ai_extraction.extract_stock_in([image_data], known_names)
+        except LLMUnavailable as exc:
+            return Response(
+                {
+                    "detail": "Claude AI is unavailable — please enter lines manually.",
+                    "reason": str(exc),
+                    "ocr_available": False,
+                },
+                status=503,
+            )
 
-            parsed = extract_slip(record.slip_image.path)
-            if parsed["items"]:
-                lines = []
-                for item in parsed["items"]:
-                    lines.append(ExtractedLine(
-                        raw_text=item["raw_text"],
-                        extracted_quantity=item["quantity"],
-                        ingredient_id=item["matched_ingredient_id"],
-                        pack_definition_id=item["matched_pack_definition_id"],
-                        unit_captured=item["unit"],
-                        rate=item.get("rate"),
-                        total_amount=item.get("total_amount"),
-                        sd_rate=item.get("sd_rate"),
-                        sd_amount=item.get("sd_amount"),
-                        vat_rate=item.get("vat_rate"),
-                        vat_amount=item.get("vat_amount"),
-                        line_total=item.get("line_total"),
-                        unit_price=item.get("unit_price"),
-                    ))
-                # Save slip-level financial totals extracted from the invoice header.
-                slip_update = []
-                for field, key in (
-                    ("slip_subtotal",    "subtotal"),
-                    ("slip_vat_total",   "vat_total"),
-                    ("slip_grand_total", "grand_total"),
-                ):
-                    v = parsed.get(key)
-                    if v is not None:
-                        setattr(record, field, Decimal(str(v)))
-                        slip_update.append(field)
-                if slip_update:
-                    record.save(update_fields=slip_update)
-        except Exception:  # noqa: BLE001 — not installed or inference error
-            lines = None
-
-        # ── 2. Claude fallback ───────────────────────────────────────────────
-        if lines is None:
-            try:
-                from catalog import ai_extraction
-
-                known_names = list(
-                    Ingredient.objects.filter(is_active=True).values_list("name", flat=True)
-                )
-                with open(record.slip_image.path, "rb") as fh:
-                    image_data = fh.read()
-
-                llm_items = ai_extraction.extract_stock_in([image_data], known_names)
-                lines = []
-                for item in llm_items:
-                    matched_name = item.get("matched_ingredient")
-                    ingredient_id = None
-                    pack_definition_id = None
-                    if matched_name:
-                        ing = Ingredient.objects.filter(name=matched_name, is_active=True).first()
-                        if ing:
-                            ingredient_id = ing.id
-                            pack = ing.pack_definitions.filter(effective_to__isnull=True).first()
-                            pack_definition_id = pack.id if pack else None
-                    qty = item.get("quantity")
-                    lines.append(ExtractedLine(
-                        raw_text=item.get("raw_text", ""),
-                        extracted_quantity=float(qty) if qty is not None else None,
-                        ingredient_id=ingredient_id,
-                        pack_definition_id=pack_definition_id,
-                        unit_captured=item.get("unit", "PACK"),
-                    ))
-            except Exception:  # noqa: BLE001 — LLMUnavailable or API error
-                lines = None
-
-        # ── 3. Tesseract last resort ─────────────────────────────────────────
-        if lines is None:
-            try:
-                lines = extract_from_slip(record.slip_image.path)
-            except OcrUnavailable as exc:
-                return Response(
-                    {
-                        "detail": "OCR is unavailable — please enter lines manually.",
-                        "reason": str(exc),
-                        "ocr_available": False,
-                    },
-                    status=503,
-                )
+        lines: list[ExtractedLine] = []
+        for item in llm_items:
+            matched_name = item.get("matched_ingredient")
+            ingredient_id = None
+            pack_definition_id = None
+            if matched_name:
+                ing = Ingredient.objects.filter(name=matched_name, is_active=True).first()
+                if ing:
+                    ingredient_id = ing.id
+                    pack = ing.pack_definitions.filter(effective_to__isnull=True).first()
+                    pack_definition_id = pack.id if pack else None
+            qty = item.get("quantity")
+            lines.append(ExtractedLine(
+                raw_text=item.get("raw_text", ""),
+                extracted_quantity=float(qty) if qty is not None else None,
+                ingredient_id=ingredient_id,
+                pack_definition_id=pack_definition_id,
+                unit_captured=item.get("unit", "PACK"),
+            ))
 
         def _dec(v):
             if v is None:

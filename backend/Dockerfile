@@ -5,9 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# libpq5 for psycopg2; tesseract-ocr powers delivery-slip extraction.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 tesseract-ocr \
+    && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

@@ -16,16 +16,15 @@
 <h1>Import Historic Purchase / Stock-In Slips</h1>
 
 <p style="color:#666;margin-bottom:1.5em;">
-  Upload one or more purchase/delivery slip images. PaddleOCR PP-Structure will read each slip,
+  Upload one or more purchase/delivery slip images. Claude AI will read each slip,
   extract the date, ingredient lines, and pricing, then let you review and correct before importing.
-  If a slip has no clear table borders, PaddleOCR switches automatically to text-based extraction.
-  Either way, you can edit every field on the next screen before committing.
+  You can edit every field on the next screen before committing.
 </p>
 
 {% if not ai_available %}
 <div class="errornote" style="margin-bottom:1em;">
-  <strong>PaddleOCR not installed.</strong>
-  Run: <code>pip install paddlepaddle paddleocr opencv-python-headless</code>
+  <strong>ANTHROPIC_API_KEY not set.</strong>
+  Add it to your <code>.env</code> file to enable AI slip extraction.
 </div>
 {% endif %}
 
