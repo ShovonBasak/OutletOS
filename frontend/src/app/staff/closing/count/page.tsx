@@ -71,6 +71,7 @@ export default function CountScreen() {
   const [displayStock, setDisplayStock] = useState<Record<number, number>>({});
   const [rows, setRows] = useState<Record<number, Row>>({});
   const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+  const [touchedIds, setTouchedIds] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -98,7 +99,11 @@ export default function CountScreen() {
         const existing = c.stock_counts.find((s) => s.product === prod.id);
         seed[prod.id] = {
           wastage: existing ? existing.wastage_pieces : 0,
-          remains: existing ? existing.remains_pieces : 0,
+          remains: existing
+            ? existing.remains_pieces
+            : !prod.requires_preparation
+            ? (dsMap[prod.id] ?? 0)
+            : 0,
         };
       }
       setRows(seed);
@@ -107,6 +112,7 @@ export default function CountScreen() {
 
   function setField(pid: number, key: keyof Row, val: number) {
     setRows((r) => ({ ...r, [pid]: { ...r[pid], [key]: val } }));
+    setTouchedIds((prev) => { const n = new Set(prev); n.add(pid); return n; });
   }
 
   const isDone = (p: Product) => savedIds.has(p.id);
@@ -174,9 +180,20 @@ export default function CountScreen() {
             <div className={`ticket overflow-hidden !p-0 ${flagged ? "border-chili/60" : ""}`}>
               {/* Card header */}
               <div className={`flex items-center justify-between px-3 py-2.5 ${flagged ? "bg-chili/5" : "bg-[#f5f0e8]"}`}>
-                <span className="font-display text-sm font-bold text-ink leading-tight">
-                  {p.name}
-                </span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className={`font-mono text-sm shrink-0 ${
+                    savedIds.has(p.id) && !touchedIds.has(p.id)
+                      ? "text-leaf-deep"
+                      : touchedIds.has(p.id)
+                      ? "text-gold-deep"
+                      : "text-ink-soft/30"
+                  }`}>
+                    {savedIds.has(p.id) && !touchedIds.has(p.id) ? "✓" : touchedIds.has(p.id) ? "●" : "○"}
+                  </span>
+                  <span className="font-display text-sm font-bold text-ink leading-tight truncate">
+                    {p.name}
+                  </span>
+                </div>
                 <span className="ml-2 shrink-0 rounded-full bg-paper px-2.5 py-0.5 font-mono text-[11px] text-ink-soft border border-[#d8cdb0]">
                   Avail&nbsp;<span className="font-bold text-ink">{available}</span>
                 </span>
@@ -187,14 +204,14 @@ export default function CountScreen() {
                 {/* Left: steppers */}
                 <div className="flex flex-1 flex-col gap-2.5">
                   <Stepper
-                    label="Wastage"
-                    value={r.wastage}
-                    onChange={(v) => setField(p.id, "wastage", v)}
-                  />
-                  <Stepper
                     label="Remains"
                     value={r.remains}
                     onChange={(v) => setField(p.id, "remains", v)}
+                  />
+                  <Stepper
+                    label="Wastage"
+                    value={r.wastage}
+                    onChange={(v) => setField(p.id, "wastage", v)}
                   />
                 </div>
 
