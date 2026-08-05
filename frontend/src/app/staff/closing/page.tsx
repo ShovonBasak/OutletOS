@@ -77,7 +77,7 @@ export default function ClosingHub() {
         <Step
           n={3}
           href="/staff/closing/walkin"
-          title="Walk-in (view-only)"
+          title="Sales summary"
           progress={`${walkinLines} derived line(s)`}
           done={walkinLines > 0}
         />

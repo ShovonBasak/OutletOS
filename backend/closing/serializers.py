@@ -13,12 +13,22 @@ from .models import (
 class StockCountSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     derived_walkin_sold = serializers.IntegerField(read_only=True)
+    wastage_cost = serializers.SerializerMethodField()
+
+    def get_wastage_cost(self, obj):
+        from decimal import Decimal
+        if not obj.wastage_pieces:
+            return "0.00"
+        price_row = obj.product.active_price()
+        unit_price = price_row.price if price_row else Decimal("0")
+        return str((unit_price * obj.wastage_pieces).quantize(Decimal("0.01")))
 
     class Meta:
         model = DailyClosingStockCount
         fields = [
             "id", "product", "product_name", "available_pieces", "wastage_pieces",
             "remains_pieces", "app_channel_sold", "derived_walkin_sold", "flag",
+            "wastage_cost",
         ]
         read_only_fields = ["flag", "app_channel_sold", "derived_walkin_sold"]
 

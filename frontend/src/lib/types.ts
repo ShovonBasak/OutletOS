@@ -357,6 +357,7 @@ export interface StockCount {
   app_channel_sold: number;
   derived_walkin_sold: number;
   flag: boolean;
+  wastage_cost: string;
 }
 
 export interface SalesLine {
