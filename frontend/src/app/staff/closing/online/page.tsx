@@ -8,6 +8,7 @@ import { getOrCreateTodayClosing } from "@/lib/closing";
 import { today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { ProductListFilter } from "@/components/ProductListFilter";
+import { bdt } from "@/lib/format";
 import type { DailyClosing, DisplayStock, Paginated, Product, SalesChannel } from "@/lib/types";
 
 export default function OnlineSellScreen() {
@@ -138,6 +139,10 @@ export default function OnlineSellScreen() {
   }
 
   const totalOrders = Object.values(qty).reduce((s, v) => s + v, 0);
+  const totalRevenue = products.reduce(
+    (s, p) => s + (qty[p.id] ?? 0) * (Number(p.selling_price) || 0),
+    0
+  );
   const isReadOnly = closing ? closing.status !== "DRAFT" : false;
 
   if (!channel) {
@@ -173,11 +178,15 @@ export default function OnlineSellScreen() {
         </span>
       </div>
 
-      <div className="flex items-center justify-between rounded bg-paper-dim px-3 py-2">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">
-          Total orders today
-        </span>
-        <span className="num font-semibold">{totalOrders}</span>
+      <div className="flex gap-2">
+        <div className="ticket-chip flex-1 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Orders</span>
+          <span className="font-mono text-lg font-bold text-ink">{totalOrders}</span>
+        </div>
+        <div className="ticket-chip flex-1 text-center">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Revenue</span>
+          <span className="font-mono text-lg font-bold text-leaf-deep">{bdt(totalRevenue)}</span>
+        </div>
       </div>
 
       <ProductListFilter

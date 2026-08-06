@@ -21,7 +21,7 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    image: ${DOCKER_USERNAME}/cpfs-backend:latest
     restart: always
     environment:
       SECRET_KEY: ${SECRET_KEY}
@@ -37,6 +37,11 @@ services:
       AWS_S3_CUSTOM_DOMAIN: ${AWS_S3_CUSTOM_DOMAIN:-}
       # OCR
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Security overrides
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-False}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-False}
+      CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-False}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
       # Do NOT set SEED_DEMO_DATA here — keeps real data safe
     depends_on:
       db:
@@ -46,10 +51,7 @@ services:
       - cpfs_media:/app/media
 
   frontend:
-    build:
-      context: ./frontend
-      args:
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+    image: ${DOCKER_USERNAME}/cpfs-frontend:latest
     restart: always
     depends_on:
       - backend

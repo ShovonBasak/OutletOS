@@ -23,6 +23,7 @@ def env_list(key, default=""):
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-insecure-change-me-not-for-production-use-32b+")
 DEBUG = env_bool("DEBUG", True)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:3000,http://localhost:8000")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
