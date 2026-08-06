@@ -10,6 +10,21 @@ import AccountPicker from "@/components/AccountPicker";
 import IngredientPicker from "@/components/IngredientPicker";
 import type { FinancialAccountName, Ingredient, Paginated, StockInItem, StockInRecord } from "@/lib/types";
 
+// Strip /api suffix to get the backend root (e.g. http://192.168.0.236:8000).
+// Django builds slip_image URLs using its own request host, which may differ
+// from NEXT_PUBLIC_API_BASE — this normalises them so the browser can load them.
+const BACKEND_ORIGIN = (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000/api")
+  .replace(/\/api\/?$/, "");
+
+function mediaUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return BACKEND_ORIGIN + new URL(url).pathname;
+  } catch {
+    return BACKEND_ORIGIN + url;
+  }
+}
+
 interface EditLine {
   ingredient: number | null;
   ingredient_name?: string;
@@ -440,7 +455,7 @@ export default function StockInPage() {
             <span className="field-label">Delivery slip</span>
             {draft.slip_image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={draft.slip_image} alt="delivery slip" className="max-h-40 w-full rounded border border-[#d8cdb0] object-contain" />
+              <img src={mediaUrl(draft.slip_image)} alt="delivery slip" className="max-h-40 w-full rounded border border-[#d8cdb0] object-contain" />
             ) : null}
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onSlipChosen} />
             <div className="flex gap-2">
