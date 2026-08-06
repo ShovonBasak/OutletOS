@@ -4,9 +4,7 @@ from django.db import migrations
 
 DEFAULTS = [
     {"account_type": "CASH", "name": "Shop Cash", "provider": ""},
-    {"account_type": "MOBILE_WALLET", "name": "bKash Merchant", "provider": "bKash"},
-    {"account_type": "BANK", "name": "Business Bank Account", "provider": ""},
-    {"account_type": "SUPPLIER_CREDIT", "name": "CP/NKG Supplier Credit", "provider": "CP/NKG"},
+    {"account_type": "SUPPLIER_CREDIT", "name": "CP Supplier Credit", "provider": "CP/NKG"},
 ]
 
 
