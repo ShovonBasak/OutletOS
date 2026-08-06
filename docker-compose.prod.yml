@@ -21,7 +21,7 @@ services:
       retries: 10
 
   backend:
-    image: ${DOCKER_USERNAME}/cpfs-backend:latest
+    build: ./backend
     restart: always
     environment:
       SECRET_KEY: ${SECRET_KEY}
@@ -51,7 +51,10 @@ services:
       - cpfs_media:/app/media
 
   frontend:
-    image: ${DOCKER_USERNAME}/cpfs-frontend:latest
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
     restart: always
     depends_on:
       - backend
