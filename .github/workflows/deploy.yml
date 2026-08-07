@@ -59,6 +59,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "docker-compose.prod.yml,nginx/"
           target: /home/ubuntu/OutletOS/
+          overwrite: true
 
       - name: Deploy
         uses: appleboy/ssh-action@v1
