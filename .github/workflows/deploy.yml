@@ -58,7 +58,6 @@ jobs:
             cd /home/ubuntu/OutletOS
             git pull origin prod
 
-            # Rewrite .env.prod from CI values on every deploy
             cat > .env.prod <<EOF
             DOCKER_USERNAME=${DOCKER_USERNAME}
             SECRET_KEY=${SECRET_KEY}
