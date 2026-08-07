@@ -48,15 +48,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: SSH & deploy
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy config files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ${{ vars.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.prod.yml,nginx/"
+          target: /home/ubuntu/OutletOS/
+
+      - name: Deploy
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ vars.EC2_HOST }}
           username: ${{ vars.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             cd /home/ubuntu/OutletOS
-            git pull origin prod
 
             cat > .env.prod <<EOF
             DOCKER_USERNAME=${DOCKER_USERNAME}
@@ -71,8 +83,8 @@ jobs:
             DOMAIN=${DOMAIN}
             EOF
 
-            docker compose -f docker-compose.prod.yml --env-file /home/ubuntu/OutletOS/.env.prod pull
-            docker compose -f docker-compose.prod.yml --env-file /home/ubuntu/OutletOS/.env.prod up -d
+            docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
             docker image prune -f
         env:
           DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
