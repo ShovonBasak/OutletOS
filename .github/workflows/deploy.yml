@@ -67,6 +67,7 @@ jobs:
           host: ${{ vars.EC2_HOST }}
           username: ${{ vars.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DOCKER_USERNAME,SECRET_KEY,POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,ALLOWED_HOSTS,CORS_ALLOWED_ORIGINS,CSRF_TRUSTED_ORIGINS,ANTHROPIC_API_KEY,DOMAIN
           script: |
             set -e
             cd /home/ubuntu/OutletOS
