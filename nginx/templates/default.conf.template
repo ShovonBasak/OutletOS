@@ -36,17 +36,20 @@ server {
 
     # Static files (Django admin CSS/JS via Whitenoise)
     location /static/ {
-        proxy_pass http://backend:8000;
+        proxy_pass         http://backend:8000;
+        proxy_set_header   Host $host;
     }
 
     # Health check → Django backend
     location /health/ {
-        proxy_pass http://backend:8000;
+        proxy_pass         http://backend:8000;
+        proxy_set_header   Host $host;
     }
 
     # Media files (only used when NOT using S3/Spaces)
     location /media/ {
-        proxy_pass http://backend:8000;
+        proxy_pass         http://backend:8000;
+        proxy_set_header   Host $host;
     }
 
     # Everything else → Next.js frontend
