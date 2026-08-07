@@ -87,6 +87,7 @@ jobs:
 
             docker compose -f docker-compose.prod.yml --env-file .env.prod pull
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+            docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
             docker image prune -f
         env:
           DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
