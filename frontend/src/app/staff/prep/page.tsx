@@ -80,7 +80,6 @@ export default function PrepPage() {
   const [logs, setLogs] = useState<PreparationLog[]>([]);
   const [raw, setRaw] = useState<RawStock[]>([]);
   const [displayStock, setDisplayStock] = useState<DisplayStock[]>([]);
-  const [readyPieces, setReadyPieces] = useState(0);
 
   const [productId, setProductId] = useState<number | "">("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -108,9 +107,26 @@ export default function PrepPage() {
     return m;
   }, [allProducts]);
 
+  // Only products that require preparation — allProducts is already filtered this way.
+  const prepProductIds = useMemo(
+    () => new Set(allProducts.map((p) => p.id)),
+    [allProducts],
+  );
+
+  // Display stock restricted to prepared items only (excludes beverages, ready-to-sell products).
+  const preparedDisplayStock = useMemo(
+    () => displayStock.filter((d) => prepProductIds.has(d.product) && d.pieces_available > 0),
+    [displayStock, prepProductIds],
+  );
+
+  const readyPieces = useMemo(
+    () => preparedDisplayStock.reduce((s, d) => s + d.pieces_available, 0),
+    [preparedDisplayStock],
+  );
+
   const readyValue = useMemo(
-    () => displayStock.reduce((sum, d) => sum + d.pieces_available * (priceByProduct.get(d.product) ?? 0), 0),
-    [displayStock, priceByProduct],
+    () => preparedDisplayStock.reduce((sum, d) => sum + d.pieces_available * (priceByProduct.get(d.product) ?? 0), 0),
+    [preparedDisplayStock, priceByProduct],
   );
 
   // Products with enough stock to prepare at least 1 piece.
@@ -130,7 +146,6 @@ export default function PrepPage() {
     setLogs(l.results.filter((x) => x.source === "FRESH"));
     setRaw(rs.results);
     setDisplayStock(ds.results);
-    setReadyPieces(ds.results.reduce((s, r) => s + r.pieces_available, 0));
   }
 
   useEffect(() => {
@@ -221,13 +236,11 @@ export default function PrepPage() {
             <span className="num font-bold text-leaf-deep">{bdt(readyValue)}</span>
           </div>
         )}
-        {displayStock.filter((d) => d.pieces_available > 0).length === 0 ? (
+        {preparedDisplayStock.length === 0 ? (
           <p className="font-mono text-[11px] text-ink-soft">Nothing prepared yet.</p>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {displayStock
-              .filter((d) => d.pieces_available > 0)
-              .map((d) => {
+            {preparedDisplayStock.map((d) => {
                 const price = priceByProduct.get(d.product) ?? 0;
                 return (
                   <div key={d.id} className="flex items-baseline justify-between gap-2">
@@ -288,7 +301,7 @@ export default function PrepPage() {
                       : 0;
                     return (
                       <div key={r.id} className="ticket-row">
-                        <span>{r.ingredient_name} · {r.quantity_per_unit} {r.base_unit}</span>
+                        <span>{rs?.ingredient_display_name ?? r.ingredient_name} · {r.quantity_per_unit} {r.base_unit}</span>
                         <span className="qty text-ink-soft">
                           {available} {rs?.base_unit ?? ""} → {canMake} pcs
                         </span>

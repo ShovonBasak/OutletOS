@@ -39,7 +39,10 @@ export default function OtherIncomePage() {
   async function refreshAccounts() {
     const d = await api<Paginated<FinancialAccount>>("/financial-accounts/");
     setAccounts(d.results);
-    if (!accountId && d.results[0]) setAccountId(String(d.results[0].id));
+    if (!accountId) {
+      const def = d.results.find((a) => a.is_primary_cash) ?? d.results[0];
+      if (def) setAccountId(String(def.id));
+    }
   }
 
   useEffect(() => {

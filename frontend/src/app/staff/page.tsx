@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { shortDate, timeOf, today } from "@/lib/format";
+import { bdt, shortDate, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import type {
   DailyClosing,
@@ -14,6 +14,11 @@ import type {
   PreparationLog,
   StockInRecord,
 } from "@/lib/types";
+
+interface CashInfo {
+  cash: { id: number; name: string; balance: string };
+  accounts: { id: number; name: string; account_type: string }[];
+}
 
 export default function StaffHome() {
   const { user } = useAuth();
@@ -26,6 +31,16 @@ export default function StaffHome() {
   const [preparedToday, setPreparedToday] = useState(0);
   const [closingStatus, setClosingStatus] = useState("Not started");
   const [skipping, setSkipping] = useState(false);
+  const [staleDayClosingStatus, setStaleDayClosingStatus] = useState<string | null>(null);
+
+  // Cash card + transfer sheet
+  const [cashInfo, setCashInfo] = useState<CashInfo | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [toAccount, setToAccount] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferNote, setTransferNote] = useState("");
+  const [transferring, setTransferring] = useState(false);
+  const [transferMsg, setTransferMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     const t = workDate || today();
@@ -50,11 +65,21 @@ export default function StaffHome() {
       if (c) setClosingStatus(c.status.charAt(0) + c.status.slice(1).toLowerCase());
       else setClosingStatus("Not started");
     });
+    api<CashInfo>("/cash/").then(setCashInfo).catch(() => {});
   }, [outlet, workDate]);
+
+  // When a stale day is detected and it's IN_PROGRESS, fetch its closing status
+  // so we can decide whether to show "Go to closing" vs. "Force close".
+  useEffect(() => {
+    if (!day || day.date === today()) { setStaleDayClosingStatus(null); return; }
+    if (day.status !== "IN_PROGRESS") { setStaleDayClosingStatus(null); return; }
+    api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${day.date}`)
+      .then((d) => setStaleDayClosingStatus(d.results[0]?.status ?? null))
+      .catch(() => setStaleDayClosingStatus(null));
+  }, [day, outlet]);
 
   const status = day?.status ?? "NOT_STARTED";
   const readyPieces = displayStock.reduce((s, d) => s + d.pieces_available, 0);
-  const readyProducts = displayStock.filter((d) => d.pieces_available > 0);
 
   // A stale day is one where the backend returned a previous (unclosed) day
   // instead of creating today's day.
@@ -64,6 +89,27 @@ export default function StaffHome() {
     closingStatus === "Locked" ? "text-leaf-deep font-semibold" :
     closingStatus === "Submitted" ? "text-leaf" :
     "text-ink-soft";
+
+  async function handleTransfer(e: React.FormEvent) {
+    e.preventDefault();
+    setTransferMsg(null);
+    setTransferring(true);
+    try {
+      const res = await api<{ detail: string; new_cash_balance: string }>("/cash/", {
+        method: "POST",
+        body: JSON.stringify({ to_account: Number(toAccount), amount: transferAmount, note: transferNote }),
+      });
+      setCashInfo((prev) => prev ? { ...prev, cash: { ...prev.cash, balance: res.new_cash_balance } } : prev);
+      setTransferMsg({ ok: true, text: "Transfer recorded." });
+      setTransferAmount("");
+      setTransferNote("");
+    } catch (err: unknown) {
+      const body = (err as { body?: { error?: string } })?.body;
+      setTransferMsg({ ok: false, text: body?.error ?? "Transfer failed." });
+    } finally {
+      setTransferring(false);
+    }
+  }
 
   async function handleSkipDay() {
     if (!day) return;
@@ -87,9 +133,11 @@ export default function StaffHome() {
       {isStaleDay && (
         <div className="rounded border border-chili/50 bg-chili/10 px-4 py-3 flex flex-col gap-2">
           <p className="font-mono text-xs font-semibold text-chili">
-            Day of {shortDate(day!.date)} is not closed
+            {shortDate(day!.date)} is not closed — blocking today
           </p>
-          {status === "NOT_STARTED" || status === "STOCK_CONFIRMED" ? (
+
+          {/* Day never really started — just skip it */}
+          {(status === "NOT_STARTED" || status === "STOCK_CONFIRMED") && (
             <>
               <p className="font-mono text-[11px] text-ink-soft">
                 This day was not fully started. Skip it to begin today.
@@ -102,7 +150,26 @@ export default function StaffHome() {
                 {skipping ? "Skipping…" : "Skip this day"}
               </button>
             </>
-          ) : (
+          )}
+
+          {/* Closing is locked or submitted — nothing left to do, just force-close the day */}
+          {status === "IN_PROGRESS" && (staleDayClosingStatus === "LOCKED" || staleDayClosingStatus === "SUBMITTED") && (
+            <>
+              <p className="font-mono text-[11px] text-ink-soft">
+                Closing is {staleDayClosingStatus.toLowerCase()}. Force close this day to start today.
+              </p>
+              <button
+                className="btn btn-primary self-start !py-1.5 !px-4 !text-xs"
+                disabled={skipping}
+                onClick={handleSkipDay}
+              >
+                {skipping ? "Closing…" : "Force close this day"}
+              </button>
+            </>
+          )}
+
+          {/* Closing still open — staff needs to complete it first, but also offer escape hatch */}
+          {status === "IN_PROGRESS" && staleDayClosingStatus !== "LOCKED" && staleDayClosingStatus !== "SUBMITTED" && (
             <>
               <p className="font-mono text-[11px] text-ink-soft">
                 Complete and submit the daily closing to start today.
@@ -110,6 +177,13 @@ export default function StaffHome() {
               <Link href="/staff/closing" className="btn btn-primary self-start !py-1.5 !px-4 !text-xs text-center">
                 Go to closing
               </Link>
+              <button
+                className="mt-1 font-mono text-[11px] text-chili underline self-start"
+                disabled={skipping}
+                onClick={handleSkipDay}
+              >
+                {skipping ? "Closing…" : "Force close without completing →"}
+              </button>
             </>
           )}
         </div>
@@ -207,26 +281,21 @@ export default function StaffHome() {
             </div>
           </div>
 
-          {/* Ready-to-sell grid */}
-          {readyProducts.length > 0 && (
-            <div>
-              <p className="mb-2 font-mono text-[11px] uppercase tracking-wide text-ink-soft">
-                Ready to sell — {readyPieces} pcs total
-              </p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {readyProducts.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex items-center justify-between rounded border border-[#d8cdb0] bg-paper px-2.5 py-2"
-                  >
-                    <span className="font-mono text-[11px] text-ink truncate">{d.product_name}</span>
-                    <span className="ml-2 shrink-0 font-mono text-[13px] font-bold text-ink">
-                      {d.pieces_available}
-                    </span>
-                  </div>
-                ))}
+          {/* Cash card */}
+          {cashInfo && (
+            <button
+              type="button"
+              className="ticket flex items-center justify-between text-left w-full"
+              onClick={() => { setTransferOpen(true); setTransferMsg(null); }}
+            >
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Shop Cash</p>
+                <p className="font-mono text-2xl font-bold text-ink">{bdt(cashInfo.cash.balance)}</p>
               </div>
-            </div>
+              <span className="rounded border border-chrome px-2.5 py-1 font-mono text-[11px] text-chrome">
+                Transfer →
+              </span>
+            </button>
           )}
 
           {/* Edit links */}
@@ -263,6 +332,136 @@ export default function StaffHome() {
             </Link>
           </div>
         </>
+      )}
+
+      {/* Transfer bottom sheet */}
+      {transferOpen && cashInfo && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-end" onClick={() => setTransferOpen(false)}>
+          <div className="absolute inset-0 bg-ink/40" />
+          <div
+            className="relative w-full max-w-[420px] flex max-h-[85vh] flex-col gap-4 overflow-y-auto rounded-t-2xl bg-paper p-5 pb-8 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="font-display text-base font-bold">Transfer cash</h2>
+                <p className="font-mono text-[11px] text-ink-soft">
+                  Available: {bdt(cashInfo.cash.balance)}
+                </p>
+              </div>
+              <button
+                className="font-mono text-[11px] text-ink-soft underline"
+                onClick={() => setTransferOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+
+            <form onSubmit={handleTransfer} className="flex flex-col gap-3">
+              <div className="field">
+                <span className="field-label">Transfer to</span>
+                <CustomSelect
+                  options={cashInfo.accounts.map((a) => ({ value: String(a.id), label: a.name }))}
+                  value={toAccount}
+                  onChange={setToAccount}
+                  placeholder="Select account…"
+                />
+              </div>
+
+              <label className="field">
+                <span className="field-label">Amount (৳)</span>
+                <input
+                  className="field-input"
+                  type="number"
+                  inputMode="decimal"
+                  min="1"
+                  max={cashInfo.cash.balance}
+                  step="any"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  required
+                />
+              </label>
+
+              <label className="field">
+                <span className="field-label">Note (optional)</span>
+                <input
+                  className="field-input"
+                  value={transferNote}
+                  onChange={(e) => setTransferNote(e.target.value)}
+                  placeholder="e.g. Bank deposit"
+                />
+              </label>
+
+              {transferMsg && (
+                <p className={`font-mono text-xs ${transferMsg.ok ? "text-leaf-deep" : "text-chili-deep"}`}>
+                  {transferMsg.text}
+                </p>
+              )}
+
+              <button type="submit" className="btn btn-primary" disabled={transferring || !toAccount || !transferAmount}>
+                {transferring ? "Transferring…" : "Confirm transfer"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomSelect({
+  options,
+  value,
+  onChange,
+  placeholder = "Select…",
+}: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative mt-1">
+      <button
+        type="button"
+        className="field-input flex w-full items-center justify-between text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={selected ? "text-ink" : "text-ink-soft"}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <span className="font-mono text-[11px] text-ink-soft">{open ? "▴" : "▾"}</span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded border border-[#d8cdb0] bg-paper shadow-lg">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              className={`flex w-full items-center justify-between border-b border-dotted border-[#d8cdb0] px-3 py-2.5 text-left font-mono text-sm last:border-0 transition-colors active:bg-paper-dim ${
+                o.value === value ? "bg-action text-gold" : "text-ink hover:bg-paper-dim"
+              }`}
+              onClick={() => { onChange(o.value); setOpen(false); }}
+            >
+              {o.label}
+              {o.value === value && <span className="text-xs">✓</span>}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

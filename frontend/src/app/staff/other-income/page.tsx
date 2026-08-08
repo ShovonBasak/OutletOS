@@ -31,8 +31,10 @@ export default function StaffOtherIncome() {
       if (d.results[0]) setCategory(String(d.results[0].id));
     });
     api<Paginated<FinancialAccountName>>("/financial-accounts/").then((d) => {
-      setAccounts(d.results.filter((a) => a.is_active));
-      if (d.results[0]) setAccountId(String(d.results[0].id));
+      const active = d.results.filter((a) => a.is_active);
+      setAccounts(active);
+      const def = active.find((a) => a.is_primary_cash) ?? active[0];
+      if (def) setAccountId(String(def.id));
     });
   }, []);
 

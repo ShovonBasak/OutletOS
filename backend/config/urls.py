@@ -45,6 +45,7 @@ from finance.views import (
     AccountTransferViewSet,
     CapitalTransactionViewSet,
     AccountBalanceCheckViewSet,
+    StaffCashView,
 )
 from income.views import OtherIncomeCategoryViewSet, OtherIncomeViewSet
 from reports.views import (
@@ -98,6 +99,7 @@ urlpatterns = [
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/me/", MeView.as_view(), name="me"),
     path("api/auth/change-password/", ChangePasswordView.as_view(), name="change_password"),
+    path("api/cash/", StaffCashView.as_view(), name="staff_cash"),
     path("api/price-resolve/", price_resolve, name="price_resolve"),
     path("api/reports/pnl/", pnl_report, name="pnl_report"),
     path("api/reports/settlements/", settlement_report, name="settlement_report"),

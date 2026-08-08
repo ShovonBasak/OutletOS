@@ -1,7 +1,10 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.permissions import IsOwner, IsOwnerOrReadOnly
 from .models import (
@@ -188,3 +191,101 @@ class AccountBalanceCheckViewSet(viewsets.ModelViewSet):
                 entered_by=self.request.user,
                 note=f"Balance reconciliation: {check.get_reason_display() or 'Adjustment'}",
             )
+
+
+class StaffCashView(APIView):
+    """
+    GET  — returns the primary cash account balance + all other active accounts.
+    POST — creates a transfer from primary cash to another account.
+    Accessible to any authenticated user (staff or owner).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _cash_account(self):
+        return FinancialAccount.objects.filter(is_primary_cash=True, is_active=True).first()
+
+    def get(self, request):
+        cash = self._cash_account()
+        if not cash:
+            return Response({"error": "No primary cash account configured."}, status=404)
+
+        others = (
+            FinancialAccount.objects
+            .filter(is_active=True)
+            .exclude(pk=cash.pk)
+            .values("id", "name", "account_type")
+        )
+        return Response({
+            "cash": {
+                "id": cash.id,
+                "name": cash.name,
+                "balance": str(cash.current_balance),
+            },
+            "accounts": list(others),
+        })
+
+    def post(self, request):
+        cash = self._cash_account()
+        if not cash:
+            return Response({"error": "No primary cash account configured."}, status=404)
+
+        to_id = request.data.get("to_account")
+        amount_raw = request.data.get("amount", "")
+        note = request.data.get("note", "").strip()
+
+        try:
+            amount = Decimal(str(amount_raw))
+        except (InvalidOperation, ValueError):
+            return Response({"error": "Invalid amount."}, status=400)
+
+        if amount <= 0:
+            return Response({"error": "Amount must be greater than zero."}, status=400)
+
+        if amount > cash.current_balance:
+            return Response({"error": "Transfer amount exceeds available cash balance."}, status=400)
+
+        try:
+            to_account = FinancialAccount.objects.get(pk=to_id, is_active=True)
+        except FinancialAccount.DoesNotExist:
+            return Response({"error": "Destination account not found."}, status=400)
+
+        if to_account.pk == cash.pk:
+            return Response({"error": "Cannot transfer to the same account."}, status=400)
+
+        from django.utils.timezone import now
+        transfer_date = now().date()
+        transfer_note = note or f"Transfer to {to_account.name}"
+
+        transfer = AccountTransfer.objects.create(
+            from_account=cash,
+            to_account=to_account,
+            amount=amount,
+            date=transfer_date,
+            note=transfer_note,
+            entered_by=request.user,
+        )
+        AccountTransaction.objects.create(
+            account=cash,
+            transaction_type="TRANSFER_OUT",
+            amount=-amount,
+            date=transfer_date,
+            source_type="ACCOUNT_TRANSFER",
+            source_id=transfer.id,
+            entered_by=request.user,
+            note=transfer_note,
+        )
+        AccountTransaction.objects.create(
+            account=to_account,
+            transaction_type="TRANSFER_IN",
+            amount=amount,
+            date=transfer_date,
+            source_type="ACCOUNT_TRANSFER",
+            source_id=transfer.id,
+            entered_by=request.user,
+            note=f"Transfer from {cash.name}",
+        )
+
+        return Response({
+            "detail": "Transfer recorded.",
+            "new_cash_balance": str(cash.current_balance),
+        })
