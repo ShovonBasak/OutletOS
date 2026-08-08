@@ -4,3 +4,9 @@ out/
 .env.local
 next-env.d.ts
 *.tsbuildinfo
+
+# PWA — generated at build time, not committed
+public/sw.js
+public/sw.js.map
+public/workbox-*.js
+public/workbox-*.js.map
