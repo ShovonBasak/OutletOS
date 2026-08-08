@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@/lib/auth";
 
 const TILES = [
   { href: "/owner/accounts", icon: "⇌", label: "Accounts" },
@@ -11,10 +10,10 @@ const TILES = [
   { href: "/owner/team", icon: "◈", label: "Team & outlets" },
   { href: "/owner/settings", icon: "⚙", label: "Settings & promos" },
   { href: "/owner/setup", icon: "🧩", label: "Setup (ingredients & recipes)" },
+  { href: "/owner/profile", icon: "◉", label: "Profile & password" },
 ];
 
 export default function MoreHub() {
-  const { logout } = useAuth();
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -30,10 +29,6 @@ export default function MoreHub() {
           </Link>
         ))}
       </div>
-
-      <button className="btn btn-ghost" onClick={logout}>
-        Log out
-      </button>
     </div>
   );
 }

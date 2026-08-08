@@ -10,7 +10,7 @@ def health(_request):
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView
+from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView
 from catalog.views import (
     OutletViewSet,
     ProductViewSet,
@@ -97,6 +97,7 @@ urlpatterns = [
     path("api/auth/login/", RoleTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/me/", MeView.as_view(), name="me"),
+    path("api/auth/change-password/", ChangePasswordView.as_view(), name="change_password"),
     path("api/price-resolve/", price_resolve, name="price_resolve"),
     path("api/reports/pnl/", pnl_report, name="pnl_report"),
     path("api/reports/settlements/", settlement_report, name="settlement_report"),

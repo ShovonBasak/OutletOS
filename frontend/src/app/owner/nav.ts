@@ -59,6 +59,7 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/approvals", "Approvals"],
   ["/owner/reports", "Reports"],
   ["/owner/more", "More"],
+  ["/owner/profile", "Profile"],
   ["/owner/products/edit-recipe", "Edit recipe"],
   ["/owner/products/add-combo", "Add combo"],
   ["/owner/products/add", "Add product"],
@@ -92,7 +93,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   },
   {
     tab: "/owner/more",
-    prefixes: ["/owner/more", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
+    prefixes: ["/owner/more", "/owner/profile", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
   },
 ];
 
