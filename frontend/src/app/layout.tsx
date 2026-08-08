@@ -12,8 +12,8 @@ export const metadata: Metadata = {
     title: "OutletOS",
   },
   icons: {
-    icon: "/icons/icon.svg",
-    apple: "/icons/icon.svg",
+    icon: "/icons/icon-192.png",
+    apple: "/icons/apple-icon.png",
   },
 };
 

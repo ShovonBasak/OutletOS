@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "gen-icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -20,6 +21,7 @@
     "@types/react-dom": "18.3.0",
     "autoprefixer": "10.4.19",
     "postcss": "8.4.39",
+    "sharp": "^0.35.3",
     "tailwindcss": "3.4.6",
     "typescript": "5.5.3"
   }
