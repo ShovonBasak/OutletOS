@@ -13,9 +13,15 @@ function statusLabel(c: DailyClosing): string {
   return "Draft";
 }
 
-function varianceNote(c: DailyClosing): string {
+function varianceNote(c: DailyClosing): { text: string; flagged: boolean } {
   const fc = c.stock_counts.find((s) => s.flag);
-  return fc ? `${fc.derived_walkin_sold} pcs ${fc.product_name}` : "—";
+  if (fc) {
+    return { text: `${fc.product_name} (${fc.derived_walkin_sold} pcs)`, flagged: true };
+  }
+  if (c.stock_counts.length > 0) {
+    return { text: "OK", flagged: false };
+  }
+  return { text: "—", flagged: false };
 }
 
 export default function ClosingsApprovals() {
@@ -57,11 +63,12 @@ export default function ClosingsApprovals() {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="datatable min-w-[640px]">
+        <table className="datatable min-w-[760px]">
           <thead>
             <tr>
               <th>Date</th>
               <th>Revenue</th>
+              <th>Online sell</th>
               <th>Cash+bKash+card</th>
               <th>Stock variance</th>
               <th>Status</th>
@@ -69,12 +76,17 @@ export default function ClosingsApprovals() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((c) => (
+            {rows.map((c) => {
+              const variance = varianceNote(c);
+              return (
               <tr key={c.id}>
                 <td>{shortDate(c.closing_date)}</td>
                 <td>{bdt(c.channel_day_net_revenue)}</td>
+                <td>{bdt(c.online_payments)}</td>
                 <td>{bdt(c.total_offline_sales)}</td>
-                <td className={c.has_flag ? "text-chili-deep" : ""}>{varianceNote(c)}</td>
+                <td className={variance.flagged ? "text-chili-deep font-semibold" : variance.text === "OK" ? "text-leaf-deep" : "text-ink-soft"}>
+                  {variance.text}
+                </td>
                 <td>
                   <Stamp status={statusLabel(c)} flat />
                 </td>
@@ -90,10 +102,11 @@ export default function ClosingsApprovals() {
                   ) : null}
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-ink-soft">
+                <td colSpan={7} className="text-ink-soft">
                   No closings.
                 </td>
               </tr>

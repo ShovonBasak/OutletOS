@@ -9,6 +9,24 @@ import { useOperatingDay } from "@/lib/staffDay";
 import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Paginated, PreparationLog, Product, RawStock, DisplayStock } from "@/lib/types";
 
+// ---- per-product prep memory (localStorage) ----
+const PREP_MEMORY_KEY = "cp_prep_memory";
+type PrepMemoryEntry = { unit: "PACK" | "PIECE"; value: number };
+
+function loadPrepMemory(): Record<number, PrepMemoryEntry> {
+  try {
+    return JSON.parse(localStorage.getItem(PREP_MEMORY_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePrepMemory(productId: number, unit: "PACK" | "PIECE", value: number) {
+  const mem = loadPrepMemory();
+  mem[productId] = { unit, value };
+  localStorage.setItem(PREP_MEMORY_KEY, JSON.stringify(mem));
+}
+
 /** Max whole pieces that can be prepared given current raw + component stock. */
 function maxPreparablePieces(
   product: Product,
@@ -169,6 +187,17 @@ export default function PrepPage() {
   const maxPieces = product ? maxPreparablePieces(product, rawByIngredient, displayByProduct) : 0;
   const maxPacks = product ? maxPreparablePacks(product, rawByIngredient) : 0;
 
+  // Restore last-used unit + quantity when the selected product changes.
+  useEffect(() => {
+    if (productId === "") return;
+    const saved = loadPrepMemory()[productId];
+    if (saved) {
+      setUnit(saved.unit);
+      if (saved.unit === "PACK") setPacks(saved.value);
+      else setPieces(saved.value);
+    }
+  }, [productId]);
+
   // When product changes, clamp current values to new limits.
   useEffect(() => {
     if (maxPieces > 0) setPieces((prev) => Math.min(prev, maxPieces) || 1);
@@ -198,6 +227,7 @@ export default function PrepPage() {
           pieces_prepared: unit === "PIECE" ? pieces : 0,
         }),
       });
+      savePrepMemory(productId, unit, unit === "PACK" ? packs : pieces);
       setMsg("Logged ✓");
       refresh();
     } catch {
