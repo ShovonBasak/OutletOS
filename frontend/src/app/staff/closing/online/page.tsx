@@ -198,6 +198,7 @@ export default function OnlineSellScreen() {
             key={p.id}
             name={p.name}
             count={qty[p.id] ?? 0}
+            price={Number(p.selling_price) || 0}
             max={maxQty[p.id] ?? 0}
             onAdjust={(d) => adjust(p.id, d)}
             onSet={(v) => setAbsolute(p.id, v)}
@@ -218,6 +219,7 @@ export default function OnlineSellScreen() {
 function ProductRow({
   name,
   count,
+  price,
   max,
   onAdjust,
   onSet,
@@ -225,19 +227,25 @@ function ProductRow({
 }: {
   name: string;
   count: number;
+  price: number;
   max: number;
   onAdjust: (delta: number) => void;
   onSet: (v: number) => void;
   readOnly?: boolean;
 }) {
+  const lineValue = count > 0 && price > 0 ? bdt(count * price) : null;
+
   return (
     <div className="flex items-center justify-between py-2.5">
       <div className="flex flex-col min-w-0">
         <span className={`font-mono text-sm ${count > 0 ? "font-semibold text-ink" : "text-ink-soft"}`}>
           {name}
         </span>
-        {max > 0 && !readOnly && (
+        {!readOnly && max > 0 && (
           <span className="font-mono text-[10px] text-ink-soft/60">{max} prepared</span>
+        )}
+        {lineValue && (
+          <span className="font-mono text-[11px] text-leaf-deep">{lineValue}</span>
         )}
       </div>
 

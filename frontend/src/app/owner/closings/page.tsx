@@ -82,7 +82,7 @@ export default function ClosingsApprovals() {
               <tr key={c.id}>
                 <td>{shortDate(c.closing_date)}</td>
                 <td>{bdt(c.channel_day_net_revenue)}</td>
-                <td>{bdt(c.online_payments)}</td>
+                <td>{bdt(c.sales_lines.filter(l => l.source === "STAFF_ENTRY").reduce((s, l) => s + Number(l.gross_amount), 0))}</td>
                 <td>{bdt(c.total_offline_sales)}</td>
                 <td className={variance.flagged ? "text-chili-deep font-semibold" : variance.text === "OK" ? "text-leaf-deep" : "text-ink-soft"}>
                   {variance.text}
