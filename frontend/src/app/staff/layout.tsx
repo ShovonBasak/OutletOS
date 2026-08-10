@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { useAuth, useRequireRole } from "@/lib/auth";
+import { api } from "@/lib/api";
 import { getTodayOperatingDay } from "@/lib/operatingDay";
 import { OperatingDayContext } from "@/lib/staffDay";
 import { today } from "@/lib/format";
@@ -44,7 +45,17 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   }
 
   useEffect(() => {
-    refreshDay();
+    if (!user) return;
+    // Detect the active work date: the most recent non-locked closing date.
+    // This handles the case where yesterday's closing is still open on a new calendar day.
+    api<{ date: string }>(`/daily-closings/active-work-date/?outlet=${outlet}`)
+      .then(({ date }) => {
+        workDateRef.current = date;
+        _setWorkDate(date);
+        return getTodayOperatingDay(outlet, date);
+      })
+      .then(setDay)
+      .catch(() => refreshDay());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, outlet]);
 

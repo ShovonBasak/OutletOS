@@ -729,6 +729,34 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
         outlet = instance.outlet
         product = instance.product
         pieces = instance.pieces_prepared
+
+        # Block deletion when a downstream product was prepared using this
+        # product as a display-stock component on the same day.
+        component_links = list(
+            product.used_as_prep_component.select_related("product").all()
+        )
+        if component_links:
+            from django.db.models import Q as DQ
+            op_date = instance.op_date or instance.timestamp.date()
+            downstream_products = [link.product for link in component_links]
+            blocking_logs = PreparationLog.objects.filter(
+                outlet=outlet,
+                product__in=downstream_products,
+            ).filter(
+                DQ(op_date=op_date)
+                | DQ(op_date__isnull=True, timestamp__date=op_date)
+            ).select_related("product")
+            if blocking_logs.exists():
+                names = ", ".join(
+                    sorted({log.product.name for log in blocking_logs})
+                )
+                raise ValidationError(
+                    f"Cannot delete this prep log — {names} "
+                    f"{'has' if names.count(',') == 0 else 'have'} already been "
+                    f"prepared using {product.name} pieces today. "
+                    f"Delete {'that' if names.count(',') == 0 else 'those'} prep log(s) first."
+                )
+
         if instance.source == PrepSource.FRESH:
             restock_from_preparation(outlet, product, pieces)
         # For CARRIED_FORWARD, no raw stock was touched — only undo DisplayStock.

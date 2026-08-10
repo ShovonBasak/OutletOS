@@ -25,6 +25,8 @@ export const OWNER_NAV: NavGroup[] = [
     items: [
       { href: "/owner/stock", label: "Stock levels" },
       { href: "/owner/sales", label: "Sales report" },
+      { href: "/owner/sell-history", label: "Sell history" },
+      { href: "/owner/stock-in-history", label: "Stock in history" },
       { href: "/owner/settlements", label: "Settlements" },
       { href: "/owner/pnl", label: "Profit & loss" },
       { href: "/owner/packaging", label: "Packaging report" },
@@ -33,6 +35,7 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Manage",
     items: [
+      { href: "/owner/sell-corrections", label: "Sell corrections" },
       { href: "/owner/accounts", label: "Accounts" },
       { href: "/owner/expenses", label: "Expenses" },
       { href: "/owner/other-income", label: "Other income" },
@@ -51,6 +54,12 @@ export const OWNER_NAV: NavGroup[] = [
   },
 ];
 
+// True when pathname is exactly href or is a sub-route under it (requires a
+// "/" boundary so "/owner/stock-in" never matches "/owner/stock-in-history").
+function under(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href + "/");
+}
+
 // Flattened, longest-href-first so sub-routes resolve to their parent nav item.
 const FLAT = OWNER_NAV.flatMap((g) => g.items).sort((a, b) => b.href.length - a.href.length);
 
@@ -68,9 +77,9 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
 ];
 
 export function titleFor(pathname: string): string {
-  const sub = SUBPAGE_TITLES.find(([href]) => pathname.startsWith(href));
+  const sub = SUBPAGE_TITLES.find(([href]) => under(pathname, href));
   if (sub) return sub[1];
-  const match = FLAT.find((n) => (n.href === "/owner" ? pathname === "/owner" : pathname.startsWith(n.href)));
+  const match = FLAT.find((n) => (n.href === "/owner" ? pathname === "/owner" : under(pathname, n.href)));
   return match?.label ?? "Dashboard";
 }
 
@@ -89,17 +98,17 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
     tab: "/owner/reports",
-    prefixes: ["/owner/reports", "/owner/stock", "/owner/sales", "/owner/settlements", "/owner/pnl", "/owner/packaging"],
+    prefixes: ["/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history", "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging"],
   },
   {
     tab: "/owner/more",
-    prefixes: ["/owner/more", "/owner/profile", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
+    prefixes: ["/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
   },
 ];
 
 export function mobileTabFor(pathname: string): string {
   for (const g of TAB_GROUPS) {
-    if (g.prefixes.some((p) => pathname.startsWith(p))) return g.tab;
+    if (g.prefixes.some((p) => under(pathname, p))) return g.tab;
   }
   return "/owner";
 }
@@ -107,7 +116,7 @@ export function mobileTabFor(pathname: string): string {
 // Which accordion group (if any) contains the active route — used to auto-open it.
 export function activeGroupFor(pathname: string): string | null {
   for (const g of OWNER_NAV) {
-    if (g.items.some((n) => (n.href === "/owner" ? false : pathname.startsWith(n.href)))) {
+    if (g.items.some((n) => (n.href === "/owner" ? false : under(pathname, n.href)))) {
       return g.group;
     }
   }

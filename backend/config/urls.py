@@ -57,6 +57,11 @@ from reports.views import (
     channel_breakdown,
     stock_value,
     daily_trend,
+    sell_history,
+    stock_in_history,
+    daily_sells,
+    correct_sells,
+    rebuild_rawstock_api,
 )
 
 router = DefaultRouter()
@@ -109,6 +114,11 @@ urlpatterns = [
     path("api/reports/channel-breakdown/", channel_breakdown, name="channel_breakdown"),
     path("api/reports/stock-value/", stock_value, name="stock_value"),
     path("api/reports/daily-trend/", daily_trend, name="daily_trend"),
+    path("api/reports/sell-history/", sell_history, name="sell_history"),
+    path("api/reports/stock-in-history/", stock_in_history, name="stock_in_history"),
+    path("api/reports/daily-sells/", daily_sells, name="daily_sells"),
+    path("api/reports/correct-sells/", correct_sells, name="correct_sells"),
+    path("api/reports/rebuild-rawstock/", rebuild_rawstock_api, name="rebuild_rawstock_api"),
     path("api/", include(router.urls)),
 ]
 

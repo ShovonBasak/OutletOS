@@ -1,0 +1,167 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Sell History — {{ site_title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+  #sell-history-wrap {
+    padding: 1rem 0;
+    overflow-x: auto;
+  }
+  #filter-form {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+  }
+  #filter-form label { font-weight: bold; font-size: 0.85rem; }
+  #filter-form input[type="date"] {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.9rem;
+  }
+  #filter-form button {
+    background: #417690;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 14px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  #filter-form button:hover { background: #2b5068; }
+
+  #sell-table {
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    min-width: 100%;
+    white-space: nowrap;
+  }
+  #sell-table th, #sell-table td {
+    border: 1px solid #ddd;
+    padding: 5px 9px;
+    text-align: center;
+  }
+  #sell-table th {
+    background: #417690;
+    color: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  #sell-table th.product-col, #sell-table td.product-col {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    background: #f8f8f8;
+    min-width: 180px;
+    max-width: 220px;
+    white-space: normal;
+  }
+  #sell-table th.product-col { background: #417690; color: #fff; z-index: 4; }
+  #sell-table tr:nth-child(even) td { background: #f5f9fb; }
+  #sell-table tr:nth-child(even) td.product-col { background: #eef4f7; }
+  #sell-table td.zero { color: #bbb; }
+  #sell-table td.total-col {
+    font-weight: bold;
+    background: #eef4f7 !important;
+  }
+  #sell-table td.stock-col {
+    font-weight: bold;
+  }
+  #sell-table td.stock-col.low { color: #c0392b; }
+  #sell-table td.stock-col.ok  { color: #27ae60; }
+  #sell-table tr.footer-row td {
+    background: #2b5068 !important;
+    color: #fff;
+    font-weight: bold;
+  }
+  #sell-table tr.footer-row td.product-col {
+    background: #2b5068 !important;
+    color: #fff;
+  }
+  .summary-chips {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .chip {
+    background: #eef4f7;
+    border: 1px solid #c2d9e5;
+    border-radius: 4px;
+    padding: 4px 12px;
+    font-size: 0.82rem;
+  }
+  .chip span { font-weight: bold; color: #417690; }
+</style>
+{% endblock %}
+
+{% block content_title %}
+<h1>Sell History</h1>
+{% endblock %}
+
+{% block content %}
+<div id="sell-history-wrap">
+
+  <!-- Date range filter -->
+  <form id="filter-form" method="get">
+    <label for="from_date">From</label>
+    <input type="date" id="from_date" name="from_date" value="{{ from_date }}">
+    <label for="to_date">To</label>
+    <input type="date" id="to_date" name="to_date" value="{{ to_date }}">
+    <button type="submit">Apply</button>
+    <a href="?" style="font-size:0.82rem; color:#417690;">Reset</a>
+  </form>
+
+  <!-- Summary chips -->
+  <div class="summary-chips">
+    <div class="chip">Period: <span>{{ from_date }} → {{ to_date }}</span></div>
+    <div class="chip">Products: <span>{{ products|length }}</span></div>
+    <div class="chip">Total sold: <span>{{ grand_total }}</span></div>
+  </div>
+
+  {% if dates %}
+  <table id="sell-table">
+    <thead>
+      <tr>
+        <th class="product-col">Product</th>
+        {% for d in dates %}<th>{{ d|date:"d/m" }}</th>{% endfor %}
+        <th class="total-col">Total</th>
+        <th class="stock-col">Stock</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="product-col">{{ row.name }}</td>
+        {% for v in row.daily %}
+          <td {% if v == 0 %}class="zero"{% endif %}>{{ v|default:"—" }}</td>
+        {% endfor %}
+        <td class="total-col">{{ row.total }}</td>
+        <td class="stock-col {% if row.stock == 0 %}low{% elif row.stock > 0 %}ok{% endif %}">
+          {% if row.stock is not None %}{{ row.stock }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="footer-row">
+        <td class="product-col">TOTAL</td>
+        {% for t in date_totals %}<td>{{ t }}</td>{% endfor %}
+        <td>{{ grand_total }}</td>
+        <td>—</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <p>No sales data found for the selected period.</p>
+  {% endif %}
+
+</div>
+{% endblock %}

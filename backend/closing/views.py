@@ -46,6 +46,22 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             qs = qs.filter(status=status_param)
         return qs
 
+    @action(detail=False, methods=["get"], url_path="active-work-date")
+    def active_work_date(self, request):
+        """Return the most recent non-LOCKED closing date for the outlet.
+        Falls back to today when all closings are locked or none exist."""
+        from datetime import date as date_cls
+        outlet = request.query_params.get("outlet", 1)
+        closing = (
+            DailyClosing.objects.filter(outlet_id=outlet)
+            .exclude(status=ClosingStatus.LOCKED)
+            .order_by("-closing_date")
+            .first()
+        )
+        if closing:
+            return Response({"date": str(closing.closing_date)})
+        return Response({"date": str(date_cls.today())})
+
     def perform_create(self, serializer):
         closing = serializer.save(staff=self.request.user)
         # Link to today's OperatingDay so the gated flow knows closing has begun.

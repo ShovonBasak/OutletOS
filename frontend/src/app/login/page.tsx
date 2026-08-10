@@ -42,6 +42,8 @@ export default function LoginPage() {
               <span className="field-label">Phone (login id)</span>
               <input
                 className="field-input"
+                type="tel"
+                inputMode="numeric"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="017…"

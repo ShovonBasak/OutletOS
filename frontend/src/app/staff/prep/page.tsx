@@ -207,7 +207,16 @@ export default function PrepPage() {
 
   const canLog = products.length > 0 && productId !== "" && (unit === "PIECE" ? pieces <= maxPieces : packs <= maxPacks);
 
-  if (day?.status === "CLOSED") {
+  if (day === null) {
+    return (
+      <div className="flex flex-col gap-3 pt-4">
+        <h1 className="font-display text-xl font-bold">Preparation log</h1>
+        <p className="font-mono text-xs text-ink-soft">Loading…</p>
+      </div>
+    );
+  }
+
+  if (day.status === "CLOSED") {
     return (
       <div className="flex flex-col gap-3 pt-4">
         <h1 className="font-display text-xl font-bold">Preparation log</h1>
@@ -407,8 +416,13 @@ export default function PrepPage() {
                 title="Delete and revert stock"
                 onClick={async () => {
                   if (!confirm("Delete this entry? Stock will be restored.")) return;
-                  await api(`/preparation-logs/${l.id}/`, { method: "DELETE" });
-                  refresh();
+                  try {
+                    await api(`/preparation-logs/${l.id}/`, { method: "DELETE" });
+                    refresh();
+                  } catch (err) {
+                    const body = (err as { body?: { detail?: string } })?.body;
+                    alert(body?.detail ?? "Could not delete prep log. Please try again.");
+                  }
                 }}
               >
                 ✕

@@ -61,22 +61,52 @@ export default function SalesSummaryScreen() {
   const walkinLines = closing.sales_lines.filter((l) => l.source === "SYSTEM_DERIVED");
   const onlineLines = closing.sales_lines.filter((l) => l.source === "STAFF_ENTRY");
 
-  // Build per-product rows from stock_counts (backend already computes the derived fields)
-  const rows: ProductRow[] = closing.stock_counts.map((sc) => {
-    const wl = walkinLines.find((l) => l.product === sc.product);
-    const ol = onlineLines.find((l) => l.product === sc.product);
-    return {
-      id: sc.product,
-      name: sc.product_name,
-      walkin: sc.derived_walkin_sold,
-      walkinRevenue: wl ? Number(wl.net_amount) : 0,
-      online: sc.app_channel_sold,
-      onlineRevenue: ol ? Number(ol.net_amount) : 0,
-      wastage: sc.wastage_pieces,
-      wastageCost: Number(sc.wastage_cost) || 0,
-      flag: sc.flag,
-    };
-  });
+  // Build per-product rows. Prefer stock_counts (post-count-step derived data);
+  // fall back to sales_lines directly when no counts have been entered yet (e.g. imported historical days).
+  let rows: ProductRow[];
+  if (closing.stock_counts.length > 0) {
+    rows = closing.stock_counts.map((sc) => {
+      const wl = walkinLines.find((l) => l.product === sc.product);
+      const ol = onlineLines.find((l) => l.product === sc.product);
+      return {
+        id: sc.product,
+        name: sc.product_name,
+        walkin: sc.derived_walkin_sold,
+        walkinRevenue: wl ? Number(wl.net_amount) : 0,
+        online: sc.app_channel_sold,
+        onlineRevenue: ol ? Number(ol.net_amount) : 0,
+        wastage: sc.wastage_pieces,
+        wastageCost: Number(sc.wastage_cost) || 0,
+        flag: sc.flag,
+      };
+    });
+  } else {
+    // No count entries yet — build rows directly from sales_lines
+    const productMap = new Map<number, ProductRow>();
+    for (const l of walkinLines) {
+      const row = productMap.get(l.product) ?? {
+        id: l.product, name: l.product_name,
+        walkin: 0, walkinRevenue: 0,
+        online: 0, onlineRevenue: 0,
+        wastage: 0, wastageCost: 0, flag: false,
+      };
+      row.walkin += l.quantity_sold;
+      row.walkinRevenue += Number(l.net_amount);
+      productMap.set(l.product, row);
+    }
+    for (const l of onlineLines) {
+      const row = productMap.get(l.product) ?? {
+        id: l.product, name: l.product_name,
+        walkin: 0, walkinRevenue: 0,
+        online: 0, onlineRevenue: 0,
+        wastage: 0, wastageCost: 0, flag: false,
+      };
+      row.online += l.quantity_sold;
+      row.onlineRevenue += Number(l.net_amount);
+      productMap.set(l.product, row);
+    }
+    rows = Array.from(productMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
 
   const totalWalkinRevenue = walkinLines.reduce((s, l) => s + Number(l.net_amount), 0);
   const totalOnlineRevenue = onlineLines.reduce((s, l) => s + Number(l.net_amount), 0);
@@ -90,7 +120,11 @@ export default function SalesSummaryScreen() {
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="font-display text-xl font-bold">Sales summary</h1>
-        <p className="text-xs text-ink-soft">Step 2 · view-only — derived from your count entries</p>
+        <p className="text-xs text-ink-soft">
+          {closing.stock_counts.length > 0
+            ? "Step 3 · view-only — derived from your count entries"
+            : "Step 3 · view-only — sales recorded for this day"}
+        </p>
       </div>
 
       {/* Summary chips */}
@@ -125,7 +159,7 @@ export default function SalesSummaryScreen() {
       {/* Per-product breakdown */}
       {rows.length === 0 ? (
         <p className="font-mono text-xs text-ink-soft">
-          No data yet. Complete step 1 (Count & online sell) first.
+          No sales recorded yet.
         </p>
       ) : (
         <div className="flex flex-col gap-2">

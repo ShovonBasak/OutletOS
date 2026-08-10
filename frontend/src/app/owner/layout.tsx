@@ -34,7 +34,9 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
   }
 
   const isActive = (href: string) =>
-    href === "/owner" ? pathname === "/owner" : pathname.startsWith(href);
+    href === "/owner"
+      ? pathname === "/owner"
+      : pathname === href || pathname.startsWith(href + "/");
 
   const toggle = (group: string) =>
     setOpen((prev) => {

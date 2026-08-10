@@ -94,7 +94,7 @@ function ReviewToggle({ checked, onToggle }: { checked: boolean; onToggle: () =>
 export default function CountScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const { workDate } = useOperatingDay();
+  const { workDate, day } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
   const opDate = workDate || today();
 
@@ -191,6 +191,15 @@ export default function CountScreen() {
   }, 0);
 
   const checkedCount = products.filter((p) => checkedIds.has(p.id)).length;
+
+  if (day === null) {
+    return (
+      <div className="flex flex-col gap-3 pt-4">
+        <h1 className="font-display text-xl font-bold">Count remains & wastage</h1>
+        <p className="font-mono text-xs text-ink-soft">Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">

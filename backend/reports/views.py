@@ -6,28 +6,36 @@ Three distinct loss categories are kept separate, per the data model:
   Shrinkage  — ingredient cost lost before prep (day-start storage level)
 Packaging (periodic-count supplies) is reported as its own line as well.
 """
+from collections import defaultdict
 from decimal import Decimal
 
+from django.db import transaction
+from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from catalog.models import ProductType
+from catalog.models import Outlet, Product, ProductType, TrackingMode
 from closing.models import (
     ChannelSettlement,
     DailyChannelDiscount,
     DailyClosing,
     DailyClosingSalesLine,
     DailyClosingStockCount,
+    LineSource,
 )
 from costs.models import CostType, Expense
 from income.models import OtherIncome
+from sales.models import SalesChannel
+from sales.pricing import resolve_price
 from stock.models import (
     DayStartStockCheck,
     PeriodicStockCheck,
     PrepSource,
     PreparationLog,
+    RawStock,
+    StockInItem,
     StockInRecord,
     StockInStatus,
 )
@@ -468,3 +476,486 @@ def dashboard_summary(request):
         "pending_stock_ins": pending_stock.count(),
         "closings_awaiting_review": awaiting.count(),
     })
+
+
+def _product_remaining_stock(product: Product, outlet_id) -> int | None:
+    """Units of product that can still be made from current RawStock."""
+    recipes = list(product.recipes.select_related("ingredient").all())
+    if not recipes:
+        return None
+    minimum = None
+    for r in recipes:
+        rs = RawStock.objects.filter(outlet_id=outlet_id, ingredient=r.ingredient).first()
+        qty = rs.quantity_available if rs else Decimal("0")
+        available = int(qty / r.quantity_per_unit) if r.quantity_per_unit else int(qty)
+        minimum = available if minimum is None else min(minimum, available)
+    return minimum
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sell_history(request):
+    """
+    Date-wise sell quantities per product.
+    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD
+    Returns { dates: [...], rows: [{id, name, category, daily: {date: qty}, total, stock}] }
+    """
+    start, end = _default_range(request)
+    outlet = request.query_params.get("outlet")
+
+    lines = (
+        DailyClosingSalesLine.objects
+        .filter(
+            daily_closing__closing_date__gte=start,
+            daily_closing__closing_date__lte=end,
+        )
+        .select_related("product", "daily_closing")
+        .order_by("daily_closing__closing_date")
+    )
+    if outlet:
+        lines = lines.filter(daily_closing__outlet_id=outlet)
+
+    # {product_id: {date_str: qty}}
+    sales: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    product_meta: dict[int, dict] = {}
+    dates_set: set[str] = set()
+
+    for line in lines:
+        pid = line.product_id
+        d = str(line.daily_closing.closing_date)
+        sales[pid][d] += line.quantity_sold
+        dates_set.add(d)
+        if pid not in product_meta:
+            product_meta[pid] = {
+                "id": pid,
+                "name": line.product.name,
+                "category": line.product.category or "",
+            }
+
+    sorted_dates = sorted(dates_set)
+    sorted_pids = sorted(product_meta, key=lambda p: product_meta[p]["name"])
+
+    # Bulk-fetch products for stock calc
+    products_qs = {
+        p.id: p for p in
+        Product.objects.prefetch_related("recipes__ingredient").filter(id__in=sorted_pids)
+    }
+
+    rows = []
+    for pid in sorted_pids:
+        meta = product_meta[pid]
+        daily = {d: sales[pid].get(d, 0) for d in sorted_dates}
+        total = sum(daily.values())
+        product = products_qs.get(pid)
+        stock = _product_remaining_stock(product, outlet) if product and outlet else None
+        rows.append({
+            "id": meta["id"],
+            "name": meta["name"],
+            "category": meta["category"],
+            "daily": daily,
+            "total": total,
+            "stock": stock,
+        })
+
+    return Response({"dates": sorted_dates, "rows": rows})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def stock_in_history(request):
+    """
+    Date-wise approved stock-in quantities per ingredient (in base units).
+    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD
+    Returns { dates: [...], rows: [{id, name, base_unit, group, daily: {date: qty}, total, stock}] }
+    """
+    start, end = _default_range(request)
+    outlet = request.query_params.get("outlet")
+
+    items = (
+        StockInItem.objects
+        .filter(
+            stock_in_record__status=StockInStatus.APPROVED,
+            stock_in_record__stock_in_date__gte=start,
+            stock_in_record__stock_in_date__lte=end,
+            ingredient__isnull=False,
+        )
+        .select_related(
+            "ingredient",
+            "pack_definition",
+            "stock_in_record",
+        )
+        .order_by("stock_in_record__stock_in_date")
+    )
+    if outlet:
+        items = items.filter(stock_in_record__outlet_id=outlet)
+
+    # {ingredient_id: {date_str: qty_in_base_units}}
+    received: dict[int, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    ingredient_meta: dict[int, dict] = {}
+    dates_set: set[str] = set()
+
+    for item in items:
+        iid = item.ingredient_id
+        d = str(item.stock_in_record.stock_in_date)
+        received[iid][d] += item.base_unit_quantity()
+        dates_set.add(d)
+        if iid not in ingredient_meta:
+            ing = item.ingredient
+            ingredient_meta[iid] = {
+                "id": iid,
+                "name": ing.name,
+                "base_unit": ing.base_unit,
+                "group": ing.group or "",
+            }
+
+    sorted_dates = sorted(dates_set)
+    sorted_iids = sorted(ingredient_meta, key=lambda i: ingredient_meta[i]["name"])
+
+    # Bulk-fetch current RawStock
+    raw_stocks = {}
+    if outlet:
+        for rs in RawStock.objects.filter(outlet_id=outlet, ingredient_id__in=sorted_iids):
+            raw_stocks[rs.ingredient_id] = rs.quantity_available
+
+    rows = []
+    for iid in sorted_iids:
+        meta = ingredient_meta[iid]
+        daily = {d: float(received[iid].get(d, 0)) for d in sorted_dates}
+        total = sum(daily.values())
+        stock = float(raw_stocks[iid]) if iid in raw_stocks else None
+        rows.append({
+            "id": meta["id"],
+            "name": meta["name"],
+            "base_unit": meta["base_unit"],
+            "group": meta["group"],
+            "daily": daily,
+            "total": total,
+            "stock": stock,
+        })
+
+    return Response({"dates": sorted_dates, "rows": rows})
+
+
+# ---------------------------------------------------------------------------
+# Sell corrections
+# ---------------------------------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def daily_sells(request):
+    """
+    All active products with their total sold qty for a given day.
+    ?outlet=1&date=YYYY-MM-DD
+    Returns {date, rows: [{product_id, name, category, quantity_sold, app_sold}]}
+    app_sold = total from non-walk-in channels (floor for corrections).
+    """
+    from datetime import date as date_cls
+    outlet_id = request.query_params.get("outlet", "1")
+    date_str = request.query_params.get("date")
+    if not date_str:
+        return Response({"error": "date required"}, status=400)
+    try:
+        target_date = date_cls.fromisoformat(date_str)
+    except ValueError:
+        return Response({"error": "invalid date"}, status=400)
+
+    products = list(Product.objects.filter(is_active=True).order_by("category", "name"))
+
+    walk_in = next(
+        (ch for ch in SalesChannel.objects.all() if ch.is_walk_in), None
+    )
+    walk_in_id = walk_in.id if walk_in else None
+
+    lines = (
+        DailyClosingSalesLine.objects
+        .filter(
+            daily_closing__outlet_id=outlet_id,
+            daily_closing__closing_date=target_date,
+        )
+        .values("product_id", "channel_id")
+        .annotate(total=Sum("quantity_sold"))
+    )
+
+    total_map: dict[int, int] = defaultdict(int)
+    app_map: dict[int, int] = defaultdict(int)
+    for row in lines:
+        pid = row["product_id"]
+        total_map[pid] += row["total"]
+        if row["channel_id"] != walk_in_id:
+            app_map[pid] += row["total"]
+
+    rows = [
+        {
+            "product_id": p.id,
+            "name": p.name,
+            "category": p.category or "",
+            "quantity_sold": total_map.get(p.id, 0),
+            "app_sold": app_map.get(p.id, 0),
+        }
+        for p in products
+    ]
+    return Response({"date": date_str, "rows": rows})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def correct_sells(request):
+    """
+    Correct walk-in sell quantities for a specific day.
+    Body: {outlet: 1, date: "YYYY-MM-DD", corrections: [{product_id, new_qty}]}
+    Adjusts walk-in DailyClosingSalesLine, syncs PrepLog, applies RawStock delta.
+    """
+    from datetime import date as date_cls
+    outlet_id = int(request.data.get("outlet", 1))
+    date_str = request.data.get("date")
+    corrections = request.data.get("corrections", [])
+
+    if not date_str:
+        return Response({"error": "date required"}, status=400)
+    if not corrections:
+        return Response({"error": "no corrections provided"}, status=400)
+
+    try:
+        target_date = date_cls.fromisoformat(date_str)
+    except ValueError:
+        return Response({"error": "invalid date"}, status=400)
+
+    try:
+        outlet = Outlet.objects.get(id=outlet_id)
+    except Outlet.DoesNotExist:
+        return Response({"error": "outlet not found"}, status=404)
+
+    walk_in = next(
+        (ch for ch in SalesChannel.objects.all() if ch.is_walk_in), None
+    )
+    if not walk_in:
+        return Response({"error": "Walk-in channel not configured"}, status=500)
+
+    daily_closing = DailyClosing.objects.filter(
+        outlet_id=outlet_id, closing_date=target_date
+    ).first()
+    if not daily_closing:
+        return Response({"error": f"No closing record for {target_date}"}, status=404)
+
+    applied = []
+    errors = []
+
+    with transaction.atomic():
+        for corr in corrections:
+            product_id = corr.get("product_id")
+            try:
+                new_total = int(corr.get("new_qty", 0))
+            except (TypeError, ValueError):
+                errors.append(f"Invalid qty for product {product_id}")
+                continue
+
+            if new_total < 0:
+                errors.append(f"Quantity cannot be negative (product {product_id})")
+                continue
+
+            try:
+                product = Product.objects.prefetch_related(
+                    "recipes__ingredient"
+                ).get(id=product_id)
+            except Product.DoesNotExist:
+                errors.append(f"Product {product_id} not found")
+                continue
+
+            all_lines = list(
+                DailyClosingSalesLine.objects.filter(
+                    daily_closing=daily_closing, product=product
+                ).select_related("channel")
+            )
+            old_total = sum(l.quantity_sold for l in all_lines)
+            delta = new_total - old_total
+            if delta == 0:
+                continue
+
+            app_total = sum(
+                l.quantity_sold for l in all_lines if not l.channel.is_walk_in
+            )
+            new_walkin = new_total - app_total
+            if new_walkin < 0:
+                errors.append(
+                    f"{product.name}: new total ({new_total}) is below app sales "
+                    f"({app_total}) — cannot reduce app channel sales here"
+                )
+                continue
+
+            walkin_line = next((l for l in all_lines if l.channel.is_walk_in), None)
+            if new_walkin == 0:
+                if walkin_line:
+                    walkin_line.delete()
+            else:
+                if walkin_line:
+                    walkin_line.quantity_sold = new_walkin
+                    walkin_line.save()
+                else:
+                    try:
+                        price, _ = resolve_price(product, walk_in, target_date)
+                    except Exception:
+                        price = product.selling_price
+                    DailyClosingSalesLine.objects.create(
+                        daily_closing=daily_closing,
+                        product=product,
+                        channel=walk_in,
+                        quantity_sold=new_walkin,
+                        unit_price=price,
+                        source=LineSource.SYSTEM_DERIVED,
+                    )
+
+            preplogs = PreparationLog.objects.filter(
+                outlet=outlet,
+                product=product,
+                source=PrepSource.FRESH,
+            ).filter(
+                Q(op_date=target_date)
+                | Q(op_date__isnull=True, timestamp__date=target_date)
+            )
+            if preplogs.exists():
+                if new_total == 0:
+                    preplogs.delete()
+                else:
+                    preplogs.update(pieces_prepared=new_total, wastage_pieces=0)
+
+            for r in product.recipes.all():
+                ing = r.ingredient
+                if ing.tracking_mode == TrackingMode.ONE_TIME:
+                    continue
+                RawStock.adjust(outlet, ing, -(Decimal(str(delta)) * r.quantity_per_unit))
+
+            applied.append({
+                "product": product.name,
+                "old_qty": old_total,
+                "new_qty": new_total,
+                "delta": delta,
+            })
+
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    return Response({"ok": True, "applied": applied})
+
+
+def _do_rebuild(outlet: Outlet) -> dict:
+    """Full RawStock rebuild replayed from all historical data. Returns summary dict."""
+    _product_cache: dict[int, Product] = {}
+
+    def get_product(pid: int) -> Product:
+        if pid not in _product_cache:
+            _product_cache[pid] = Product.objects.prefetch_related(
+                "recipes__ingredient"
+            ).get(id=pid)
+        return _product_cache[pid]
+
+    def all_dates() -> list:
+        dates: set = set()
+        for d in DayStartStockCheck.objects.filter(
+            operating_day__outlet=outlet, confirmed_qty__isnull=False
+        ).values_list("operating_day__date", flat=True):
+            dates.add(d)
+        for d in StockInItem.objects.filter(
+            stock_in_record__outlet=outlet,
+            stock_in_record__status=StockInStatus.APPROVED,
+            ingredient__isnull=False,
+        ).values_list("stock_in_record__stock_in_date", flat=True):
+            dates.add(d)
+        for log in PreparationLog.objects.filter(outlet=outlet, source=PrepSource.FRESH):
+            dates.add(log.op_date or log.timestamp.date())
+        for d in DailyClosingSalesLine.objects.filter(
+            daily_closing__outlet_id=outlet.id
+        ).values_list("daily_closing__closing_date", flat=True):
+            dates.add(d)
+        return sorted(dates)
+
+    total_sets = total_adds = total_subs = 0
+
+    with transaction.atomic():
+        RawStock.objects.filter(outlet=outlet).update(quantity_available=Decimal("0"))
+
+        for day in all_dates():
+            for dsc in DayStartStockCheck.objects.filter(
+                operating_day__outlet=outlet,
+                operating_day__date=day,
+                confirmed_qty__isnull=False,
+            ).select_related("ingredient"):
+                RawStock.set_to(outlet, dsc.ingredient, dsc.confirmed_qty)
+                total_sets += 1
+
+            for item in StockInItem.objects.filter(
+                stock_in_record__outlet=outlet,
+                stock_in_record__status=StockInStatus.APPROVED,
+                stock_in_record__stock_in_date=day,
+                ingredient__isnull=False,
+            ).select_related("ingredient", "pack_definition"):
+                ing = item.ingredient
+                if ing.tracking_mode == TrackingMode.ONE_TIME:
+                    continue
+                delta = item.base_unit_quantity()
+                if delta:
+                    RawStock.adjust(outlet, ing, delta)
+                    total_adds += 1
+
+            prepped_pids: set[int] = set()
+            for log in PreparationLog.objects.filter(
+                outlet=outlet, source=PrepSource.FRESH,
+            ).filter(
+                Q(op_date=day) | Q(op_date__isnull=True, timestamp__date=day)
+            ).prefetch_related("product__recipes__ingredient"):
+                prepped_pids.add(log.product_id)
+                for r in log.product.recipes.all():
+                    delta = Decimal(str(log.pieces_prepared)) * r.quantity_per_unit
+                    if delta:
+                        RawStock.adjust(outlet, r.ingredient, -delta)
+                        total_subs += 1
+
+            sales_today: dict[int, int] = defaultdict(int)
+            for row in DailyClosingSalesLine.objects.filter(
+                daily_closing__outlet_id=outlet.id,
+                daily_closing__closing_date=day,
+            ).values("product_id", "quantity_sold"):
+                sales_today[row["product_id"]] += row["quantity_sold"]
+
+            for pid, qty in sales_today.items():
+                if pid in prepped_pids:
+                    continue
+                prod = get_product(pid)
+                for r in prod.recipes.all():
+                    ing = r.ingredient
+                    if ing.tracking_mode == TrackingMode.ONE_TIME:
+                        continue
+                    delta = Decimal(str(qty)) * r.quantity_per_unit
+                    if delta:
+                        RawStock.adjust(outlet, ing, -delta)
+                        total_subs += 1
+
+        stock = [
+            {
+                "ingredient": rs.ingredient.name,
+                "quantity": float(rs.quantity_available),
+                "unit": rs.ingredient.base_unit,
+                "negative": rs.quantity_available < 0,
+            }
+            for rs in RawStock.objects.filter(outlet=outlet)
+                .select_related("ingredient")
+                .order_by("ingredient__name")
+        ]
+
+    return {
+        "events": {"sets": total_sets, "adds": total_adds, "subs": total_subs},
+        "stock": stock,
+    }
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def rebuild_rawstock_api(request):
+    """Full RawStock rebuild from all historical data. Body: {outlet: 1}"""
+    outlet_id = int(request.data.get("outlet", 1))
+    try:
+        outlet = Outlet.objects.get(id=outlet_id)
+    except Outlet.DoesNotExist:
+        return Response({"error": "outlet not found"}, status=404)
+
+    result = _do_rebuild(outlet)
+    return Response({"ok": True, **result})
