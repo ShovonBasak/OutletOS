@@ -48,10 +48,27 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="active-work-date")
     def active_work_date(self, request):
-        """Return the most recent non-LOCKED closing date for the outlet.
-        Falls back to today when all closings are locked or none exist."""
+        """Return the date the staff is currently working on.
+
+        Priority:
+          1. Most recent non-CLOSED OperatingDay — this is the authoritative
+             work date even before closing is started (prep happens before closing).
+          2. Most recent non-LOCKED DailyClosing — fallback when no open day exists.
+          3. Today — final fallback.
+        """
         from datetime import date as date_cls
+        from stock.models import OperatingDay, OperatingDayStatus
         outlet = request.query_params.get("outlet", 1)
+
+        active_day = (
+            OperatingDay.objects.filter(outlet_id=outlet)
+            .exclude(status=OperatingDayStatus.CLOSED)
+            .order_by("-date")
+            .first()
+        )
+        if active_day:
+            return Response({"date": str(active_day.date)})
+
         closing = (
             DailyClosing.objects.filter(outlet_id=outlet)
             .exclude(status=ClosingStatus.LOCKED)
@@ -60,6 +77,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         )
         if closing:
             return Response({"date": str(closing.closing_date)})
+
         return Response({"date": str(date_cls.today())})
 
     def perform_create(self, serializer):
