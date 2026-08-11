@@ -1012,6 +1012,19 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         day = self.get_object()
         if day.status == OperatingDayStatus.NOT_STARTED:
             raise ValidationError("Confirm day-start stock first.")
+
+        # Idempotent: reverse any previous carry-forward for this day before
+        # reapplying, so re-submitting does not double DisplayStock.
+        existing = PreparationLog.objects.filter(
+            outlet=day.outlet,
+            source=PrepSource.CARRIED_FORWARD,
+            op_date=day.date,
+        )
+        for prev in existing:
+            if prev.pieces_prepared:
+                DisplayStock.adjust(day.outlet, prev.product, -prev.pieces_prepared)
+        existing.delete()
+
         for row in request.data.get("items", []):
             count = DailyClosingStockCount.objects.get(pk=row["stock_count"])
             leftover = int(row.get("leftover_available_pieces", count.remains_pieces))
@@ -1027,6 +1040,7 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
                 leftover_available_pieces=leftover,
                 pieces_prepared=pieces,
                 wastage_pieces=wastage,
+                op_date=day.date,
             )
             if pieces:
                 DisplayStock.adjust(day.outlet, count.product, pieces)
