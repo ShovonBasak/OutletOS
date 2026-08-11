@@ -96,6 +96,7 @@ export default function PrepPage() {
   const opDate = workDate || today();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [logs, setLogs] = useState<PreparationLog[]>([]);
+  const [allLogs, setAllLogs] = useState<PreparationLog[]>([]);
   const [raw, setRaw] = useState<RawStock[]>([]);
   const [displayStock, setDisplayStock] = useState<DisplayStock[]>([]);
 
@@ -125,26 +126,34 @@ export default function PrepPage() {
     return m;
   }, [allProducts]);
 
-  // Only products that require preparation — allProducts is already filtered this way.
-  const prepProductIds = useMemo(
-    () => new Set(allProducts.map((p) => p.id)),
-    [allProducts],
-  );
+  // "Ready to sell" is derived from today's prep logs (FRESH + CARRIED_FORWARD),
+  // not DisplayStock, so it reflects only what was prepared/carried on this op_date.
+  const readyByProduct = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const l of allLogs) {
+      m.set(l.product, (m.get(l.product) ?? 0) + l.pieces_prepared);
+    }
+    return m;
+  }, [allLogs]);
 
-  // Display stock restricted to prepared items only (excludes beverages, ready-to-sell products).
-  const preparedDisplayStock = useMemo(
-    () => displayStock.filter((d) => prepProductIds.has(d.product) && d.pieces_available > 0),
-    [displayStock, prepProductIds],
-  );
+  const preparedToday = useMemo(() => {
+    return Array.from(readyByProduct.entries())
+      .filter(([, pcs]) => pcs > 0)
+      .map(([productId, pcs]) => {
+        const prod = allProducts.find((p) => p.id === productId);
+        return prod ? { product: productId, product_name: prod.name, pieces: pcs } : null;
+      })
+      .filter(Boolean) as { product: number; product_name: string; pieces: number }[];
+  }, [readyByProduct, allProducts]);
 
   const readyPieces = useMemo(
-    () => preparedDisplayStock.reduce((s, d) => s + d.pieces_available, 0),
-    [preparedDisplayStock],
+    () => Array.from(readyByProduct.values()).reduce((s, v) => s + v, 0),
+    [readyByProduct],
   );
 
   const readyValue = useMemo(
-    () => preparedDisplayStock.reduce((sum, d) => sum + d.pieces_available * (priceByProduct.get(d.product) ?? 0), 0),
-    [preparedDisplayStock, priceByProduct],
+    () => preparedToday.reduce((s, d) => s + d.pieces * (priceByProduct.get(d.product) ?? 0), 0),
+    [preparedToday, priceByProduct],
   );
 
   // Products with enough stock to prepare at least 1 piece.
@@ -161,6 +170,7 @@ export default function PrepPage() {
       api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
     ]);
     setAllProducts(p.results.filter((x) => x.requires_preparation));
+    setAllLogs(l.results);
     setLogs(l.results.filter((x) => x.source === "FRESH"));
     setRaw(rs.results);
     setDisplayStock(ds.results);
@@ -275,18 +285,18 @@ export default function PrepPage() {
             <span className="num font-bold text-leaf-deep">{bdt(readyValue)}</span>
           </div>
         )}
-        {preparedDisplayStock.length === 0 ? (
+        {preparedToday.length === 0 ? (
           <p className="font-mono text-[11px] text-ink-soft">Nothing prepared yet.</p>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {preparedDisplayStock.map((d) => {
+            {preparedToday.map((d) => {
                 const price = priceByProduct.get(d.product) ?? 0;
                 return (
-                  <div key={d.id} className="flex items-baseline justify-between gap-2">
+                  <div key={d.product} className="flex items-baseline justify-between gap-2">
                     <span className="font-mono text-[11px] text-ink truncate">{d.product_name}</span>
                     <span className="shrink-0 font-mono text-[11px] text-ink-soft">
-                      {d.pieces_available} pcs
-                      {price > 0 && <span className="ml-1.5 text-ink">= {bdt(d.pieces_available * price)}</span>}
+                      {d.pieces} pcs
+                      {price > 0 && <span className="ml-1.5 text-ink">= {bdt(d.pieces * price)}</span>}
                     </span>
                   </div>
                 );

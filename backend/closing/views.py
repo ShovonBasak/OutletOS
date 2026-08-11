@@ -279,9 +279,12 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
     def _close_operating_day(closing):
         from stock.models import OperatingDay, OperatingDayStatus
 
-        OperatingDay.objects.filter(daily_closing=closing).update(
-            status=OperatingDayStatus.CLOSED
-        )
+        # Close by date+outlet (reliable). The daily_closing FK may not be set
+        # if the closing was created before the OperatingDay existed.
+        OperatingDay.objects.filter(
+            outlet=closing.outlet,
+            date=closing.closing_date,
+        ).update(status=OperatingDayStatus.CLOSED)
 
 
 class ChannelSettlementViewSet(viewsets.ModelViewSet):

@@ -46,15 +46,16 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!user) return;
-    // Detect the active work date: the most recent non-locked closing date.
-    // This handles the case where yesterday's closing is still open on a new calendar day.
+    // active-work-date gives a hint; getTodayOperatingDay may apply the day-boundary
+    // guard and return a different date's OperatingDay. Always sync workDate to the
+    // returned OperatingDay's actual date so every page fetches and saves consistently.
     api<{ date: string }>(`/daily-closings/active-work-date/?outlet=${outlet}`)
-      .then(({ date }) => {
-        workDateRef.current = date;
-        _setWorkDate(date);
-        return getTodayOperatingDay(outlet, date);
+      .then(({ date }) => getTodayOperatingDay(outlet, date))
+      .then((operatingDay) => {
+        workDateRef.current = operatingDay.date;
+        _setWorkDate(operatingDay.date);
+        setDay(operatingDay);
       })
-      .then(setDay)
       .catch(() => refreshDay());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, outlet]);
