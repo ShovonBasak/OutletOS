@@ -319,8 +319,13 @@ QUANTITY RULES:
 # ---------------------------------------------------------------------------
 _HISTORIC_STOCKIN_SCHEMA = {
     "type": "object",
-    "required": ["date", "items"],
+    "required": ["invoice_number", "date", "items"],
     "properties": {
+        "invoice_number": {
+            "type": "string",
+            "nullable": True,
+            "description": "Invoice/challan number exactly as printed (e.g. 'INV-001/6419/0826'), or null if not found.",
+        },
         "date": {
             "type": "string",
             "nullable": True,
@@ -410,6 +415,9 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
     system = (
         "You are a stock-in assistant for CP Five Star, a fried-chicken outlet in Dhaka, Bangladesh. "
         "You read a photographed supplier tax invoice / delivery slip and extract structured data.\n\n"
+        "INVOICE HEADER:\n"
+        "- invoice_number: the invoice/challan reference exactly as printed (e.g. 'INV-001/6419/0826'); null if absent\n"
+        "- date: invoice/delivery date as YYYY-MM-DD; use the invoice date, not expiry dates; null if absent\n\n"
         "INVOICE COLUMN LAYOUT (CP Bangladesh tax invoices):\n"
         "  No. | Product/Service Name | Qty | Unit | Per Unit Price | Total Amount | "
         "SD Rate | SD Amount | VAT Rate | VAT Amount | Total Value incl. VAT & Tax\n\n"
@@ -432,19 +440,18 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
         "MATCHING RULES:\n"
         "- Match product names by meaning: 'CKN PATTY 5IN' → 'Crispy Chicken Patty 5in'\n"
         "- Use EXACT catalog name when confident; null when not\n\n"
-        "DATE RULES:\n"
-        "- Return date as YYYY-MM-DD; use the invoice/delivery date (not expiry dates)\n\n"
         "Skip non-item rows: headers, totals, VAT summary, delivery charges, addresses."
     )
     known = ", ".join(sorted(known_names)) or "(none yet)"
     instruction = (
         "Read the attached tax invoice / delivery slip and extract all structured data.\n\n"
         "Return:\n"
-        "1. Invoice/delivery date (ISO YYYY-MM-DD)\n"
-        "2. Every product line — raw text, quantity, unit, rate (pre-tax per unit), "
+        "1. Invoice number/reference (exactly as printed, or null)\n"
+        "2. Invoice/delivery date (ISO YYYY-MM-DD, or null)\n"
+        "3. Every product line — raw text, quantity, unit, rate (pre-tax per unit), "
         "total_amount (pre-tax subtotal), sd_rate, sd_amount, vat_rate, vat_amount, "
         "line_total (after-tax total), and matched catalog ingredient name\n"
-        "3. Slip totals: subtotal (pre-tax), vat_total, grand_total (after tax)\n\n"
+        "4. Slip totals: subtotal (pre-tax), vat_total, grand_total (after tax)\n\n"
         f"Our ingredient catalog: {known}\n\n"
         "Do not skip any product line, even unrecognized ones. "
         "Return null for any field that cannot be read from the slip."

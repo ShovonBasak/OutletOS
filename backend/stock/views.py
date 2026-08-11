@@ -116,7 +116,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             image_data = fh.read()
 
         try:
-            llm_items = ai_extraction.extract_stock_in([image_data], known_names)
+            result = ai_extraction.extract_historic_stock_in([image_data], known_names)
         except LLMUnavailable as exc:
             return Response(
                 {
@@ -127,8 +127,43 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 status=503,
             )
 
+        def _dec(v):
+            if v is None:
+                return None
+            try:
+                return Decimal(str(v))
+            except Exception:
+                return None
+
+        # Update StockInRecord header fields from the extracted slip data.
+        record_update_fields = []
+        invoice_number = result.get("invoice_number")
+        if invoice_number and not record.invoice_number:
+            record.invoice_number = str(invoice_number).strip()
+            record_update_fields.append("invoice_number")
+        slip_date = result.get("date")
+        if slip_date:
+            from datetime import date as _date
+            try:
+                parsed_date = _date.fromisoformat(str(slip_date))
+                record.stock_in_date = parsed_date
+                record_update_fields.append("stock_in_date")
+            except ValueError:
+                pass
+        for field, key in [
+            ("slip_subtotal", "subtotal"),
+            ("slip_vat_total", "vat_total"),
+            ("slip_grand_total", "grand_total"),
+        ]:
+            val = _dec(result.get(key))
+            if val is not None:
+                setattr(record, field, val)
+                record_update_fields.append(field)
+        if record_update_fields:
+            record.save(update_fields=record_update_fields)
+
         lines: list[ExtractedLine] = []
-        for item in llm_items:
+        for item in result.get("items", []):
             matched_name = item.get("matched_ingredient")
             ingredient_id = None
             pack_definition_id = None
@@ -145,15 +180,15 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 ingredient_id=ingredient_id,
                 pack_definition_id=pack_definition_id,
                 unit_captured=item.get("unit", "PACK"),
+                rate=item.get("rate"),
+                total_amount=item.get("total_amount"),
+                sd_rate=item.get("sd_rate"),
+                sd_amount=item.get("sd_amount"),
+                vat_rate=item.get("vat_rate"),
+                vat_amount=item.get("vat_amount"),
+                line_total=item.get("line_total"),
+                unit_price=item.get("unit_price"),
             ))
-
-        def _dec(v):
-            if v is None:
-                return None
-            try:
-                return Decimal(str(v))
-            except Exception:
-                return None
 
         record.items.filter(source=LineSource.SLIP_EXTRACTED).delete()
         for line in lines:
