@@ -11,6 +11,8 @@ import { ProductListFilter } from "@/components/ProductListFilter";
 import { bdt } from "@/lib/format";
 import type { DailyClosing, DisplayStock, Paginated, Product, SalesChannel } from "@/lib/types";
 
+type UnresolvedItem = { external_name: string; order_qty: number };
+
 export default function OnlineSellScreen() {
   const { user } = useAuth();
   const router = useRouter();
@@ -26,63 +28,72 @@ export default function OnlineSellScreen() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [busy, setBusy] = useState(false);
 
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [unresolved, setUnresolved] = useState<UnresolvedItem[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const closingRef = useRef<DailyClosing | null>(null);
   const channelRef = useRef<SalesChannel | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const c = await getOrCreateTodayClosing(outlet, opDate);
-      setClosing(c);
-      closingRef.current = c;
+  async function loadData(existingChannel?: SalesChannel | null) {
+    const c = await getOrCreateTodayClosing(outlet, opDate);
+    setClosing(c);
+    closingRef.current = c;
 
-      const [p, ch, ds] = await Promise.all([
-        api<Paginated<Product>>("/products/?active=true"),
-        api<Paginated<SalesChannel>>("/sales-channels/"),
-        api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
-      ]);
+    const [p, ch, ds] = await Promise.all([
+      api<Paginated<Product>>("/products/?active=true"),
+      api<Paginated<SalesChannel>>("/sales-channels/"),
+      api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
+    ]);
 
-      const dsMap: Record<number, number> = {};
-      ds.results.forEach((d) => { dsMap[d.product] = d.pieces_available; });
-      setMaxQty(dsMap);
+    const dsMap: Record<number, number> = {};
+    ds.results.forEach((d) => { dsMap[d.product] = d.pieces_available; });
+    setMaxQty(dsMap);
 
-      const fp =
-        ch.results.find((x) => x.is_active && x.name.toLowerCase().includes("foodpanda")) ?? null;
-      setChannel(fp);
-      channelRef.current = fp;
+    const fp =
+      existingChannel ??
+      ch.results.find((x) => x.is_active && x.name.toLowerCase().includes("foodpanda")) ??
+      null;
+    setChannel(fp);
+    channelRef.current = fp;
 
-      const productMap: Record<number, Product> = {};
-      p.results.forEach((prod) => { productMap[prod.id] = prod; });
+    const productMap: Record<number, Product> = {};
+    p.results.forEach((prod) => { productMap[prod.id] = prod; });
 
-      if (fp) {
-        const fpLines = c.sales_lines.filter(
-          (l) => l.source === "STAFF_ENTRY" && l.channel === fp.id
+    if (fp) {
+      const fpLines = c.sales_lines.filter(
+        (l) => l.source === "STAFF_ENTRY" && l.channel === fp.id
+      );
+      const seed: Record<number, number> = {};
+
+      if (c.status !== "DRAFT") {
+        setProducts(
+          fpLines.map((l) => productMap[l.product]).filter(Boolean) as Product[]
         );
-        const seed: Record<number, number> = {};
-
-        if (c.status !== "DRAFT") {
-          setProducts(
-            fpLines.map((l) => productMap[l.product]).filter(Boolean) as Product[]
-          );
-          fpLines.forEach((l) => { seed[l.product] = l.quantity_sold; });
-        } else {
-          setProducts(p.results.filter((prod) => (dsMap[prod.id] ?? 0) > 0));
-          for (const l of fpLines) {
-            if ((dsMap[l.product] ?? 0) > 0) {
-              seed[l.product] = l.quantity_sold;
-            } else {
-              await api(`/daily-closings/${c.id}/online-sell/`, {
-                method: "POST",
-                body: JSON.stringify({
-                  items: [{ product: l.product, channel: fp.id, quantity_sold: 0 }],
-                }),
-              });
-            }
+        fpLines.forEach((l) => { seed[l.product] = l.quantity_sold; });
+      } else {
+        setProducts(p.results.filter((prod) => (dsMap[prod.id] ?? 0) > 0));
+        for (const l of fpLines) {
+          if ((dsMap[l.product] ?? 0) > 0) {
+            seed[l.product] = l.quantity_sold;
+          } else {
+            await api(`/daily-closings/${c.id}/online-sell/`, {
+              method: "POST",
+              body: JSON.stringify({
+                items: [{ product: l.product, channel: fp.id, quantity_sold: 0 }],
+              }),
+            });
           }
         }
-        setQty(seed);
       }
-    })();
+      setQty(seed);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet, opDate]);
 
   async function persist(currentQty: Record<number, number>) {
@@ -128,6 +139,37 @@ export default function OnlineSellScreen() {
       scheduleSave(next);
       return next;
     });
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const c = closingRef.current;
+    const ch = channelRef.current;
+    if (!file || !c || !ch) return;
+
+    setUploadStatus("uploading");
+    setUnresolved([]);
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("channel", String(ch.id));
+
+      const result = await api<{
+        mapped: { product_id: number; product_name: string; quantity: number }[];
+        unresolved: UnresolvedItem[];
+        closing: DailyClosing;
+      }>(`/daily-closings/${c.id}/import-online-sells/`, { method: "POST", body: form });
+
+      // Refresh the page data so quantities reflect the upload
+      await loadData(ch);
+      setUnresolved(result.unresolved);
+      setUploadStatus("done");
+    } catch {
+      setUploadStatus("error");
+    }
+    // Reset file input so the same file can be re-uploaded after adding mappings
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function finish() {
@@ -177,6 +219,61 @@ export default function OnlineSellScreen() {
           {saveStatus === "saving" ? "Saving…" : "Saved ✓"}
         </span>
       </div>
+
+      {/* Excel upload */}
+      {!isReadOnly && (
+        <div className="rounded border border-dashed border-[#d8cdb0] bg-paper-dim px-3 py-2.5">
+          <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft mb-2">
+            Upload Foodpanda report
+          </p>
+          <label
+            className={`btn btn-sm inline-flex cursor-pointer items-center gap-1.5 font-mono text-xs ${
+              uploadStatus === "uploading" ? "opacity-50 pointer-events-none" : ""
+            }`}
+          >
+            {uploadStatus === "uploading"
+              ? "Uploading…"
+              : uploadStatus === "done"
+              ? "Re-upload"
+              : "Choose Excel file (.xlsx)"}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              className="sr-only"
+              onChange={handleFileUpload}
+              disabled={uploadStatus === "uploading"}
+            />
+          </label>
+          {uploadStatus === "error" && (
+            <p className="mt-1.5 font-mono text-[10px] text-chili">
+              Upload failed — check the file format and try again.
+            </p>
+          )}
+          {uploadStatus === "done" && unresolved.length === 0 && (
+            <p className="mt-1.5 font-mono text-[10px] text-leaf-deep">
+              All items imported successfully.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Unresolved items */}
+      {unresolved.length > 0 && (
+        <div className="rounded border border-chili/30 bg-chili/5 px-3 py-2.5">
+          <p className="font-mono text-[10px] uppercase tracking-wide text-chili mb-2">
+            {unresolved.length} item name{unresolved.length > 1 ? "s" : ""} not mapped — ask owner to add mapping
+          </p>
+          <div className="flex flex-col gap-1">
+            {unresolved.map((u) => (
+              <div key={u.external_name} className="flex items-center justify-between">
+                <span className="font-mono text-xs text-ink">{u.external_name}</span>
+                <span className="font-mono text-[10px] text-ink-soft">{u.order_qty} ordered</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2">
         <div className="ticket-chip flex-1 text-center">

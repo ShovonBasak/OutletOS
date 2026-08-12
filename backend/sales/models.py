@@ -123,3 +123,29 @@ class OrderLevelOffer(models.Model):
 
     def __str__(self):
         return self.description
+
+
+class ChannelMenuMap(models.Model):
+    """Maps an online platform's item name to an internal product with a quantity multiplier.
+
+    e.g. "3X Hot & Crispy Chicken" → product=Hot & Crispy Chicken, multiplier=3
+         "Crispy Chicken"          → product=Hot & Crispy Chicken, multiplier=1
+    """
+
+    channel = models.ForeignKey(
+        SalesChannel, on_delete=models.CASCADE, related_name="menu_maps"
+    )
+    external_name = models.CharField(max_length=255, db_index=True)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="menu_maps")
+    quantity_multiplier = models.PositiveIntegerField(
+        default=1,
+        help_text="Multiply the order qty by this to get internal product pieces.",
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ("channel", "external_name")
+        ordering = ["external_name"]
+
+    def __str__(self):
+        return f"{self.channel}: '{self.external_name}' → {self.quantity_multiplier}× {self.product}"

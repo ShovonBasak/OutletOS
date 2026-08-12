@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from accounts.permissions import IsOwnerOrReadOnly
 from catalog.models import Product
 from .models import (
+    ChannelMenuMap,
     ChannelPrice,
     ChannelPromotion,
     OrderLevelOffer,
@@ -13,6 +14,7 @@ from .models import (
 )
 from .pricing import resolve_price
 from .serializers import (
+    ChannelMenuMapSerializer,
     ChannelPriceSerializer,
     ChannelPromotionSerializer,
     OrderLevelOfferSerializer,
@@ -42,6 +44,19 @@ class OrderLevelOfferViewSet(viewsets.ModelViewSet):
     queryset = OrderLevelOffer.objects.all()
     serializer_class = OrderLevelOfferSerializer
     permission_classes = [IsOwnerOrReadOnly]
+
+
+class ChannelMenuMapViewSet(viewsets.ModelViewSet):
+    queryset = ChannelMenuMap.objects.select_related("channel", "product")
+    serializer_class = ChannelMenuMapSerializer
+    permission_classes = [IsOwnerOrReadOnly]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        channel = self.request.query_params.get("channel")
+        if channel:
+            qs = qs.filter(channel_id=channel)
+        return qs
 
 
 @api_view(["GET"])

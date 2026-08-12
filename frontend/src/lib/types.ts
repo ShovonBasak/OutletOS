@@ -483,6 +483,17 @@ export interface ChannelPrice {
   is_active: boolean;
 }
 
+export interface ChannelMenuMap {
+  id: number;
+  channel: number;
+  channel_name: string;
+  external_name: string;
+  product: number;
+  product_name: string;
+  quantity_multiplier: number;
+  is_active: boolean;
+}
+
 export interface ChannelPromotion {
   id: number;
   channel: number | null;

@@ -39,12 +39,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
       : pathname === href || pathname.startsWith(href + "/");
 
   const toggle = (group: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
+    setOpen((prev) => (prev.has(group) ? new Set() : new Set([group])));
 
   const activeMobileTab = mobileTabFor(pathname);
 
@@ -74,7 +69,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                   <Link
                     key={n.href}
                     href={n.href}
-                    className={`navitem block !pl-4 ${isActive(n.href) ? "active" : ""}`}
+                    className={`navitem toplevel block ${isActive(n.href) ? "active" : ""}`}
                   >
                     {n.label}
                   </Link>

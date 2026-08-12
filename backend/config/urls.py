@@ -35,6 +35,7 @@ from sales.views import (
     ChannelPriceViewSet,
     ChannelPromotionViewSet,
     OrderLevelOfferViewSet,
+    ChannelMenuMapViewSet,
     price_resolve,
 )
 from closing.views import DailyClosingViewSet, ChannelSettlementViewSet
@@ -85,6 +86,7 @@ router.register("sales-channels", SalesChannelViewSet)
 router.register("channel-prices", ChannelPriceViewSet)
 router.register("channel-promotions", ChannelPromotionViewSet)
 router.register("order-level-offers", OrderLevelOfferViewSet)
+router.register("channel-menu-maps", ChannelMenuMapViewSet)
 router.register("daily-closings", DailyClosingViewSet)
 router.register("channel-settlements", ChannelSettlementViewSet)
 router.register("cost-categories", CostCategoryViewSet)

@@ -67,7 +67,7 @@ function ChannelPriceForm() {
       } else {
         await api("/channel-prices/", { method: "POST", body });
       }
-      router.push("/owner/settings");
+      router.push("/owner/settings/pricing");
     } catch {
       setError("Could not save price.");
       setSaving(false);
@@ -79,7 +79,7 @@ function ChannelPriceForm() {
     setSaving(true);
     try {
       await api(`/channel-prices/${editId}/`, { method: "DELETE" });
-      router.push("/owner/settings");
+      router.push("/owner/settings/pricing");
     } catch {
       setError("Could not remove price.");
       setSaving(false);
@@ -88,7 +88,7 @@ function ChannelPriceForm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/owner/settings" className="self-start font-mono text-[11px] text-ink-soft">
+      <Link href="/owner/settings/pricing" className="self-start font-mono text-[11px] text-ink-soft">
         ‹ Back to Settings
       </Link>
 

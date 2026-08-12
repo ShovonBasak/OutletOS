@@ -131,23 +131,34 @@ body {
     @apply px-4 pb-1 pt-3.5 font-mono text-[9px] uppercase tracking-[0.1em] text-white/[0.33];
   }
   .navitem {
-    @apply w-full cursor-pointer border-l-[3px] border-transparent bg-none px-4 py-[11px] text-left font-mono text-[11px] uppercase tracking-[0.03em] text-white/[0.6] transition hover:bg-white/[0.06];
+    @apply w-full cursor-pointer border-l-[3px] border-transparent bg-none px-3 py-2 text-left font-mono text-[11px] uppercase tracking-[0.03em] text-white/[0.6] transition hover:bg-white/[0.06];
   }
   .navitem.active {
     @apply border-gold bg-white/[0.05] text-gold;
   }
-  /* Collapsible group header + children (accordion), per the sitemap sidebar. */
+  /* Top-level navitems (Dashboard) — full sidebar width, a bit more breathing room. */
+  .navitem.toplevel {
+    @apply px-4 py-[11px];
+  }
+  /* Collapsible group header — category label, clearly distinct from page links. */
   .navparent {
-    @apply flex w-full cursor-pointer select-none items-center justify-between border-l-[3px] border-transparent px-4 py-[11px] text-left font-mono text-[11px] uppercase tracking-[0.03em] text-white/[0.72] transition hover:bg-white/[0.06];
+    @apply flex w-full cursor-pointer select-none items-center justify-between
+           px-4 pb-1.5 pt-4 text-left font-mono text-[9px] uppercase
+           tracking-[0.14em] text-white/40 transition hover:text-white/60;
+  }
+  /* First group header gets less top space (sits right under brand). */
+  .navparent:first-child {
+    @apply pt-3;
   }
   .navchev {
-    @apply inline-block text-[10px] text-white/50 transition-transform duration-200;
+    @apply inline-block text-[8px] text-white/30 transition-transform duration-200;
   }
   .navchev.open {
-    @apply rotate-90 text-gold;
+    @apply rotate-90 text-white/50;
   }
+  /* Children drawer — indented block with a faint left rail. */
   .navchildren {
-    @apply flex flex-col bg-black/10;
+    @apply flex flex-col border-l border-white/[0.06] ml-4 mb-1;
   }
 
   /* Desktop top bar. */

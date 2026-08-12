@@ -132,6 +132,72 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         recompute_closing(closing)
         return self._fresh_response(closing)
 
+    # ---- Step 2a: Upload platform Excel report (Foodpanda etc.) ----
+    @action(detail=True, methods=["post"], url_path="import-online-sells")
+    def import_online_sells(self, request, pk=None):
+        """Parse a Foodpanda/platform order report XLSX and auto-register mapped sales lines.
+
+        Form fields:
+          file    — the XLSX file
+          channel — SalesChannel id
+
+        Response:
+          mapped      — [{product_id, product_name, quantity}]  (registered automatically)
+          unresolved  — [{external_name, order_qty}]             (needs mapping setup)
+          closing     — full closing object
+        """
+        from rest_framework.parsers import MultiPartParser
+        from .excel_parser import parse_foodpanda_excel
+
+        closing = self.get_object()
+        self._guard_editable(closing)
+
+        file = request.FILES.get("file")
+        if not file:
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError("No file uploaded.")
+
+        channel_id = request.data.get("channel")
+        if not channel_id:
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError("channel field is required.")
+
+        channel = SalesChannel.objects.get(pk=channel_id)
+
+        try:
+            mapped, unresolved = parse_foodpanda_excel(file, closing.closing_date, channel)
+        except (ValueError, KeyError) as exc:
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError(str(exc))
+
+        # Register each mapped product as a sales line (upsert, accumulating)
+        for item in mapped:
+            product = item["product"]
+            qty = item["quantity"]
+            price, _ = resolve_price(product, channel, closing.closing_date)
+            line, _ = DailyClosingSalesLine.objects.get_or_create(
+                daily_closing=closing, product=product, channel=channel,
+                defaults={"source": LineSource.STAFF_ENTRY},
+            )
+            line.quantity_sold = qty
+            line.unit_price = price
+            line.source = LineSource.STAFF_ENTRY
+            line.recompute()
+            line.save()
+
+        recompute_closing(closing)
+
+        mapped_out = [
+            {"product_id": item["product"].id, "product_name": item["product"].name, "quantity": item["quantity"]}
+            for item in mapped
+        ]
+        fresh = self.get_queryset().get(pk=closing.pk)
+        return Response({
+            "mapped": mapped_out,
+            "unresolved": unresolved,
+            "closing": self.get_serializer(fresh).data,
+        })
+
     # ---- Step 2: Online sell (Pathao/Foodi/Foodpanda) ----
     @action(detail=True, methods=["post"], url_path="online-sell")
     def online_sell(self, request, pk=None):

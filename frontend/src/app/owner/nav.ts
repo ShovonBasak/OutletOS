@@ -41,7 +41,16 @@ export const OWNER_NAV: NavGroup[] = [
       { href: "/owner/other-income", label: "Other income" },
       { href: "/owner/products", label: "Products & recipes" },
       { href: "/owner/team", label: "Team & outlets" },
-      { href: "/owner/settings", label: "Settings & promotions" },
+    ],
+  },
+  {
+    group: "Settings",
+    items: [
+      { href: "/owner/settings/outlet", label: "Outlet" },
+      { href: "/owner/settings/channels", label: "Sales channels" },
+      { href: "/owner/settings/pricing", label: "Pricing & promos" },
+      { href: "/owner/settings/menu-mapping", label: "Menu mapping" },
+      { href: "/owner/settings/cost-categories", label: "Cost categories" },
     ],
   },
   {
@@ -74,6 +83,11 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/products/add", "Add product"],
   ["/owner/team/add-outlet", "Add outlet"],
   ["/owner/settings/channel-price", "Channel price"],
+  ["/owner/settings/outlet", "Outlet"],
+  ["/owner/settings/channels", "Sales channels"],
+  ["/owner/settings/pricing", "Pricing & promos"],
+  ["/owner/settings/menu-mapping", "Menu mapping"],
+  ["/owner/settings/cost-categories", "Cost categories"],
 ];
 
 export function titleFor(pathname: string): string {
@@ -103,6 +117,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   {
     tab: "/owner/more",
     prefixes: ["/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
+    // /owner/settings covers all sub-routes (outlet, channels, pricing, menu-mapping, cost-categories)
   },
 ];
 
