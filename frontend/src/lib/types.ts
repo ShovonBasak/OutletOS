@@ -471,17 +471,6 @@ export interface DashboardSummary {
   closings_awaiting_review: number;
 }
 
-export interface ChannelPrice {
-  id: number;
-  channel: number;
-  channel_name: string;
-  product: number;
-  product_name: string;
-  price: string;
-  effective_from: string;
-  effective_to: string | null;
-  is_active: boolean;
-}
 
 export interface ChannelMenuMap {
   id: number;

@@ -58,6 +58,7 @@ export default function OnlineSellScreen() {
     setChannel(fp);
     channelRef.current = fp;
 
+
     const productMap: Record<number, Product> = {};
     p.results.forEach((prod) => { productMap[prod.id] = prod; });
 

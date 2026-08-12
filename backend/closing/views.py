@@ -343,7 +343,15 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _close_operating_day(closing):
-        from stock.models import OperatingDay, OperatingDayStatus
+        from stock.models import DisplayStock, OperatingDay, OperatingDayStatus
+
+        # Deduct sold + wasted from DisplayStock so it ends the day at 'remains'.
+        # This ensures the next day's carry-forward starts from the correct baseline
+        # regardless of when data was entered.
+        for count in closing.stock_counts.all():
+            deduct = count.available_pieces - count.remains_pieces
+            if deduct > 0:
+                DisplayStock.adjust(closing.outlet, count.product, -deduct)
 
         # Close by date+outlet (reliable). The daily_closing FK may not be set
         # if the closing was created before the OperatingDay existed.

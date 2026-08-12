@@ -1013,8 +1013,7 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         if day.status == OperatingDayStatus.NOT_STARTED:
             raise ValidationError("Confirm day-start stock first.")
 
-        # Idempotent: reverse any previous carry-forward for this day before
-        # reapplying, so re-submitting does not double DisplayStock.
+        # Idempotent: undo any previous carry-forward for this day.
         existing = PreparationLog.objects.filter(
             outlet=day.outlet,
             source=PrepSource.CARRIED_FORWARD,
@@ -1024,6 +1023,18 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
             if prev.pieces_prepared:
                 DisplayStock.adjust(day.outlet, prev.product, -prev.pieces_prepared)
         existing.delete()
+
+        # Reset DisplayStock to 0 for all prepared products before adding carry-forward
+        # pieces. This corrects any accumulated drift (e.g. from retroactive data entry
+        # or a closing that ran before the deduction fix was applied).
+        from catalog.models import Product as _Product
+        prepared_ids = list(
+            _Product.objects.filter(requires_preparation=True, is_active=True)
+            .values_list("id", flat=True)
+        )
+        DisplayStock.objects.filter(
+            outlet=day.outlet, product_id__in=prepared_ids
+        ).update(pieces_available=0)
 
         for row in request.data.get("items", []):
             count = DailyClosingStockCount.objects.get(pk=row["stock_count"])

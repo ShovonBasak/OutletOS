@@ -5,26 +5,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { today } from "@/lib/format";
-import type { Paginated, Product, SalesChannel } from "@/lib/types";
+import type { Paginated, Product } from "@/lib/types";
 
 interface CompRow {
   product: string;
   qty: string;
 }
-interface PriceRow {
-  channel: string;
-  price: string;
-}
 
 export default function AddComboPage() {
   const router = useRouter();
   const [singles, setSingles] = useState<Product[]>([]);
-  const [channels, setChannels] = useState<SalesChannel[]>([]);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState(today());
   const [comps, setComps] = useState<CompRow[]>([{ product: "", qty: "1" }]);
-  const [prices, setPrices] = useState<PriceRow[]>([]);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +29,10 @@ export default function AddComboPage() {
       setSingles(s);
       if (s[0]) setComps([{ product: String(s[0].id), qty: "1" }]);
     });
-    api<Paginated<SalesChannel>>("/sales-channels/").then((d) => setChannels(d.results));
   }, []);
 
   function setComp(i: number, patch: Partial<CompRow>) {
     setComps((c) => c.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
-  }
-  function setPriceRow(i: number, patch: Partial<PriceRow>) {
-    setPrices((p) => p.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
   }
 
   async function save() {
@@ -78,22 +68,6 @@ export default function AddComboPage() {
           })
         )
       );
-      await Promise.all(
-        prices
-          .filter((p) => p.channel && p.price)
-          .map((p) =>
-            api("/channel-prices/", {
-              method: "POST",
-              body: JSON.stringify({
-                channel: Number(p.channel),
-                product: combo.id,
-                price: p.price,
-                effective_from: today(),
-                is_active: true,
-              }),
-            })
-          )
-      );
       router.push("/owner/products");
     } catch {
       setError("Could not save combo.");
@@ -113,7 +87,7 @@ export default function AddComboPage() {
           <input className="field-input" placeholder="e.g. Family Feast" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="field">
-          <span className="field-label">Combo price — walk-in (৳)</span>
+          <span className="field-label">Combo price (৳)</span>
           <input className="field-input" placeholder="e.g. 280" value={price} onChange={(e) => setPrice(e.target.value)} />
         </label>
         <label className="field">
@@ -146,29 +120,7 @@ export default function AddComboPage() {
         + Add component
       </button>
 
-      <h2 className="sec mt-2">Channel prices (optional)</h2>
-      <p className="text-xs text-ink-soft">Set what this combo sells for on specific channels — otherwise the walk-in price applies.</p>
-      {prices.map((p, i) => (
-        <div key={i} className="comprow max-w-[480px]">
-          <select className="field-input flex-[2]" value={p.channel} onChange={(e) => setPriceRow(i, { channel: e.target.value })}>
-            <option value="">Select channel</option>
-            {channels.map((ch) => (
-              <option key={ch.id} value={ch.id}>
-                {ch.name}
-              </option>
-            ))}
-          </select>
-          <input className="field-input flex-1" placeholder="৳ price" value={p.price} onChange={(e) => setPriceRow(i, { price: e.target.value })} />
-          <button className="text-chili-deep" onClick={() => setPrices((rows) => rows.filter((_, idx) => idx !== i))}>
-            ×
-          </button>
-        </div>
-      ))}
-      <button className="btn btn-ghost w-40" onClick={() => setPrices((p) => [...p, { channel: "", price: "" }])}>
-        + Add channel price
-      </button>
-
-      <div className="togglerow">
+      <div className="togglerow mt-2">
         <span className="text-xs">Active</span>
         <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
       </div>

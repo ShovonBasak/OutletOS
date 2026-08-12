@@ -1,10 +1,9 @@
 """Price resolution at sale time.
 
-Order of precedence (most specific wins), per CLAUDE.md:
-    1. ChannelPrice exact match (channel + product, active on date)
-    2. ChannelPromotion applied to the active ProductPrice.price:
+Order of precedence (most specific wins):
+    1. ChannelPromotion applied to the active ProductPrice.price:
          product+channel  →  channel-only  →  product-only
-    3. Plain active ProductPrice.price
+    2. Plain active ProductPrice.price
 The resolved value is snapshotted into DailyClosingSalesLine.unit_price.
 """
 from decimal import Decimal
@@ -12,7 +11,7 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import ChannelPrice, ChannelPromotion, DiscountType
+from .models import ChannelPromotion, DiscountType
 
 
 def _active_on(qs, on_date):
@@ -35,17 +34,10 @@ def resolve_price(product, channel, on_date=None):
     """Return (resolved_price, basis_label) for a product on a channel."""
     on_date = on_date or timezone.localdate()
 
-    # 1. Exact channel price override.
-    cp = _active_on(
-        ChannelPrice.objects.filter(product=product, channel=channel), on_date
-    ).order_by("-effective_from").first()
-    if cp:
-        return cp.price, "channel_price"
-
     active_pp = product.active_price(as_of=on_date)
     base = active_pp.price if active_pp else Decimal("0")
 
-    # 2. Promotions, most specific first.
+    # Promotions, most specific first.
     promos = _active_on(ChannelPromotion.objects.all(), on_date)
 
     exact = promos.filter(product=product, channel=channel).first()
@@ -60,5 +52,4 @@ def resolve_price(product, channel, on_date=None):
     if product_only:
         return _apply_promo(base, product_only), "promo_product"
 
-    # 3. Plain active ProductPrice.
     return base, "product_price"

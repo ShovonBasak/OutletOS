@@ -2,7 +2,6 @@ from rest_framework import serializers
 
 from .models import (
     ChannelMenuMap,
-    ChannelPrice,
     ChannelPromotion,
     OrderLevelOffer,
     SalesChannel,
@@ -17,17 +16,6 @@ class SalesChannelSerializer(serializers.ModelSerializer):
             "integration_type", "commission_basis", "is_active",
         ]
 
-
-class ChannelPriceSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source="product.name", read_only=True)
-    channel_name = serializers.CharField(source="channel.name", read_only=True)
-
-    class Meta:
-        model = ChannelPrice
-        fields = [
-            "id", "channel", "channel_name", "product", "product_name",
-            "price", "effective_from", "effective_to", "is_active",
-        ]
 
 
 class ChannelPromotionSerializer(serializers.ModelSerializer):

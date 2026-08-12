@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { bdt } from "@/lib/format";
 import type {
-  ChannelPrice,
   ChannelPromotion,
   OrderLevelOffer,
   Paginated,
@@ -15,8 +12,6 @@ import type {
 } from "@/lib/types";
 
 export default function PricingPage() {
-  const router = useRouter();
-  const [prices, setPrices] = useState<ChannelPrice[]>([]);
   const [promos, setPromos] = useState<ChannelPromotion[]>([]);
   const [offers, setOffers] = useState<OrderLevelOffer[]>([]);
   const [channels, setChannels] = useState<SalesChannel[]>([]);
@@ -25,7 +20,6 @@ export default function PricingPage() {
   useEffect(() => {
     api<Paginated<SalesChannel>>("/sales-channels/").then((d) => setChannels(d.results));
     api<Paginated<Product>>("/products/").then((d) => setProducts(d.results)).catch(() => {});
-    api<Paginated<ChannelPrice>>("/channel-prices/").then((d) => setPrices(d.results)).catch(() => {});
     api<Paginated<ChannelPromotion>>("/channel-promotions/").then((d) => setPromos(d.results)).catch(() => {});
     api<Paginated<OrderLevelOffer>>("/order-level-offers/").then((d) => setOffers(d.results)).catch(() => {});
   }, []);
@@ -37,48 +31,6 @@ export default function PricingPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Channel-specific pricing */}
-      <section className="flex flex-col gap-2">
-        <h2 className="sec">Channel-specific pricing</h2>
-        <p className="text-xs text-ink-soft">
-          Direct price per product/combo per channel — this is how combo deals get set up. Tap a row to edit.
-        </p>
-        <div className="overflow-x-auto">
-          <table className="datatable min-w-[560px]">
-            <thead>
-              <tr>
-                <th>Product / Combo</th>
-                <th>Channel</th>
-                <th>Price</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {prices.map((p) => (
-                <tr
-                  key={p.id}
-                  className="cursor-pointer hover:bg-paper-dim"
-                  onClick={() => router.push(`/owner/settings/channel-price?id=${p.id}`)}
-                >
-                  <td>{p.product_name}</td>
-                  <td>{p.channel_name}</td>
-                  <td>{bdt(p.price)}</td>
-                  <td>{p.is_active ? "Active" : "Inactive"}</td>
-                </tr>
-              ))}
-              {prices.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="text-ink-soft">No channel prices.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <Link href="/owner/settings/channel-price" className="btn btn-ghost w-44">
-          + Add channel price
-        </Link>
-      </section>
-
       {/* Ongoing promotions */}
       <section className="flex flex-col gap-2">
         <h2 className="sec">Ongoing promotions</h2>

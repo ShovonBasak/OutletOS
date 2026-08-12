@@ -7,7 +7,6 @@ from accounts.permissions import IsOwnerOrReadOnly
 from catalog.models import Product
 from .models import (
     ChannelMenuMap,
-    ChannelPrice,
     ChannelPromotion,
     OrderLevelOffer,
     SalesChannel,
@@ -15,7 +14,6 @@ from .models import (
 from .pricing import resolve_price
 from .serializers import (
     ChannelMenuMapSerializer,
-    ChannelPriceSerializer,
     ChannelPromotionSerializer,
     OrderLevelOfferSerializer,
     SalesChannelSerializer,
@@ -25,12 +23,6 @@ from .serializers import (
 class SalesChannelViewSet(viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
-    permission_classes = [IsOwnerOrReadOnly]
-
-
-class ChannelPriceViewSet(viewsets.ModelViewSet):
-    queryset = ChannelPrice.objects.select_related("product", "channel")
-    serializer_class = ChannelPriceSerializer
     permission_classes = [IsOwnerOrReadOnly]
 
 

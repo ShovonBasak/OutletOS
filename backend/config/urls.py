@@ -32,7 +32,6 @@ from stock.views import (
 )
 from sales.views import (
     SalesChannelViewSet,
-    ChannelPriceViewSet,
     ChannelPromotionViewSet,
     OrderLevelOfferViewSet,
     ChannelMenuMapViewSet,
@@ -83,7 +82,6 @@ router.register("display-stock", DisplayStockViewSet)
 router.register("operating-days", OperatingDayViewSet)
 router.register("periodic-stock-checks", PeriodicStockCheckViewSet)
 router.register("sales-channels", SalesChannelViewSet)
-router.register("channel-prices", ChannelPriceViewSet)
 router.register("channel-promotions", ChannelPromotionViewSet)
 router.register("order-level-offers", OrderLevelOfferViewSet)
 router.register("channel-menu-maps", ChannelMenuMapViewSet)

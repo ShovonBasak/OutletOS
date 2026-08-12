@@ -82,7 +82,6 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/products/add-combo", "Add combo"],
   ["/owner/products/add", "Add product"],
   ["/owner/team/add-outlet", "Add outlet"],
-  ["/owner/settings/channel-price", "Channel price"],
   ["/owner/settings/outlet", "Outlet"],
   ["/owner/settings/channels", "Sales channels"],
   ["/owner/settings/pricing", "Pricing & promos"],
