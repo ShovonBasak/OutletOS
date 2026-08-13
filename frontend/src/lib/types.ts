@@ -351,6 +351,8 @@ export interface StockCount {
   id: number;
   product: number;
   product_name: string;
+  product_category: string;
+  requires_preparation: boolean;
   available_pieces: number;
   wastage_pieces: number;
   remains_pieces: number;
@@ -358,6 +360,9 @@ export interface StockCount {
   derived_walkin_sold: number;
   flag: boolean;
   wastage_cost: string;
+  unit_price: string;
+  remains_value: string;
+  pieces_per_pack: string | null;
 }
 
 export interface SalesLine {
@@ -402,6 +407,7 @@ export interface DailyClosing {
   total_offline_sales: string;
   computed_cash: string;
   has_flag: boolean;
+  carried_forward_value: string;
 }
 
 export interface ProductPerformanceRow {

@@ -90,6 +90,20 @@ export default function ClosingHub() {
         />
       </div>
 
+      {/* Stock summary link — informational, not a step */}
+      <Link
+        href="/staff/closing/stock"
+        className="flex items-center justify-between rounded border border-dashed border-[#d8cdb0] bg-paper px-4 py-3 text-ink-soft hover:bg-paper-dim"
+      >
+        <div>
+          <span className="block font-display text-sm font-bold text-ink">Stock summary</span>
+          <span className="block font-mono text-[11px] text-ink-soft">
+            Prepared items · beverages · raw ingredients
+          </span>
+        </div>
+        <span className="font-mono text-ink-soft">›</span>
+      </Link>
+
       <div className="ticket">
         <div className="ticket-row">
           <span>Net revenue (after discount)</span>

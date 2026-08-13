@@ -29,7 +29,11 @@ from .services import recompute_closing
 
 class DailyClosingViewSet(viewsets.ModelViewSet):
     queryset = DailyClosing.objects.prefetch_related(
-        "stock_counts", "sales_lines", "channel_discounts", "payments"
+        "stock_counts__product__prices",
+        "stock_counts__product__recipes__ingredient__pack_definitions",
+        "sales_lines",
+        "channel_discounts",
+        "payments",
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
 
