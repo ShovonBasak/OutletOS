@@ -200,7 +200,8 @@ export default function StockInPage() {
     setRecords(r.results);
     const activeAccounts = acc.results.filter((a) => a.is_active);
     setAccounts(activeAccounts);
-    if (!accountId && activeAccounts[0]) setAccountId(String(activeAccounts[0].id));
+    const defAcc = activeAccounts.find((a) => a.is_primary_cash) ?? activeAccounts[0];
+    if (defAcc) setAccountId(String(defAcc.id));
     return r.results;
   }
   useEffect(() => {

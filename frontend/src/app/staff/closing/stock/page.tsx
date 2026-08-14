@@ -1,13 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
 import { bdt, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
-import type { DailyClosing, Paginated, RawStock } from "@/lib/types";
+import type { DailyClosing, Paginated, RawStock, StockCount } from "@/lib/types";
+
+const CATEGORY_ORDER = [
+  "Fried Chicken", "Snacks", "Light Snacks", "Meals",
+  "Rice & Sides", "Beverages", "Add-on", "Combo",
+];
+function categoryRank(cat: string) {
+  const i = CATEGORY_ORDER.indexOf(cat);
+  return i === -1 ? CATEGORY_ORDER.length : i;
+}
+function sortedCounts(counts: StockCount[]) {
+  return [...counts].sort(
+    (a, b) =>
+      categoryRank(a.product_category) - categoryRank(b.product_category) ||
+      Number(a.unit_price) - Number(b.unit_price) ||
+      a.product_name.localeCompare(b.product_name)
+  );
+}
+function buildCatPrices(counts: StockCount[]) {
+  const m = new Map<string, Set<number>>();
+  for (const sc of counts) {
+    if (!m.has(sc.product_category)) m.set(sc.product_category, new Set());
+    m.get(sc.product_category)!.add(Number(sc.unit_price));
+  }
+  return m;
+}
 
 export default function StockSummaryScreen() {
   const { user } = useAuth();
@@ -40,8 +65,11 @@ export default function StockSummaryScreen() {
     .filter((sc) => !sc.requires_preparation)
     .sort((a, b) => a.product_name.localeCompare(b.product_name));
 
-  // Raw ingredients that are RECIPE_LINKED (not tied to a product directly)
-  const recipeIngredients = rawStock.filter((r) => r.tracking_mode === "RECIPE_LINKED");
+  // Raw ingredients that are RECIPE_LINKED — exclude BEVERAGE group since those
+  // are already shown as products in the "Beverages & ready stock" section above.
+  const recipeIngredients = rawStock.filter(
+    (r) => r.tracking_mode === "RECIPE_LINKED" && r.ingredient_group !== "BEVERAGE"
+  );
   const periodicIngredients = rawStock.filter((r) => r.tracking_mode === "PERIODIC_COUNT");
 
   const rawValue = (r: RawStock) =>
@@ -76,49 +104,91 @@ export default function StockSummaryScreen() {
         </span>
       </div>
 
-      {/* Prepared items */}
-      {preparedCounts.length > 0 && (
-        <Section title="Prepared items" subtitle="Physically counted at close">
-          {preparedCounts.map((sc) => (
-            <StockRow
-              key={sc.id}
-              name={sc.product_name}
-              qty={sc.remains_pieces}
-              unit="pcs"
-              value={sc.remains_pieces > 0 ? Number(sc.remains_value) : undefined}
-              dim={sc.remains_pieces === 0}
-              piecesPerPack={sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null}
-            />
-          ))}
-        </Section>
-      )}
+      {/* Prepared items — grouped by category then price */}
+      {preparedCounts.length > 0 && (() => {
+        const sorted = sortedCounts(preparedCounts);
+        const catPrices = buildCatPrices(sorted);
+        return (
+          <Section title="Prepared items" subtitle="Physically counted at close">
+            {sorted.map((sc, i) => {
+              const prev = sorted[i - 1];
+              const isFirstInCat = i === 0 || prev.product_category !== sc.product_category;
+              const multiPrice = (catPrices.get(sc.product_category)?.size ?? 1) > 1;
+              const isFirstInPrice = isFirstInCat || Number(prev.unit_price) !== Number(sc.unit_price);
+              return (
+                <React.Fragment key={sc.id}>
+                  {isFirstInCat && sc.product_category && (
+                    <div className={`px-3 pt-2 pb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-soft/50`}>
+                      {sc.product_category}
+                    </div>
+                  )}
+                  {multiPrice && isFirstInPrice && (
+                    <div className="pl-4 pr-3 pt-1 pb-0.5 font-mono text-[9px] text-ink-soft/35">
+                      ৳{Number(sc.unit_price)} each
+                    </div>
+                  )}
+                  <StockRow
+                    name={sc.product_name}
+                    qty={sc.remains_pieces}
+                    unit="pcs"
+                    value={sc.remains_pieces > 0 ? Number(sc.remains_value) : undefined}
+                    dim={sc.remains_pieces === 0}
+                    piecesPerPack={sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null}
+                  />
+                </React.Fragment>
+              );
+            })}
+          </Section>
+        );
+      })()}
 
-      {/* Beverages & ready stock */}
-      {readyCounts.length > 0 && (
-        <Section title="Beverages & ready stock" subtitle="Physically counted at close">
-          {readyCounts.map((sc) => (
-            <StockRow
-              key={sc.id}
-              name={sc.product_name}
-              qty={sc.remains_pieces}
-              unit="pcs"
-              value={sc.remains_pieces > 0 ? Number(sc.remains_value) : undefined}
-              dim={sc.remains_pieces === 0}
-              piecesPerPack={sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null}
-            />
-          ))}
-        </Section>
-      )}
+      {/* Beverages & ready stock — grouped by category then price */}
+      {readyCounts.length > 0 && (() => {
+        const sorted = sortedCounts(readyCounts);
+        const catPrices = buildCatPrices(sorted);
+        return (
+          <Section title="Beverages & ready stock" subtitle="Physically counted at close">
+            {sorted.map((sc, i) => {
+              const prev = sorted[i - 1];
+              const isFirstInCat = i === 0 || prev.product_category !== sc.product_category;
+              const multiPrice = (catPrices.get(sc.product_category)?.size ?? 1) > 1;
+              const isFirstInPrice = isFirstInCat || Number(prev.unit_price) !== Number(sc.unit_price);
+              return (
+                <React.Fragment key={sc.id}>
+                  {isFirstInCat && sc.product_category && (
+                    <div className="px-3 pt-2 pb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-soft/50">
+                      {sc.product_category}
+                    </div>
+                  )}
+                  {multiPrice && isFirstInPrice && (
+                    <div className="pl-4 pr-3 pt-1 pb-0.5 font-mono text-[9px] text-ink-soft/35">
+                      ৳{Number(sc.unit_price)} each
+                    </div>
+                  )}
+                  <StockRow
+                    name={sc.product_name}
+                    qty={sc.remains_pieces}
+                    unit="pcs"
+                    value={sc.remains_pieces > 0 ? Number(sc.remains_value) : undefined}
+                    dim={sc.remains_pieces === 0}
+                    piecesPerPack={sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null}
+                  />
+                </React.Fragment>
+              );
+            })}
+          </Section>
+        );
+      })()}
 
       {/* Raw ingredients (recipe-linked) */}
       {recipeIngredients.length > 0 && (
         <Section title="Raw ingredients" subtitle="System-tracked balance after today's prep">
           {recipeIngredients
-            .sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name))
+            .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
             .map((r) => (
               <StockRow
                 key={r.id}
-                name={r.ingredient_name}
+                name={r.ingredient_display_name}
                 qty={Number(r.quantity_available)}
                 unit={r.base_unit}
                 value={rawValue(r) > 0 ? rawValue(r) : undefined}
@@ -133,11 +203,11 @@ export default function StockSummaryScreen() {
       {periodicIngredients.length > 0 && (
         <Section title="Packaging & supplies" subtitle="Last reported count">
           {periodicIngredients
-            .sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name))
+            .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
             .map((r) => (
               <StockRow
                 key={r.id}
-                name={r.ingredient_name}
+                name={r.ingredient_display_name}
                 qty={Number(r.quantity_available)}
                 unit={r.base_unit}
                 value={rawValue(r) > 0 ? rawValue(r) : undefined}

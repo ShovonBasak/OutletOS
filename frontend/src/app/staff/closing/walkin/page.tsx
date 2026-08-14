@@ -11,6 +11,8 @@ import type { DailyClosing } from "@/lib/types";
 interface ProductRow {
   id: number;
   name: string;
+  category: string;
+  unitPrice: number;
   requiresPreparation: boolean;
   piecesPerPack: number | null;
   walkin: number;
@@ -22,6 +24,16 @@ interface ProductRow {
   remains: number;
   remainsValue: number;
   flag: boolean;
+}
+
+const CATEGORY_ORDER = [
+  "Fried Chicken", "Snacks", "Light Snacks", "Meals",
+  "Rice & Sides", "Beverages", "Add-on", "Combo",
+];
+
+function categoryRank(cat: string) {
+  const i = CATEGORY_ORDER.indexOf(cat);
+  return i === -1 ? CATEGORY_ORDER.length : i;
 }
 
 function fmtPack(qty: number, piecesPerPack: number | null): string | null {
@@ -57,6 +69,8 @@ export default function SalesSummaryScreen() {
       return {
         id: sc.product,
         name: sc.product_name,
+        category: sc.product_category,
+        unitPrice: Number(sc.unit_price) || 0,
         requiresPreparation: sc.requires_preparation,
         piecesPerPack: sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null,
         walkin: sc.derived_walkin_sold,
@@ -74,7 +88,7 @@ export default function SalesSummaryScreen() {
     const productMap = new Map<number, ProductRow>();
     for (const l of walkinLines) {
       const row = productMap.get(l.product) ?? {
-        id: l.product, name: l.product_name, requiresPreparation: false, piecesPerPack: null,
+        id: l.product, name: l.product_name, category: "", unitPrice: 0, requiresPreparation: false, piecesPerPack: null,
         walkin: 0, walkinRevenue: 0, online: 0, onlineRevenue: 0,
         wastage: 0, wastageCost: 0, remains: 0, remainsValue: 0, flag: false,
       };
@@ -84,7 +98,7 @@ export default function SalesSummaryScreen() {
     }
     for (const l of onlineLines) {
       const row = productMap.get(l.product) ?? {
-        id: l.product, name: l.product_name, requiresPreparation: false, piecesPerPack: null,
+        id: l.product, name: l.product_name, category: "", unitPrice: 0, requiresPreparation: false, piecesPerPack: null,
         walkin: 0, walkinRevenue: 0, online: 0, onlineRevenue: 0,
         wastage: 0, wastageCost: 0, remains: 0, remainsValue: 0, flag: false,
       };
@@ -117,6 +131,19 @@ export default function SalesSummaryScreen() {
       r.flag ||
       (r.requiresPreparation && (r.wastage > 0 || r.remains > 0))
   );
+
+  const sorted = [...displayRows].sort(
+    (a, b) =>
+      categoryRank(a.category) - categoryRank(b.category) ||
+      a.unitPrice - b.unitPrice ||
+      a.name.localeCompare(b.name)
+  );
+
+  const categoryPrices = new Map<string, Set<number>>();
+  for (const r of sorted) {
+    if (!categoryPrices.has(r.category)) categoryPrices.set(r.category, new Set());
+    categoryPrices.get(r.category)!.add(r.unitPrice);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -188,7 +215,7 @@ export default function SalesSummaryScreen() {
         </div>
       )}
 
-      {/* Per-product list */}
+      {/* Per-product list — grouped by category then price tier */}
       {displayRows.length === 0 ? (
         <p className="font-mono text-xs text-ink-soft">No sales recorded yet.</p>
       ) : (
@@ -196,86 +223,89 @@ export default function SalesSummaryScreen() {
           <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-ink-soft/60 bg-[#f5f0e8] border-b border-dashed border-[#d8cdb0]">
             By product
           </p>
-          {displayRows.map((row, i) => {
-            const totalSold = Math.max(0, row.walkin) + row.online;
-            const totalRevenue = row.walkinRevenue + row.onlineRevenue;
+          {sorted.map((row, i) => {
+                const totalSold = Math.max(0, row.walkin) + row.online;
+                const totalRevenue = row.walkinRevenue + row.onlineRevenue;
+                const prev = sorted[i - 1];
+                const isFirstInCategory = i === 0 || prev.category !== row.category;
+                const multiPrice = (categoryPrices.get(row.category)?.size ?? 1) > 1;
+                const isFirstInPriceTier = isFirstInCategory || prev.unitPrice !== row.unitPrice;
+                const isLast = i === sorted.length - 1;
 
-            // Bottom-left channel breakdown — show raw walkin so flags surface the negative
-            const channelParts: React.ReactNode[] = [];
-            if (row.online > 0)
-              channelParts.push(
-                <span key="online" className="text-ink-soft">Online&nbsp;<span className="font-semibold text-ink">{row.online}</span></span>
-              );
-            if (row.walkin !== 0)
-              channelParts.push(
-                <span key="walkin" className={row.walkin < 0 ? "text-chili" : "text-ink-soft"}>
-                  Walk-in&nbsp;<span className={`font-semibold ${row.walkin < 0 ? "text-chili" : "text-ink"}`}>{row.walkin}</span>
-                </span>
-              );
-            if (channelParts.length === 0)
-              channelParts.push(<span key="none" className="text-ink-soft/40">no channel data</span>);
+                const channelParts: React.ReactNode[] = [];
+                if (row.online > 0)
+                  channelParts.push(
+                    <span key="online" className="text-ink-soft">Online&nbsp;<span className="font-semibold text-ink">{row.online}</span></span>
+                  );
+                if (row.walkin !== 0)
+                  channelParts.push(
+                    <span key="walkin" className={row.walkin < 0 ? "text-chili" : "text-ink-soft"}>
+                      Walk-in&nbsp;<span className={`font-semibold ${row.walkin < 0 ? "text-chili" : "text-ink"}`}>{row.walkin}</span>
+                    </span>
+                  );
+                if (channelParts.length === 0)
+                  channelParts.push(<span key="none" className="text-ink-soft/40">no channel data</span>);
 
-            return (
-              <div
-                key={row.id}
-                className={`px-3 py-2.5 ${
-                  i < displayRows.length - 1 ? "border-b border-dashed border-[#e8dfc8]" : ""
-                } ${row.flag ? "bg-chili/[0.03]" : ""}`}
-              >
-                {/* Top row: product name (left) · qty + price (right) */}
-                <div className="flex items-baseline justify-between gap-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-1">
-                    {row.flag && (
-                      <span className="shrink-0 font-mono text-[10px] text-chili">⚑</span>
+                return (
+                  <React.Fragment key={row.id}>
+                    {/* Category label — shown once per category */}
+                    {isFirstInCategory && row.category && (
+                      <div className={`px-3 pt-2 pb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-soft/50 ${i > 0 ? "border-t border-[#e0d5bc]" : ""}`}>
+                        {row.category}
+                      </div>
                     )}
-                    <span className="font-display text-sm font-bold text-ink leading-tight truncate">
-                      {row.name}
-                    </span>
-                  </div>
-                  {/* Qty and price kept visually distinct: qty is monospace dark, price is green */}
-                  <div className="shrink-0 flex items-baseline gap-0.5">
-                    <span className={`font-mono text-sm font-bold ${row.flag ? "text-chili" : "text-ink"}`}>
-                      {totalSold}
-                    </span>
-                    <span className="font-mono text-[10px] text-ink-soft mr-1">pcs</span>
-                    <span className="font-mono text-[10px] text-ink-soft/40">·</span>
-                    <span className="font-mono text-sm font-semibold text-leaf-deep ml-1">
-                      {bdt(totalRevenue)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Bottom row: channel breakdown (left) · remaining (right) */}
-                <div className="mt-0.5 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                    {channelParts.map((part, j) => (
-                      <span key={j} className="flex items-center gap-1.5">
-                        {j > 0 && <span className="text-ink-soft/30">·</span>}
-                        {part}
-                      </span>
-                    ))}
-                    {row.wastage > 0 && (
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-ink-soft/30">·</span>
-                        <span className="text-chili-deep">Wastage&nbsp;<span className="font-semibold">{row.wastage}</span></span>
-                      </span>
+                    {/* Price tier sub-label — only when category has multiple price points */}
+                    {multiPrice && isFirstInPriceTier && (
+                      <div className={`pl-4 pr-3 pt-1 pb-0.5 font-mono text-[9px] text-ink-soft/35 ${!isFirstInCategory && i > 0 ? "border-t border-dashed border-[#ede5ce]" : ""}`}>
+                        ৳{row.unitPrice} each
+                      </div>
                     )}
-                  </div>
-                  {row.requiresPreparation && (
-                    <div className="shrink-0 flex flex-col items-end">
-                      <span className={`font-mono text-[10px] ${row.remains > 0 ? "font-semibold text-gold-deep" : "text-ink-soft/30"}`}>
-                        {row.remains > 0 ? `Rem ${row.remains}` : "—"}
-                      </span>
-                      {row.remains > 0 && fmtPack(row.remains, row.piecesPerPack) && (
-                        <span className="font-mono text-[9px] text-ink-soft/50 leading-tight">
-                          {fmtPack(row.remains, row.piecesPerPack)}
-                        </span>
-                      )}
+                    <div className={`px-3 py-2.5 ${!isLast ? "border-b border-dashed border-[#e8dfc8]" : ""} ${row.flag ? "bg-chili/[0.03]" : ""}`}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div className="flex min-w-0 flex-1 items-center gap-1">
+                          {row.flag && <span className="shrink-0 font-mono text-[10px] text-chili">⚑</span>}
+                          <span className="font-display text-sm font-bold text-ink leading-tight truncate">
+                            {row.name}
+                          </span>
+                        </div>
+                        <div className="shrink-0 flex items-baseline gap-0.5">
+                          <span className={`font-mono text-sm font-bold ${row.flag ? "text-chili" : "text-ink"}`}>{totalSold}</span>
+                          <span className="font-mono text-[10px] text-ink-soft mr-1">pcs</span>
+                          <span className="font-mono text-[10px] text-ink-soft/40">·</span>
+                          <span className="font-mono text-sm font-semibold text-leaf-deep ml-1">{bdt(totalRevenue)}</span>
+                        </div>
+                      </div>
+                      <div className="mt-0.5 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                          {channelParts.map((part, j) => (
+                            <span key={j} className="flex items-center gap-1.5">
+                              {j > 0 && <span className="text-ink-soft/30">·</span>}
+                              {part}
+                            </span>
+                          ))}
+                          {row.wastage > 0 && (
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-ink-soft/30">·</span>
+                              <span className="text-chili-deep">Wastage&nbsp;<span className="font-semibold">{row.wastage}</span></span>
+                            </span>
+                          )}
+                        </div>
+                        {row.requiresPreparation && (
+                          <div className="shrink-0 flex flex-col items-end">
+                            <span className={`font-mono text-[10px] ${row.remains > 0 ? "font-semibold text-gold-deep" : "text-ink-soft/30"}`}>
+                              {row.remains > 0 ? `Rem ${row.remains}` : "—"}
+                            </span>
+                            {row.remains > 0 && fmtPack(row.remains, row.piecesPerPack) && (
+                              <span className="font-mono text-[9px] text-ink-soft/50 leading-tight">
+                                {fmtPack(row.remains, row.piecesPerPack)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-            );
+                  </React.Fragment>
+                );
           })}
         </div>
       )}

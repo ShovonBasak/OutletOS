@@ -133,7 +133,7 @@ class RawStockSerializer(serializers.ModelSerializer):
     cost_per_base_unit = serializers.SerializerMethodField()
 
     def get_ingredient_display_name(self, obj):
-        alias = obj.ingredient.aliases.filter(is_active=True).first()
+        alias = next((a for a in obj.ingredient.aliases.all() if a.is_active), None)
         return alias.alias_text if alias else obj.ingredient.name
 
     def get_pieces_per_pack(self, obj):
@@ -174,7 +174,7 @@ class DayStartStockCheckSerializer(serializers.ModelSerializer):
     )
 
     def get_ingredient_display_name(self, obj):
-        alias = obj.ingredient.aliases.filter(is_active=True).first()
+        alias = next((a for a in obj.ingredient.aliases.all() if a.is_active), None)
         return alias.alias_text if alias else obj.ingredient.name
 
     class Meta:

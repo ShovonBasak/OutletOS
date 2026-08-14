@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Product } from "@/lib/types";
+
+const CATEGORY_RANK = new Map(PRODUCT_CATEGORIES.map((c, i) => [c as string, i]));
+function catRank(cat: string) { return CATEGORY_RANK.get(cat) ?? PRODUCT_CATEGORIES.length; }
 
 type TypeFilter = "ALL" | "READY" | "PREPARED";
 
@@ -25,6 +28,7 @@ export function ProductListFilter({
   doneLabel,
   showTypeFilter,
   rawItems,
+  grouped,
 }: {
   products: Product[];
   renderRow: (p: Product) => React.ReactNode;
@@ -33,6 +37,8 @@ export function ProductListFilter({
   showTypeFilter?: boolean;
   /** When true, skip the per-item wrapper div so renderRow can own all styling. */
   rawItems?: boolean;
+  /** When true, sort by category → price → name and show subtle category labels. */
+  grouped?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("ALL");
@@ -114,23 +120,42 @@ export function ProductListFilter({
       </p>
 
       <div className="flex flex-col gap-2">
-        {visible.map((p) =>
-          rawItems ? (
-            <div key={p.id}>{renderRow(p)}</div>
-          ) : (
-            <div
-              key={p.id}
-              className={`rounded border px-3 py-2 transition ${
-                isDone(p) ? "border-leaf/40 bg-leaf/10" : "border-[#d8cdb0] bg-[#fffdf7]"
-              }`}
-            >
-              {renderRow(p)}
-            </div>
-          )
-        )}
         {visible.length === 0 && (
           <p className="py-6 text-center font-mono text-xs text-ink-soft">No products match.</p>
         )}
+        {(grouped
+          ? [...visible].sort(
+              (a, b) =>
+                catRank(a.category) - catRank(b.category) ||
+                Number(a.selling_price) - Number(b.selling_price) ||
+                a.name.localeCompare(b.name)
+            )
+          : visible
+        ).map((p, i, arr) => {
+          const prev = arr[i - 1];
+          const isFirstInCat = grouped && (i === 0 || prev.category !== p.category);
+          const showCatLabel = isFirstInCat && cat === "ALL" && !!p.category;
+          return (
+            <React.Fragment key={p.id}>
+              {showCatLabel && (
+                <p className={`px-1 font-mono text-[9px] uppercase tracking-[0.1em] text-ink-soft/50 ${i > 0 ? "mt-1" : ""}`}>
+                  {p.category}
+                </p>
+              )}
+              {rawItems ? (
+                <div>{renderRow(p)}</div>
+              ) : (
+                <div
+                  className={`rounded border px-3 py-2 transition ${
+                    isDone(p) ? "border-leaf/40 bg-leaf/10" : "border-[#d8cdb0] bg-[#fffdf7]"
+                  }`}
+                >
+                  {renderRow(p)}
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
   );

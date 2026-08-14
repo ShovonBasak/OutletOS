@@ -166,6 +166,8 @@ export interface DayStartStockCheck {
   operating_day: number;
   ingredient: number;
   ingredient_name: string;
+  ingredient_display_name: string;
+  ingredient_group: string;
   base_unit: string;
   system_carried_qty: string;
   confirmed_qty: string;

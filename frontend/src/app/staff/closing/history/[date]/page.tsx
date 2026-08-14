@@ -7,7 +7,13 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, shortDate } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
-import type { DailyClosing, Paginated, Product } from "@/lib/types";
+import type { DailyClosing, DayStartStockCheck, OperatingDay, Paginated, Product, RawStock } from "@/lib/types";
+
+function nextDate(d: string): string {
+  const dt = new Date(d + "T00:00:00");
+  dt.setDate(dt.getDate() + 1);
+  return dt.toISOString().slice(0, 10);
+}
 
 export default function ClosingDetail() {
   const { user } = useAuth();
@@ -16,17 +22,26 @@ export default function ClosingDetail() {
   const date = params.date as string;
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [priceMap, setPriceMap] = useState<Record<number, number>>({});
+  const [rawChecks, setRawChecks] = useState<DayStartStockCheck[]>([]);
+  const [rawStock, setRawStock] = useState<RawStock[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     Promise.all([
       api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${date}`),
       api<Paginated<Product>>("/products/?active=true"),
-    ]).then(([cd, pd]) => {
+      api<Paginated<OperatingDay>>(`/operating-days/?outlet=${outlet}&date=${nextDate(date)}`),
+      api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),
+    ]).then(([cd, pd, nextOp, rs]) => {
       setClosing(cd.results[0] ?? null);
       const map: Record<number, number> = {};
       pd.results.forEach((p) => { map[p.id] = Number(p.selling_price); });
       setPriceMap(map);
+      // next day's system_carried_qty = what raw stock was at end of this closing day
+      const checks = nextOp.results[0]?.stock_checks ?? [];
+      setRawChecks(checks.filter((c) => c.ingredient_group !== "BEVERAGE" && Number(c.system_carried_qty) > 0));
+      // fallback: use current raw stock if next day hasn't started yet
+      setRawStock(rs.results.filter((r) => r.tracking_mode === "RECIPE_LINKED" && r.ingredient_group !== "BEVERAGE" && Number(r.quantity_available) > 0));
     }).finally(() => setLoaded(true));
   }, [outlet, date]);
 
@@ -52,14 +67,19 @@ export default function ClosingDetail() {
   const walkinTotal = walkinLines.reduce((s, l) => s + Number(l.net_amount), 0);
 
   const preparedRows = closing.stock_counts
-    .filter((sc) => sc.available_pieces > 0)
+    .filter((sc) => sc.requires_preparation && sc.available_pieces > 0)
     .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.available_pieces * (priceMap[sc.product] ?? 0) }));
   const preparedTotal = preparedRows.reduce((s, r) => s + r.total, 0);
 
   const remainsRows = closing.stock_counts
-    .filter((sc) => sc.remains_pieces > 0)
+    .filter((sc) => sc.requires_preparation && sc.remains_pieces > 0)
     .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.remains_pieces * (priceMap[sc.product] ?? 0) }));
   const remainsTotal = remainsRows.reduce((s, r) => s + r.total, 0);
+
+  const readyStockRows = closing.stock_counts
+    .filter((sc) => !sc.requires_preparation && sc.remains_pieces > 0)
+    .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.remains_pieces * (priceMap[sc.product] ?? 0) }));
+  const readyStockTotal = readyStockRows.reduce((s, r) => s + r.total, 0);
 
   const wastageRows = closing.stock_counts
     .filter((sc) => sc.wastage_pieces > 0)
@@ -177,6 +197,64 @@ export default function ClosingDetail() {
           <Row label="Remains total" value={bdt(remainsTotal)} bold />
         </Section>
       )}
+
+      {/* End-of-day stock: ready products (beverages, add-ons) */}
+      {readyStockRows.length > 0 && (
+        <Section title="End-of-day stock (ready products)">
+          <p className="mb-2 font-mono text-[10px] text-ink-soft">
+            Unsold beverages & ready items remaining at close
+          </p>
+          {readyStockRows.map((r) => (
+            <div key={r.id} className="ticket-row font-mono text-[11px]">
+              <span>{r.product_name} <span className="text-ink-soft">× {r.remains_pieces} @ {bdt(r.price)}</span></span>
+              <span className="num">{bdt(r.total)}</span>
+            </div>
+          ))}
+          <Divider />
+          <Row label="Ready stock total" value={bdt(readyStockTotal)} bold />
+        </Section>
+      )}
+
+      {/* End-of-day raw ingredient stock */}
+      {(rawChecks.length > 0 || rawStock.length > 0) && (() => {
+        const useChecks = rawChecks.length > 0;
+        return (
+          <Section title="End-of-day stock (raw ingredients)">
+            {!useChecks && (
+              <p className="mb-2 font-mono text-[10px] text-ink-soft/60 italic">
+                Next day not started — showing current balance
+              </p>
+            )}
+            {useChecks
+              ? rawChecks
+                  .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
+                  .map((c) => (
+                    <div key={c.id} className="ticket-row font-mono text-[11px]">
+                      <span>{c.ingredient_display_name}</span>
+                      <span className="num">
+                        {Number(c.system_carried_qty) % 1 === 0
+                          ? Number(c.system_carried_qty)
+                          : Number(c.system_carried_qty).toFixed(2)}{" "}
+                        <span className="text-ink-soft">{c.base_unit}</span>
+                      </span>
+                    </div>
+                  ))
+              : rawStock
+                  .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
+                  .map((r) => (
+                    <div key={r.id} className="ticket-row font-mono text-[11px]">
+                      <span>{r.ingredient_display_name}</span>
+                      <span className="num">
+                        {Number(r.quantity_available) % 1 === 0
+                          ? Number(r.quantity_available)
+                          : Number(r.quantity_available).toFixed(2)}{" "}
+                        <span className="text-ink-soft">{r.base_unit}</span>
+                      </span>
+                    </div>
+                  ))}
+          </Section>
+        );
+      })()}
 
       {/* Wastage */}
       {wastageRows.length > 0 && (

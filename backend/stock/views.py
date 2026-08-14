@@ -800,7 +800,10 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
 
 
 class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = RawStock.objects.select_related("ingredient", "outlet")
+    queryset = RawStock.objects.select_related("ingredient", "outlet").prefetch_related(
+        "ingredient__aliases",
+        "ingredient__pack_definitions",
+    )
     serializer_class = RawStockSerializer
 
     def get_queryset(self):
@@ -851,7 +854,9 @@ def _initialize_direct_stock(outlet):
 class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
     """Gates the staff daily flow. Read + custom transitions (start, confirm)."""
 
-    queryset = OperatingDay.objects.select_related("outlet", "started_by")
+    queryset = OperatingDay.objects.select_related("outlet", "started_by").prefetch_related(
+        "stock_checks__ingredient__aliases",
+    )
     serializer_class = OperatingDaySerializer
 
     def get_queryset(self):

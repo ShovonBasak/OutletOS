@@ -65,7 +65,10 @@ export default function StaffHome() {
       if (c) setClosingStatus(c.status.charAt(0) + c.status.slice(1).toLowerCase());
       else setClosingStatus("Not started");
     });
-    api<CashInfo>("/cash/").then(setCashInfo).catch(() => {});
+    api<CashInfo>("/cash/").then((info) => {
+      setCashInfo(info);
+      if (!toAccount && info.accounts[0]) setToAccount(String(info.accounts[0].id));
+    }).catch(() => {});
   }, [outlet, workDate]);
 
   // When a stale day is detected and it's IN_PROGRESS, fetch its closing status

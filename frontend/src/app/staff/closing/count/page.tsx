@@ -233,6 +233,7 @@ export default function CountScreen() {
         doneLabel={(d, t) => `${d}/${t} saved`}
         showTypeFilter
         rawItems
+        grouped
         renderRow={(p) => {
           const r = rows[p.id] ?? { remains: 0, wastage: 0 };
           const available = displayStock[p.id] ?? 0;

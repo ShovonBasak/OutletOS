@@ -127,8 +127,9 @@ function InvoiceRow({
   onResume?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const primaryId = accounts.find((a) => a.is_primary_cash)?.id ?? accounts[0]?.id;
   const [approvalAccount, setApprovalAccount] = useState(
-    r.paid_from_account ? String(r.paid_from_account) : ""
+    r.paid_from_account ? String(r.paid_from_account) : (primaryId ? String(primaryId) : "")
   );
   const invoiceLabel = r.invoice_number
     ? r.invoice_number
