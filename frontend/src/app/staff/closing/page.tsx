@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
@@ -11,27 +11,61 @@ import { useOperatingDay } from "@/lib/staffDay";
 import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, Paginated, Product } from "@/lib/types";
 
-export default function ClosingHub() {
+function yesterday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export default function ClosingHubPage() {
+  return (
+    <Suspense fallback={<p className="font-mono text-xs text-ink-soft">Loading closing…</p>}>
+      <ClosingHub />
+    </Suspense>
+  );
+}
+
+function ClosingHub() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewYesterday = searchParams.get("view") === "yesterday";
   const { workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
-  const opDate = workDate || today();
+  const opDate = viewYesterday ? yesterday() : (workDate || today());
   const [closing, setClosing] = useState<DailyClosing | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
+    if (viewYesterday) {
+      const res = await api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${opDate}`);
+      if (res.results[0]) {
+        setClosing(res.results[0]);
+      } else {
+        setNotFound(true);
+      }
+      return;
+    }
     const c = await getOrCreateTodayClosing(outlet, opDate);
     setClosing(c);
     const p = await api<Paginated<Product>>("/products/?active=true");
     setTotalProducts(p.results.filter((x) => x.product_type === "SINGLE").length);
   }
   useEffect(() => {
+    setClosing(null);
+    setNotFound(false);
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outlet, opDate]);
+  }, [outlet, opDate, viewYesterday]);
 
+  if (notFound) return (
+    <div className="flex flex-col gap-3">
+      <p className="font-mono text-xs text-ink-soft">No closing found for {shortDate(opDate)}.</p>
+      <button className="btn btn-ghost self-start" onClick={() => router.back()}>← Back</button>
+    </div>
+  );
   if (!closing) return <p className="font-mono text-xs text-ink-soft">Loading closing…</p>;
 
   const counted = closing.stock_counts.length;
@@ -53,56 +87,62 @@ export default function ClosingHub() {
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="font-display text-xl font-bold">Day-end closing</h1>
+          <h1 className="font-display text-xl font-bold">
+            {viewYesterday ? "Yesterday's closing" : "Day-end closing"}
+          </h1>
           <p className="text-xs text-ink-soft">{shortDate(opDate)}</p>
         </div>
         <Stamp status={closing.status} />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Step
-          n={1}
-          href="/staff/closing/count"
-          title="Count remains & wastage"
-          progress={`${counted}/${totalProducts} counted`}
-          done={counted >= totalProducts && totalProducts > 0}
-        />
-        <Step
-          n={2}
-          href="/staff/closing/online"
-          title="Online sell"
-          progress={`${onlineEntered} line(s) entered`}
-          done={onlineEntered > 0}
-        />
-        <Step
-          n={3}
-          href="/staff/closing/walkin"
-          title="Sales summary"
-          progress={`${walkinLines} derived line(s)`}
-          done={walkinLines > 0}
-        />
-        <Step
-          n={4}
-          href="/staff/closing/payments"
-          title="Payments"
-          progress={paid ? "recorded" : "pending"}
-          done={paid}
-        />
-      </div>
+      {!viewYesterday && (
+        <div className="flex flex-col gap-2">
+          <Step
+            n={1}
+            href="/staff/closing/count"
+            title="Count remains & wastage"
+            progress={`${counted}/${totalProducts} counted`}
+            done={counted >= totalProducts && totalProducts > 0}
+          />
+          <Step
+            n={2}
+            href="/staff/closing/online"
+            title="Online sell"
+            progress={`${onlineEntered} line(s) entered`}
+            done={onlineEntered > 0}
+          />
+          <Step
+            n={3}
+            href="/staff/closing/walkin"
+            title="Sales summary"
+            progress={`${walkinLines} derived line(s)`}
+            done={walkinLines > 0}
+          />
+          <Step
+            n={4}
+            href="/staff/closing/payments"
+            title="Payments"
+            progress={paid ? "recorded" : "pending"}
+            done={paid}
+          />
+        </div>
+      )}
 
       {/* Stock summary link — informational, not a step */}
-      <Link
-        href="/staff/closing/stock"
-        className="flex items-center justify-between rounded border border-dashed border-[#d8cdb0] bg-paper px-4 py-3 text-ink-soft hover:bg-paper-dim"
-      >
-        <div>
-          <span className="block font-display text-sm font-bold text-ink">Stock summary</span>
-          <span className="block font-mono text-[11px] text-ink-soft">
-            Prepared items · beverages · raw ingredients
-          </span>
-        </div>
-        <span className="font-mono text-ink-soft">›</span>
-      </Link>
+      {!viewYesterday && (
+        <Link
+          href="/staff/closing/stock"
+          className="flex items-center justify-between rounded border border-dashed border-[#d8cdb0] bg-paper px-4 py-3 text-ink-soft hover:bg-paper-dim"
+        >
+          <div>
+            <span className="block font-display text-sm font-bold text-ink">Stock summary</span>
+            <span className="block font-mono text-[11px] text-ink-soft">
+              Prepared items · beverages · raw ingredients
+            </span>
+          </div>
+          <span className="font-mono text-ink-soft">›</span>
+        </Link>
+      )}
 
       <div className="ticket">
         <div className="ticket-row">
@@ -120,15 +160,15 @@ export default function ClosingHub() {
         )}
       </div>
 
-      {closing.status === "DRAFT" && (
+      {!viewYesterday && closing.status === "DRAFT" && (
         <button className="btn btn-primary" disabled={busy} onClick={submit}>
           {busy ? "Submitting…" : "Submit closing"}
         </button>
       )}
-      {closing.status === "SUBMITTED" && (
+      {!viewYesterday && closing.status === "SUBMITTED" && (
         <p className="font-mono text-xs text-gold-deep">Submitted — awaiting owner review (flagged).</p>
       )}
-      {closing.status === "LOCKED" && (
+      {!viewYesterday && closing.status === "LOCKED" && (
         <p className="font-mono text-xs text-leaf-deep">Locked ✓ — closing complete.</p>
       )}
       <button className="btn btn-ghost" onClick={() => router.push("/staff")}>
