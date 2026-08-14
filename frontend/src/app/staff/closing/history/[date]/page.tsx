@@ -10,9 +10,13 @@ import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, DayStartStockCheck, OperatingDay, Paginated, Product, RawStock } from "@/lib/types";
 
 function nextDate(d: string): string {
-  const dt = new Date(d + "T00:00:00");
-  dt.setDate(dt.getDate() + 1);
-  return dt.toISOString().slice(0, 10);
+  const [y, m, day] = d.split("-").map(Number);
+  // Use local-time date constructor to avoid UTC offset shifting the date string
+  const dt = new Date(y, m - 1, day + 1);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
 export default function ClosingDetail() {
