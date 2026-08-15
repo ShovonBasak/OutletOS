@@ -312,7 +312,10 @@ class DisplayStock(models.Model):
     @classmethod
     def adjust(cls, outlet, product, delta):
         obj, _ = cls.objects.get_or_create(outlet=outlet, product=product)
-        obj.pieces_available = (obj.pieces_available or 0) + int(delta)
+        # Clamp to 0 — DS can't go negative. Without this, deleting a prep log
+        # that was already "erased" by a CF reset would push DS below zero and
+        # future preps wouldn't fully compensate.
+        obj.pieces_available = max(0, (obj.pieces_available or 0) + int(delta))
         obj.save()
         return obj
 
