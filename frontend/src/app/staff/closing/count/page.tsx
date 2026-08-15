@@ -117,7 +117,22 @@ export default function CountScreen() {
 
       const dsMap: Record<number, number> = {};
       ds.results.forEach((d) => { dsMap[d.product] = d.pieces_available; });
-      setDisplayStock(dsMap);
+
+      // Use the snapshotted available_pieces when a stock count already exists —
+      // live DS may have been reduced by a closing submission or carry-forward reset.
+      const snapshotMap: Record<number, number> = {};
+      c.stock_counts.forEach((s) => { snapshotMap[s.product] = s.available_pieces; });
+
+      const effectiveDs: Record<number, number> = {};
+      const allProductIds = new Set([
+        ...Object.keys(dsMap).map(Number),
+        ...Object.keys(snapshotMap).map(Number),
+      ]);
+      allProductIds.forEach((id) => {
+        effectiveDs[id] = Math.max(snapshotMap[id] ?? 0, dsMap[id] ?? 0);
+      });
+
+      setDisplayStock(effectiveDs);
 
       const countedIds = new Set(c.stock_counts.map((s) => s.product));
       const prepared = p.results.filter(

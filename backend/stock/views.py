@@ -1029,17 +1029,10 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
                 DisplayStock.adjust(day.outlet, prev.product, -prev.pieces_prepared)
         existing.delete()
 
-        # Reset DisplayStock to 0 for all prepared products before adding carry-forward
-        # pieces. This corrects any accumulated drift (e.g. from retroactive data entry
-        # or a closing that ran before the deduction fix was applied).
-        from catalog.models import Product as _Product
-        prepared_ids = list(
-            _Product.objects.filter(requires_preparation=True, is_active=True)
-            .values_list("id", flat=True)
-        )
-        DisplayStock.objects.filter(
-            outlet=day.outlet, product_id__in=prepared_ids
-        ).update(pieces_available=0)
+        # Do NOT reset DisplayStock here — the undo loop above already reversed the
+        # previous carry-forward contribution precisely. A blanket reset would wipe
+        # fresh prep contributions logged between the first and second carry-forward
+        # submissions, leaving DisplayStock lower than the sum of today's prep logs.
 
         for row in request.data.get("items", []):
             count = DailyClosingStockCount.objects.get(pk=row["stock_count"])
