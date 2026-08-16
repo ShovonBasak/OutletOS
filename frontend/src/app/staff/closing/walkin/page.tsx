@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
@@ -52,7 +52,11 @@ export default function SalesSummaryScreen() {
   const opDate = workDate || today();
   const [closing, setClosing] = useState<DailyClosing | null>(null);
 
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
+
   useEffect(() => {
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
     getOrCreateTodayClosing(outlet, opDate).then(setClosing);
   }, [outlet, opDate]);
 

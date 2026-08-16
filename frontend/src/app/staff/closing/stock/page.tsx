@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -44,7 +44,11 @@ export default function StockSummaryScreen() {
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [rawStock, setRawStock] = useState<RawStock[]>([]);
 
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
+
   useEffect(() => {
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
     Promise.all([
       getOrCreateTodayClosing(outlet, opDate),
       api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),

@@ -54,20 +54,39 @@ function StockInCard({
   onDelete,
 }: {
   record: StockInRecord;
-  onResume: () => void;
+  onResume: (detail: StockInRecord) => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<StockInRecord | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
   const label = record.invoice_number
     ? record.invoice_number
     : `#SI-${String(record.id).padStart(4, "0")}`;
-  const itemCount = record.items.length;
+  const itemCount = record.item_count ?? record.items?.length ?? 0;
+
+  async function handleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next && !detail) {
+      setLoadingDetail(true);
+      try {
+        const full = await api<StockInRecord>(`/stock-in/${record.id}/`);
+        setDetail(full);
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
+  }
+
+  const items = detail?.items ?? [];
 
   return (
     <div className="rounded border border-[#d8cdb0] bg-paper">
       <button
         className="w-full px-3 pt-3 pb-2.5 text-left"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleOpen}
       >
         {/* Row 1: invoice label + status */}
         <div className="flex items-start justify-between gap-2 mb-2">
@@ -97,11 +116,13 @@ function StockInCard({
 
       {open && (
         <div className="border-t border-[#d8cdb0] px-3 pb-3 pt-2">
-          {record.items.length === 0 ? (
+          {loadingDetail ? (
+            <p className="font-mono text-[11px] text-ink-soft">Loading…</p>
+          ) : items.length === 0 ? (
             <p className="font-mono text-[11px] text-ink-soft">No lines.</p>
           ) : (
             <div className="flex flex-col gap-0">
-              {record.items.map((it) => (
+              {items.map((it) => (
                 <div
                   key={it.id}
                   className="flex items-baseline justify-between border-b border-dotted border-[#e8e0cc] py-1.5 last:border-0"
@@ -127,7 +148,13 @@ function StockInCard({
             <div className="mt-2 flex items-center gap-4">
               <button
                 className="font-mono text-[11px] text-leaf-deep underline"
-                onClick={onResume}
+                onClick={() => {
+                  if (detail) {
+                    onResume(detail);
+                  } else {
+                    api<StockInRecord>(`/stock-in/${record.id}/`).then(onResume);
+                  }
+                }}
               >
                 Resume editing →
               </button>
@@ -153,9 +180,14 @@ export default function StockInPage() {
   const fileRef    = useRef<HTMLInputElement>(null);
   const aliasedRef = useRef<Set<string>>(new Set());
 
+  const PAGE_SIZE = 20;
+
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccountName[]>([]);
   const [records, setRecords] = useState<StockInRecord[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [draft, setDraft] = useState<StockInRecord | null>(null);
   const [lines, setLines] = useState<EditLine[]>([]);
   const [accountId, setAccountId] = useState("");
@@ -190,22 +222,46 @@ export default function StockInPage() {
     }));
   }
 
-  async function refresh() {
-    const [ing, r, acc] = await Promise.all([
+  async function loadStaticData() {
+    const [ing, acc] = await Promise.all([
       api<Paginated<Ingredient>>("/ingredients/?active=true"),
-      api<Paginated<StockInRecord>>(`/stock-in/?outlet=${outlet}`),
       api<Paginated<FinancialAccountName>>("/financial-accounts/"),
     ]);
     setIngredients(ing.results);
-    setRecords(r.results);
     const activeAccounts = acc.results.filter((a) => a.is_active);
     setAccounts(activeAccounts);
     const defAcc = activeAccounts.find((a) => a.is_primary_cash) ?? activeAccounts[0];
     if (defAcc) setAccountId(String(defAcc.id));
+  }
+
+  async function loadRecords(p = 1, append = false) {
+    const r = await api<Paginated<StockInRecord>>(
+      `/stock-in/?outlet=${outlet}&page=${p}&page_size=${PAGE_SIZE}`
+    );
+    setRecords((prev) => (append ? [...prev, ...r.results] : r.results));
+    setPage(p);
+    setHasMore(!!r.next);
     return r.results;
   }
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      await loadRecords(page + 1, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // useRef guard: prevents React StrictMode's simulated unmount+remount from
+  // firing the effect twice, and also skips re-fetching when auth loads but
+  // the computed outlet value doesn't actually change.
+  const prevOutlet = useRef<number | null>(null);
+
   useEffect(() => {
-    refresh();
+    if (prevOutlet.current === outlet) return;
+    prevOutlet.current = outlet;
+    Promise.all([loadStaticData(), loadRecords()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet]);
 
@@ -213,8 +269,14 @@ export default function StockInPage() {
     setMsg("");
     const existing = records.find((r) => r.status === "DRAFT");
     if (existing) {
-      setDraft(existing);
-      setLines(toEditLines(existing.items));
+      setBusy("new");
+      try {
+        const full = await api<StockInRecord>(`/stock-in/${existing.id}/`);
+        setDraft(full);
+        setLines(toEditLines(full.items ?? []));
+      } finally {
+        setBusy("");
+      }
       return;
     }
     setBusy("new");
@@ -259,8 +321,8 @@ export default function StockInPage() {
         { method: "POST" }
       );
       setDraft(rec);
-      setLines(toEditLines(rec.items));
-      const unresolved = rec.items.filter((i) => i.ingredient == null).length;
+      setLines(toEditLines(rec.items ?? []));
+      const unresolved = (rec.items ?? []).filter((i) => i.ingredient == null).length;
       setMsg(
         rec.extracted_count > 0
           ? `Read ${rec.extracted_count} line(s)${unresolved ? ` · ${unresolved} unrecognized — match them below` : ""}.`
@@ -379,7 +441,7 @@ export default function StockInPage() {
       }),
     });
     setDraft(rec);
-    setLines(toEditLines(rec.items));
+    setLines(toEditLines(rec.items ?? []));
     return rec;
   }
 
@@ -400,15 +462,15 @@ export default function StockInPage() {
     setMsg("");
     try {
       const rec = await persist();
-      if (rec && rec.unresolved_count > 0) {
-        setMsg(`Resolve ${rec.unresolved_count} line(s) first (unknown ingredient or missing pack yield).`);
+      if (rec && (rec.unresolved_count ?? 0) > 0) {
+        setMsg(`Resolve ${rec.unresolved_count ?? 0} line(s) first (unknown ingredient or missing pack yield).`);
         return;
       }
       await api(`/stock-in/${draft.id}/submit/`, { method: "POST" });
       setDraft(null);
       setLines([]);
       setMsg("Submitted for approval ✓");
-      refresh();
+      loadRecords();
     } catch {
       setMsg("Submit failed — resolve all lines and add at least one.");
     } finally {
@@ -590,14 +652,23 @@ export default function StockInPage() {
           <StockInCard
             key={r.id}
             record={r}
-            onResume={() => { setDraft(r); setLines(toEditLines(r.items)); }}
+            onResume={(detail) => { setDraft(detail); setLines(toEditLines(detail.items ?? [])); }}
             onDelete={async () => {
               await api(`/stock-in/${r.id}/`, { method: "DELETE" });
-              refresh();
+              loadRecords();
             }}
           />
         ))}
         {records.length === 0 && <p className="font-mono text-xs text-ink-soft">No stock-ins yet.</p>}
+        {hasMore && (
+          <button
+            className="btn btn-ghost w-full font-mono text-[11px]"
+            disabled={loadingMore}
+            onClick={loadMore}
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        )}
       </div>
     </div>
   );

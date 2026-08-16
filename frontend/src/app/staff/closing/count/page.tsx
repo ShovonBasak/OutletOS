@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getOrCreateTodayClosing } from "@/lib/closing";
+import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { ProductListFilter } from "@/components/ProductListFilter";
@@ -106,12 +106,16 @@ export default function CountScreen() {
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
+
   useEffect(() => {
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
     (async () => {
       const [c, p, ds] = await Promise.all([
         getOrCreateTodayClosing(outlet, opDate),
         api<Paginated<Product>>("/products/?active=true&product_type=SINGLE"),
-        api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
+        api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}&slim=1`),
       ]);
       setClosing(c);
 
@@ -193,6 +197,7 @@ export default function CountScreen() {
         method: "POST",
         body: JSON.stringify({ items }),
       });
+      invalidateClosingCache(outlet, opDate);
       router.push("/staff/closing");
     } finally {
       setBusy(false);

@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { today } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
 import AccountPicker from "@/components/AccountPicker";
-import type { FinancialAccount, Ingredient, Paginated, StockInRecord, StockInItem } from "@/lib/types";
+import type { FinancialAccount, IngredientGroup, IngredientSummary, Paginated, StockInRecord, StockInItem } from "@/lib/types";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -15,12 +15,17 @@ function fullDate(iso: string): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function sourceLabel(r: StockInRecord): string {
-  const hasSlip = r.items.some((i) => i.source === "SLIP_EXTRACTED");
-  const hasManual = r.items.some((i) => i.source === "MANUAL");
-  if (hasSlip && hasManual) return "Slip + manual";
-  if (hasSlip) return "Slip";
-  return "Manual";
+function sourceLabel(r: StockInRecord, detail: StockInRecord | null): string {
+  const items = detail?.items ?? r.items;
+  if (r.source_summary && !items) return r.source_summary;
+  if (items) {
+    const hasSlip = items.some((i) => i.source === "SLIP_EXTRACTED");
+    const hasManual = items.some((i) => i.source === "MANUAL");
+    if (hasSlip && hasManual) return "Slip + manual";
+    if (hasSlip) return "Slip";
+    return "Manual";
+  }
+  return r.source_summary ?? "Manual";
 }
 
 function fmt(val: string | null | undefined, decimals = 2): string {
@@ -124,9 +129,12 @@ function InvoiceRow({
   busy: boolean;
   accounts: FinancialAccount[];
   onAct: (id: number, action: "approve" | "reject" | "delete", accountId?: number | null) => void;
-  onResume?: () => void;
+  onResume?: (detail: StockInRecord) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<StockInRecord | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
   const primaryId = accounts.find((a) => a.is_primary_cash)?.id ?? accounts[0]?.id;
   const [approvalAccount, setApprovalAccount] = useState(
     r.paid_from_account ? String(r.paid_from_account) : (primaryId ? String(primaryId) : "")
@@ -135,17 +143,30 @@ function InvoiceRow({
     ? r.invoice_number
     : `#SI-${String(r.id).padStart(4, "0")}`;
 
-  const totalAfterTax = r.items.reduce((sum, item) => {
-    const v = item.line_total ? parseFloat(item.line_total) : 0;
-    return sum + (isNaN(v) ? 0 : v);
-  }, 0);
-  const totalLabel = totalAfterTax > 0 ? `৳${totalAfterTax.toFixed(2)}` : null;
+  const grandTotal = r.slip_grand_total ?? null;
+  const totalLabel = grandTotal && parseFloat(grandTotal) > 0 ? `৳${parseFloat(grandTotal).toFixed(2)}` : null;
+
+  async function handleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next && !detail) {
+      setLoadingDetail(true);
+      try {
+        const full = await api<StockInRecord>(`/stock-in/${r.id}/`);
+        setDetail(full);
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
+  }
+
+  const items = detail?.items;
 
   return (
     <div className="rounded border border-[#d8cdb0] bg-paper">
       <button
         className="w-full px-4 pt-3 pb-2.5 text-left"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleOpen}
       >
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="min-w-0">
@@ -161,7 +182,7 @@ function InvoiceRow({
           </div>
           <div>
             <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Source</p>
-            <p className="font-mono text-[11px] text-ink">{sourceLabel(r)}</p>
+            <p className="font-mono text-[11px] text-ink">{sourceLabel(r, detail)}</p>
           </div>
           <div>
             <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Submitted by</p>
@@ -181,10 +202,12 @@ function InvoiceRow({
 
       {open && (
         <div className="px-3 pb-3">
-          {r.items.length === 0 ? (
+          {loadingDetail ? (
+            <p className="py-2 font-mono text-[11px] text-ink-soft">Loading…</p>
+          ) : !items || items.length === 0 ? (
             <p className="py-2 font-mono text-[11px] text-ink-soft">No items on this record.</p>
           ) : (
-            <ItemTable items={r.items} />
+            <ItemTable items={items} />
           )}
 
           {r.slip_image && (
@@ -240,7 +263,14 @@ function InvoiceRow({
               {onResume && (
                 <button
                   className="font-mono text-[11px] text-leaf-deep underline"
-                  onClick={(e) => { e.stopPropagation(); onResume(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (detail) {
+                      onResume(detail);
+                    } else {
+                      api<StockInRecord>(`/stock-in/${r.id}/`).then(onResume);
+                    }
+                  }}
                 >
                   Edit &amp; submit →
                 </button>
@@ -313,10 +343,16 @@ export default function StockInApprovals() {
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
   const [actBusy, setActBusy] = useState<number | null>(null);
+  const PAGE_SIZE = 20;
 
   // draft state
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [ingredients, setIngredients] = useState<IngredientSummary[]>([]);
   const [draft, setDraft] = useState<StockInRecord | null>(null);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [draftBusy, setDraftBusy] = useState("");
@@ -329,7 +365,7 @@ export default function StockInApprovals() {
 
   // manual entry form fields
   const ingById = useMemo(() => {
-    const m = new Map<number, Ingredient>();
+    const m = new Map<number, IngredientSummary>();
     ingredients.forEach((i) => m.set(i.id, i));
     return m;
   }, [ingredients]);
@@ -344,23 +380,46 @@ export default function StockInApprovals() {
   const [createUnit, setCreateUnit] = useState("item");
   const [createBusy, setCreateBusy] = useState(false);
 
-  async function refresh() {
-    const qs = status ? `?status=${status}` : "";
-    const [ing, recs, acc] = await Promise.all([
-      api<Paginated<Ingredient>>("/ingredients/?active=true"),
-      api<Paginated<StockInRecord>>(`/stock-in/${qs}`),
+  async function loadStaticData() {
+    const [ing, acc] = await Promise.all([
+      api<Paginated<IngredientSummary>>("/ingredients/?active=true&slim=1"),
       api<Paginated<FinancialAccount>>("/financial-accounts/"),
     ]);
     setIngredients(ing.results);
-    setRecords(recs.results);
     setAccounts(acc.results);
     if (!manualIng && ing.results.length) setManualIng(ing.results[0].id);
   }
 
+  async function loadRecords(p = page) {
+    const params = new URLSearchParams({ page: String(p), page_size: String(PAGE_SIZE) });
+    if (status) params.set("status", status);
+    if (search) params.set("search", search);
+    const recs = await api<Paginated<StockInRecord>>(`/stock-in/?${params}`);
+    setRecords(recs.results);
+    setTotalCount(recs.count);
+    setHasNext(!!recs.next);
+    setHasPrev(!!recs.previous);
+  }
+
+  // Guards against React StrictMode's double-invocation of effects.
+  // Refs survive the simulated unmount so the second firing is skipped.
+  const staticLoaded = useRef(false);
+  const prevFilter = useRef({ status: "\0", search: "\0" });
+
   useEffect(() => {
-    refresh();
+    if (staticLoaded.current) return;
+    staticLoaded.current = true;
+    loadStaticData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+  }, []);
+
+  useEffect(() => {
+    if (prevFilter.current.status === status && prevFilter.current.search === search) return;
+    prevFilter.current = { status, search };
+    setPage(1);
+    loadRecords(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, search]);
 
   async function act(id: number, action: "approve" | "reject" | "delete", accountId?: number | null) {
     setActBusy(id);
@@ -375,17 +434,17 @@ export default function StockInApprovals() {
       } else {
         await api(`/stock-in/${id}/${action}/`, { method: "POST" });
       }
-      await refresh();
+      await loadRecords();
     } finally {
       setActBusy(null);
     }
   }
 
-  function resumeDraft(r: StockInRecord) {
-    setDraft(r);
-    setLines(toEditLines(r.items));
-    setInvoiceNo(r.invoice_number ?? "");
-    setInvoiceDate(r.stock_in_date ?? "");
+  function resumeDraft(detail: StockInRecord) {
+    setDraft(detail);
+    setLines(toEditLines(detail.items ?? []));
+    setInvoiceNo(detail.invoice_number ?? "");
+    setInvoiceDate(detail.stock_in_date ?? "");
     setDraftMsg("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -430,7 +489,7 @@ export default function StockInApprovals() {
         { method: "POST", body: form }
       );
       setDraft(result);
-      setLines(toEditLines(result.items));
+      setLines(toEditLines(result.items ?? []));
       const unres = result.unresolved_names.length;
       setDraftMsg(
         result.imported_count > 0
@@ -490,7 +549,7 @@ export default function StockInApprovals() {
     if (!createName.trim()) return;
     setCreateBusy(true);
     try {
-      const ing = await api<Ingredient>("/ingredients/", {
+      const ing = await api<{ id: number; name: string; base_unit: string; group: string }>("/ingredients/", {
         method: "POST",
         body: JSON.stringify({
           name: createName.trim(),
@@ -499,7 +558,10 @@ export default function StockInApprovals() {
           is_active: true,
         }),
       });
-      setIngredients((prev) => [...prev, ing]);
+      setIngredients((prev) => [
+        ...prev,
+        { id: ing.id, name: ing.name, base_unit: ing.base_unit, group: ing.group as IngredientGroup, active_pack: null },
+      ]);
       setLines((ls) =>
         ls.map((x, idx) =>
           idx === lineIdx ? { ...x, ingredient: ing.id, ingredient_name: ing.name } : x
@@ -546,7 +608,7 @@ export default function StockInApprovals() {
       }),
     });
     setDraft(rec);
-    setLines(toEditLines(rec.items));
+    setLines(toEditLines(rec.items ?? []));
     return rec;
   }
 
@@ -556,7 +618,7 @@ export default function StockInApprovals() {
     setDraftMsg("");
     try {
       const rec = await persist();
-      if (!rec || rec.unresolved_count > 0) {
+      if (!rec || (rec.unresolved_count ?? 0) > 0) {
         setDraftMsg(`Resolve ${rec?.unresolved_count ?? 0} unrecognized line(s) before submitting.`);
         return;
       }
@@ -566,7 +628,7 @@ export default function StockInApprovals() {
       setInvoiceNo("");
       setInvoiceDate("");
       setDraftMsg("Submitted ✓");
-      await refresh();
+      await loadRecords();
     } catch {
       setDraftMsg("Submit failed.");
     } finally {
@@ -574,16 +636,9 @@ export default function StockInApprovals() {
     }
   }
 
-  const rows = useMemo(
-    () =>
-      records.filter((r) =>
-        search
-          ? r.invoice_number?.toLowerCase().includes(search.toLowerCase()) ||
-            String(r.id).includes(search.replace(/\D/g, ""))
-          : true
-      ),
-    [records, search]
-  );
+  function handleSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") setSearch(searchInput.trim());
+  }
 
   // Grand total of current draft lines
   const draftTotal = lines.reduce((s, l) => {
@@ -935,27 +990,58 @@ export default function StockInApprovals() {
           <option value="REJECTED">Rejected</option>
         </select>
         <input
-          placeholder="Search invoice / record #"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search invoice / record # (Enter to search)"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          onKeyDown={handleSearchKey}
         />
       </div>
+      {search && (
+        <p className="font-mono text-[10px] text-ink-soft">
+          Filtering by &ldquo;{search}&rdquo; ·{" "}
+          <button className="underline" onClick={() => { setSearch(""); setSearchInput(""); }}>clear</button>
+        </p>
+      )}
 
       <div className="flex flex-col gap-2">
-        {rows.map((r) => (
+        {records.map((r) => (
           <InvoiceRow
             key={r.id}
             r={r}
             busy={actBusy === r.id}
             accounts={accounts}
             onAct={act}
-            onResume={r.status === "DRAFT" ? () => resumeDraft(r) : undefined}
+            onResume={r.status === "DRAFT" ? resumeDraft : undefined}
           />
         ))}
-        {rows.length === 0 && (
+        {records.length === 0 && (
           <p className="font-mono text-sm text-ink-soft">No records.</p>
         )}
       </div>
+
+      {(hasPrev || hasNext) && (
+        <div className="flex items-center justify-between border-t border-[#d8cdb0] pt-3">
+          <p className="font-mono text-[10px] text-ink-soft">
+            {totalCount} total · page {page} of {Math.ceil(totalCount / PAGE_SIZE)}
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="btn btn-ghost !px-3 !py-1 font-mono text-[11px] disabled:opacity-40"
+              disabled={!hasPrev}
+              onClick={() => { const p = page - 1; setPage(p); loadRecords(p); }}
+            >
+              ← Prev
+            </button>
+            <button
+              className="btn btn-ghost !px-3 !py-1 font-mono text-[11px] disabled:opacity-40"
+              disabled={!hasNext}
+              onClick={() => { const p = page + 1; setPage(p); loadRecords(p); }}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -41,11 +41,33 @@ from stock.models import (
 )
 
 
+MAX_RANGE_DAYS = 31
+
+
 def _default_range(request):
+    from datetime import date, timedelta
     today = timezone.localdate()
     start = request.query_params.get("start", today.replace(day=1).isoformat())
     end = request.query_params.get("end", today.isoformat())
     return start, end
+
+
+def _clamped_range(request):
+    """Like _default_range but caps the range at MAX_RANGE_DAYS.
+
+    Returns (start, end, range_clamped) where range_clamped=True signals that
+    the requested range was trimmed so the frontend can show a note to the user."""
+    from datetime import date as date_cls, timedelta
+    start, end = _default_range(request)
+    try:
+        start_d = date_cls.fromisoformat(start)
+        end_d = date_cls.fromisoformat(end)
+    except ValueError:
+        return start, end, False
+    if (end_d - start_d).days > MAX_RANGE_DAYS:
+        start_d = end_d - timedelta(days=MAX_RANGE_DAYS)
+        return start_d.isoformat(), end, True
+    return start, end, False
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +304,8 @@ def packaging_report(request):
 @permission_classes([IsAuthenticated])
 def product_performance(request):
     """Per-product: units sold, gross revenue, net revenue, recipe COGS, gross profit, margin %.
-    ?start=&end=&outlet="""
-    start, end = _default_range(request)
+    ?start=&end=&outlet= (range capped at MAX_RANGE_DAYS)"""
+    start, end, range_clamped = _clamped_range(request)
     outlet = request.query_params.get("outlet")
 
     lines = DailyClosingSalesLine.objects.filter(
@@ -330,7 +352,7 @@ def product_performance(request):
             "margin_pct": margin.quantize(Decimal("0.1")),
         })
 
-    return Response({"start": start, "end": end, "rows": rows})
+    return Response({"start": start, "end": end, "rows": rows, "range_clamped": range_clamped})
 
 
 @api_view(["GET"])
@@ -497,10 +519,10 @@ def _product_remaining_stock(product: Product, outlet_id) -> int | None:
 def sell_history(request):
     """
     Date-wise sell quantities per product.
-    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD
-    Returns { dates: [...], rows: [{id, name, category, daily: {date: qty}, total, stock}] }
+    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD (range capped at MAX_RANGE_DAYS)
+    Returns { dates: [...], rows: [...], range_clamped: bool }
     """
-    start, end = _default_range(request)
+    start, end, range_clamped = _clamped_range(request)
     outlet = request.query_params.get("outlet")
 
     lines = (
@@ -557,7 +579,7 @@ def sell_history(request):
             "stock": stock,
         })
 
-    return Response({"dates": sorted_dates, "rows": rows})
+    return Response({"dates": sorted_dates, "rows": rows, "range_clamped": range_clamped})
 
 
 @api_view(["GET"])
@@ -565,10 +587,10 @@ def sell_history(request):
 def stock_in_history(request):
     """
     Date-wise approved stock-in quantities per ingredient (in base units).
-    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD
-    Returns { dates: [...], rows: [{id, name, base_unit, group, daily: {date: qty}, total, stock}] }
+    ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD (range capped at MAX_RANGE_DAYS)
+    Returns { dates: [...], rows: [...], range_clamped: bool }
     """
-    start, end = _default_range(request)
+    start, end, range_clamped = _clamped_range(request)
     outlet = request.query_params.get("outlet")
 
     items = (
@@ -633,7 +655,7 @@ def stock_in_history(request):
             "stock": stock,
         })
 
-    return Response({"dates": sorted_dates, "rows": rows})
+    return Response({"dates": sorted_dates, "rows": rows, "range_clamped": range_clamped})
 
 
 # ---------------------------------------------------------------------------

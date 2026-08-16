@@ -22,33 +22,62 @@ from .models import (
 )
 from .serializers import (
     ChannelSettlementSerializer,
+    DailyClosingListSerializer,
     DailyClosingSerializer,
 )
 from .services import recompute_closing
 
 
 class DailyClosingViewSet(viewsets.ModelViewSet):
+    # Full prefetch — used for detail/create/update actions.
     queryset = DailyClosing.objects.prefetch_related(
         "stock_counts__product__prices",
         "stock_counts__product__recipes__ingredient__pack_definitions",
-        "sales_lines",
+        "sales_lines__channel",
         "channel_discounts",
-        "payments",
+        "payments__account",
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
 
+    # Slim prefetch for list — drops heavy stock_count product nesting; still
+    # fetches sales_lines/channel_discounts/payments for the financial rollup
+    # properties (total_sale, channel_day_net_revenue, computed_cash).
+    _LIST_QUERYSET = DailyClosing.objects.prefetch_related(
+        "stock_counts",
+        "sales_lines__channel",
+        "channel_discounts",
+        "payments__account",
+    ).select_related("outlet", "staff")
+
+    def get_serializer_class(self):
+        if self.action == "list" and self.request.query_params.get("expand") != "full":
+            return DailyClosingListSerializer
+        return DailyClosingSerializer
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        expand_full = self.request.query_params.get("expand") == "full"
+        if self.action == "list" and not expand_full:
+            base = self._LIST_QUERYSET
+        else:
+            base = super().get_queryset()
         outlet = self.request.query_params.get("outlet")
         if outlet:
-            qs = qs.filter(outlet_id=outlet)
+            base = base.filter(outlet_id=outlet)
         date = self.request.query_params.get("date")
         if date:
-            qs = qs.filter(closing_date=date)
+            base = base.filter(closing_date=date)
+        date_from = self.request.query_params.get("date_from")
+        if date_from:
+            base = base.filter(closing_date__gte=date_from)
+        date_to = self.request.query_params.get("date_to")
+        if date_to:
+            base = base.filter(closing_date__lte=date_to)
         status_param = self.request.query_params.get("status")
         if status_param:
-            qs = qs.filter(status=status_param)
-        return qs
+            base = base.filter(status=status_param)
+        if self.action == "list":
+            base = base.order_by("-closing_date")
+        return base
 
     @action(detail=False, methods=["get"], url_path="active-work-date")
     def active_work_date(self, request):
@@ -83,6 +112,66 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             return Response({"date": str(closing.closing_date)})
 
         return Response({"date": str(date_cls.today())})
+
+    @action(detail=False, methods=["get"], url_path="channel-summary")
+    def channel_summary(self, request):
+        """Aggregate sales by channel for a date range.
+
+        Query params: outlet, date_from, date_to (all optional).
+        Returns a list of {channel_id, channel_name, total_quantity, total_gross,
+        total_discount, total_net} sorted by channel name.
+        """
+        from django.db.models import Sum
+
+        outlet = request.query_params.get("outlet")
+        date_from = request.query_params.get("date_from")
+        date_to = request.query_params.get("date_to")
+
+        lines_qs = DailyClosingSalesLine.objects.select_related("channel")
+        if outlet:
+            lines_qs = lines_qs.filter(daily_closing__outlet_id=outlet)
+        if date_from:
+            lines_qs = lines_qs.filter(daily_closing__closing_date__gte=date_from)
+        if date_to:
+            lines_qs = lines_qs.filter(daily_closing__closing_date__lte=date_to)
+
+        by_channel = (
+            lines_qs
+            .values("channel__id", "channel__name")
+            .annotate(
+                total_quantity=Sum("quantity_sold"),
+                total_gross=Sum("gross_amount"),
+            )
+            .order_by("channel__name")
+        )
+
+        discounts_qs = DailyChannelDiscount.objects.all()
+        if outlet:
+            discounts_qs = discounts_qs.filter(daily_closing__outlet_id=outlet)
+        if date_from:
+            discounts_qs = discounts_qs.filter(daily_closing__closing_date__gte=date_from)
+        if date_to:
+            discounts_qs = discounts_qs.filter(daily_closing__closing_date__lte=date_to)
+
+        discount_by_channel = {}
+        for row in discounts_qs.values("channel_id").annotate(total=Sum("discount_amount")):
+            discount_by_channel[row["channel_id"]] = row["total"] or Decimal("0")
+
+        result = []
+        for row in by_channel:
+            cid = row["channel__id"]
+            gross = row["total_gross"] or Decimal("0")
+            discount = discount_by_channel.get(cid, Decimal("0"))
+            result.append({
+                "channel_id": cid,
+                "channel_name": row["channel__name"],
+                "total_quantity": row["total_quantity"] or 0,
+                "total_gross": str(gross),
+                "total_discount": str(discount),
+                "total_net": str(gross - discount),
+            })
+
+        return Response(result)
 
     def perform_create(self, serializer):
         closing = serializer.save(staff=self.request.user)

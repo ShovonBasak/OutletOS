@@ -120,6 +120,14 @@ class Ingredient(models.Model):
         return self.name
 
     def active_pack(self):
+        # When pack_definitions is already prefetched, iterate in Python to avoid
+        # issuing a new query per ingredient (filter() bypasses the prefetch cache).
+        cache = getattr(self, "_prefetched_objects_cache", {})
+        if "pack_definitions" in cache:
+            return next(
+                (p for p in self.pack_definitions.all() if p.effective_to is None),
+                None,
+            )
         return self.pack_definitions.filter(effective_to__isnull=True).first()
 
     @property

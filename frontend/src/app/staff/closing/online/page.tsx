@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getOrCreateTodayClosing } from "@/lib/closing";
+import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { ProductListFilter } from "@/components/ProductListFilter";
@@ -35,6 +35,7 @@ export default function OnlineSellScreen() {
   const closingRef = useRef<DailyClosing | null>(null);
   const channelRef = useRef<SalesChannel | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
 
   async function loadData(existingChannel?: SalesChannel | null) {
     const c = await getOrCreateTodayClosing(outlet, opDate);
@@ -43,8 +44,8 @@ export default function OnlineSellScreen() {
 
     const [p, ch, ds] = await Promise.all([
       api<Paginated<Product>>("/products/?active=true"),
-      api<Paginated<SalesChannel>>("/sales-channels/"),
-      api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
+      api<Paginated<SalesChannel>>("/sales-channels/?slim=1"),
+      api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}&slim=1`),
     ]);
 
     const dsMap: Record<number, number> = {};
@@ -93,6 +94,8 @@ export default function OnlineSellScreen() {
   }
 
   useEffect(() => {
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet, opDate]);
@@ -112,6 +115,7 @@ export default function OnlineSellScreen() {
         method: "POST",
         body: JSON.stringify({ items }),
       });
+      invalidateClosingCache(outlet, opDate);
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch {

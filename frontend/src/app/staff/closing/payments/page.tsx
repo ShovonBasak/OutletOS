@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getOrCreateTodayClosing } from "@/lib/closing";
+import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { bdt2, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import type { DailyClosing, FinancialAccountName, Paginated } from "@/lib/types";
@@ -29,6 +29,8 @@ export default function PaymentsScreen() {
   const [amounts, setAmounts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
 
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
+
   // Accounts the staff can manually enter (non-primary-cash, non-supplier-credit)
   const payableAccounts = useMemo(
     () => accounts.filter((a) => a.is_active && !a.is_primary_cash && a.account_type !== "SUPPLIER_CREDIT"),
@@ -51,6 +53,8 @@ export default function PaymentsScreen() {
   }, [closing, payableAccounts, amounts]);
 
   useEffect(() => {
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
     async function load() {
       const [c, acc] = await Promise.all([
         getOrCreateTodayClosing(outlet, opDate),
@@ -82,6 +86,7 @@ export default function PaymentsScreen() {
         method: "POST",
         body: JSON.stringify({ entries }),
       });
+      invalidateClosingCache(outlet, opDate);
       setClosing(updated);
     } finally {
       setBusy(false);

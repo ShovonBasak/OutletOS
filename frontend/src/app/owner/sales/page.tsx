@@ -27,7 +27,7 @@ export default function SalesReportPage() {
   const [closings, setClosings] = useState<DailyClosing[]>([]);
 
   useEffect(() => {
-    api<Paginated<DailyClosing>>("/daily-closings/?outlet=1").then((d) => setClosings(d.results));
+    api<Paginated<DailyClosing>>("/daily-closings/?outlet=1&expand=full").then((d) => setClosings(d.results));
   }, []);
 
   const agg = useMemo(() => {

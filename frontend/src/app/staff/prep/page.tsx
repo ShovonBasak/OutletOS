@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { bdt, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { PRODUCT_CATEGORIES } from "@/lib/types";
-import type { Paginated, PreparationLog, Product, RawStock, DisplayStock } from "@/lib/types";
+import type { Paginated, PrepLog, PrepProduct, RawStockSlim, DisplayStockSlim } from "@/lib/types";
 
 // ---- per-product prep memory (localStorage) ----
 const PREP_MEMORY_KEY = "cp_prep_memory";
@@ -29,9 +29,9 @@ function savePrepMemory(productId: number, unit: "PACK" | "PIECE", value: number
 
 /** Max whole pieces that can be prepared given current raw + component stock. */
 function maxPreparablePieces(
-  product: Product,
-  rawByIngredient: Map<number, RawStock>,
-  displayByProduct: Map<number, DisplayStock>,
+  product: PrepProduct,
+  rawByIngredient: Map<number, RawStockSlim>,
+  displayByProduct: Map<number, DisplayStockSlim>,
 ): number {
   if (product.recipes.length === 0 && product.product_recipe_components.length === 0) return 0;
   let cap = Infinity;
@@ -51,14 +51,14 @@ function maxPreparablePieces(
 }
 
 /** Returns the primary recipe row: explicit is_primary flag, or the only recipe for single-ingredient products. */
-function primaryRecipe(product: Product): Product["recipes"][0] | null {
+function primaryRecipe(product: PrepProduct): PrepProduct["recipes"][0] | null {
   return product.recipes.find((r) => r.is_primary) ?? (product.recipes.length === 1 ? product.recipes[0] : null);
 }
 
 /** Max whole packs that can be used, based on the primary ingredient and all supporting ingredients. */
 function maxPreparablePacks(
-  product: Product,
-  rawByIngredient: Map<number, RawStock>,
+  product: PrepProduct,
+  rawByIngredient: Map<number, RawStockSlim>,
 ): number {
   const primary = primaryRecipe(product);
   if (!primary) return 0;
@@ -94,11 +94,13 @@ export default function PrepPage() {
   const { day, workDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
   const opDate = workDate || today();
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [logs, setLogs] = useState<PreparationLog[]>([]);
-  const [allLogs, setAllLogs] = useState<PreparationLog[]>([]);
-  const [raw, setRaw] = useState<RawStock[]>([]);
-  const [displayStock, setDisplayStock] = useState<DisplayStock[]>([]);
+  const [allProducts, setAllProducts] = useState<PrepProduct[]>([]);
+  const [logs, setLogs] = useState<PrepLog[]>([]);
+  const [allLogs, setAllLogs] = useState<PrepLog[]>([]);
+  const [raw, setRaw] = useState<RawStockSlim[]>([]);
+  const [displayStock, setDisplayStock] = useState<DisplayStockSlim[]>([]);
+
+  const prevCtx = useRef({ outlet: 0, opDate: "" });
 
   const [productId, setProductId] = useState<number | "">("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -109,13 +111,13 @@ export default function PrepPage() {
   const [msg, setMsg] = useState("");
 
   const rawByIngredient = useMemo(() => {
-    const m = new Map<number, RawStock>();
+    const m = new Map<number, RawStockSlim>();
     raw.forEach((r) => m.set(r.ingredient, r));
     return m;
   }, [raw]);
 
   const displayByProduct = useMemo(() => {
-    const m = new Map<number, DisplayStock>();
+    const m = new Map<number, DisplayStockSlim>();
     displayStock.forEach((d) => m.set(d.product, d));
     return m;
   }, [displayStock]);
@@ -162,14 +164,19 @@ export default function PrepPage() {
     [allProducts, rawByIngredient, displayByProduct],
   );
 
-  async function refresh() {
-    const [p, l, rs, ds] = await Promise.all([
-      api<Paginated<Product>>(`/products/?active=true&product_type=SINGLE&as_of=${opDate}`),
-      api<Paginated<PreparationLog>>(`/preparation-logs/?outlet=${outlet}&date=${opDate}`),
-      api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),
-      api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
+  async function loadStatic() {
+    const p = await api<Paginated<PrepProduct>>(
+      `/products/?as_of=${opDate}&prep=1`
+    );
+    setAllProducts(p.results);
+  }
+
+  async function loadLive() {
+    const [l, rs, ds] = await Promise.all([
+      api<Paginated<PrepLog>>(`/preparation-logs/?outlet=${outlet}&date=${opDate}&slim=1`),
+      api<Paginated<RawStockSlim>>(`/raw-stock/?outlet=${outlet}&slim=1`),
+      api<Paginated<DisplayStockSlim>>(`/display-stock/?outlet=${outlet}&slim=1`),
     ]);
-    setAllProducts(p.results.filter((x) => x.requires_preparation));
     setAllLogs(l.results);
     setLogs(l.results.filter((x) => x.source === "FRESH"));
     setRaw(rs.results);
@@ -177,7 +184,10 @@ export default function PrepPage() {
   }
 
   useEffect(() => {
-    refresh();
+    if (prevCtx.current.outlet === outlet && prevCtx.current.opDate === opDate) return;
+    prevCtx.current = { outlet, opDate };
+    loadStatic();
+    loadLive();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet, opDate]);
 
@@ -239,7 +249,7 @@ export default function PrepPage() {
       });
       savePrepMemory(productId, unit, unit === "PACK" ? packs : pieces);
       setMsg("Logged ✓");
-      refresh();
+      loadLive();
     } catch {
       setMsg("Failed — not enough raw stock, or no pack for the ingredient.");
     }
@@ -458,7 +468,7 @@ export default function PrepPage() {
                   if (!confirm("Delete this entry? Stock will be restored.")) return;
                   try {
                     await api(`/preparation-logs/${l.id}/`, { method: "DELETE" });
-                    refresh();
+                    loadLive();
                   } catch (err) {
                     const body = (err as { body?: { detail?: string } })?.body;
                     alert(body?.detail ?? "Could not delete prep log. Please try again.");
@@ -492,10 +502,10 @@ function ProductPickerSheet({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  products: Product[];
+  products: PrepProduct[];
   selectedId: number | "";
   onSelect: (id: number) => void;
-  maxPieces: (p: Product) => number;
+  maxPieces: (p: PrepProduct) => number;
   triggerRef: RefObject<HTMLButtonElement>;
 }) {
   const [search, setSearch] = useState("");
@@ -530,7 +540,7 @@ function ProductPickerSheet({
 
   // Group by category — only show headers if 2+ distinct categories.
   const groups = useMemo(() => {
-    const map = new Map<string, Product[]>();
+    const map = new Map<string, PrepProduct[]>();
     filtered.forEach((p) => {
       const cat = p.category || "Other";
       if (!map.has(cat)) map.set(cat, []);

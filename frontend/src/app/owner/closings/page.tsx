@@ -30,7 +30,7 @@ export default function ClosingsApprovals() {
   const [busy, setBusy] = useState<number | null>(null);
 
   async function refresh() {
-    const qs = status ? `?status=${status}` : "";
+    const qs = status ? `?status=${status}&expand=full` : "?expand=full";
     const d = await api<Paginated<DailyClosing>>(`/daily-closings/${qs}`);
     setClosings(d.results);
   }

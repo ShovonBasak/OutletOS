@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { getTodayOperatingDay } from "@/lib/operatingDay";
+import { getTodayOperatingDay, invalidateDayCache } from "@/lib/operatingDay";
 import { OperatingDayContext } from "@/lib/staffDay";
 import { today } from "@/lib/format";
 import type { OperatingDay } from "@/lib/types";
@@ -26,10 +26,12 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const [day, setDay] = useState<OperatingDay | null>(null);
   const [workDate, _setWorkDate] = useState(today());
   const workDateRef = useRef(workDate);
+  const prevLayoutCtx = useRef({ userId: 0, outlet: 0 });
 
   async function refreshDay() {
     if (!user) return;
     try {
+      invalidateDayCache(outlet, workDateRef.current);
       setDay(await getTodayOperatingDay(outlet, workDateRef.current));
     } catch {
       /* ignore — home still renders */
@@ -46,6 +48,8 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!user) return;
+    if (prevLayoutCtx.current.userId === user.id && prevLayoutCtx.current.outlet === outlet) return;
+    prevLayoutCtx.current = { userId: user.id, outlet };
     // active-work-date gives a hint; getTodayOperatingDay may apply the day-boundary
     // guard and return a different date's OperatingDay. Always sync workDate to the
     // returned OperatingDay's actual date so every page fetches and saves consistently.

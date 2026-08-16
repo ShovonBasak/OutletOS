@@ -17,6 +17,15 @@ class SalesChannelSerializer(serializers.ModelSerializer):
         ]
 
 
+class SalesChannelSlimSerializer(serializers.ModelSerializer):
+    """Slim read-only variant for picker/filter contexts (?slim=1).
+    Omits commission and settlement fields — callers only need id/name/is_active."""
+
+    class Meta:
+        model = SalesChannel
+        fields = ["id", "name", "is_active"]
+
+
 
 class ChannelPromotionSerializer(serializers.ModelSerializer):
     class Meta:

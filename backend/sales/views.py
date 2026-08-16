@@ -17,6 +17,7 @@ from .serializers import (
     ChannelPromotionSerializer,
     OrderLevelOfferSerializer,
     SalesChannelSerializer,
+    SalesChannelSlimSerializer,
 )
 
 
@@ -24,6 +25,11 @@ class SalesChannelViewSet(viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
     permission_classes = [IsOwnerOrReadOnly]
+
+    def get_serializer_class(self):
+        if self.action == "list" and self.request.query_params.get("slim") == "1":
+            return SalesChannelSlimSerializer
+        return SalesChannelSerializer
 
 
 class ChannelPromotionViewSet(viewsets.ModelViewSet):

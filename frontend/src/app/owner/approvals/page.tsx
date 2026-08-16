@@ -70,7 +70,7 @@ export default function ApprovalsHub() {
             <span className="stamp stamp-pending rotate-0">Pending</span>
           </div>
           <div className="qmeta">
-            {r.items.length} line(s) · {shortDate(r.stock_in_date)} · by {r.submitted_by_name}
+            {r.item_count ?? r.items?.length ?? 0} line(s) · {shortDate(r.stock_in_date)} · by {r.submitted_by_name}
           </div>
           <div className="qbtns">
             <button className="approve" disabled={busy === `si-${r.id}`} onClick={() => actStockIn(r.id, "approve")}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { pushPermissionState, subscribeToPush } from "@/lib/push";
 import { Stamp } from "@/components/Stamp";
 import { bdt, shortDate, timeOf } from "@/lib/format";
 import type { DailyClosing, DashboardSummary, Paginated, StockInRecord } from "@/lib/types";
@@ -11,12 +12,17 @@ export default function OwnerDashboard() {
   const [pending, setPending] = useState<StockInRecord[]>([]);
   const [flagged, setFlagged] = useState<DailyClosing[]>([]);
   const [busy, setBusy] = useState<number | null>(null);
+  const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "unsupported" | "busy">("default");
+
+  useEffect(() => {
+    setNotifState(pushPermissionState() as typeof notifState);
+  }, []);
 
   async function refresh() {
     const [s, si, cl] = await Promise.all([
       api<DashboardSummary>("/reports/dashboard/?outlet=1"),
       api<Paginated<StockInRecord>>("/stock-in/?status=PENDING"),
-      api<Paginated<DailyClosing>>("/daily-closings/?status=SUBMITTED"),
+      api<Paginated<DailyClosing>>("/daily-closings/?status=SUBMITTED&expand=full"),
     ]);
     setSummary(s);
     setPending(si.results);
@@ -36,12 +42,41 @@ export default function OwnerDashboard() {
     }
   }
 
+  async function enableNotifications() {
+    setNotifState("busy");
+    try {
+      const ok = await subscribeToPush();
+      setNotifState(ok ? "granted" : "denied");
+    } catch {
+      setNotifState("denied");
+    }
+  }
+
   if (!summary) return <p className="font-mono text-xs text-ink-soft">Loading…</p>;
   const p = summary.pnl_today;
   const margin = Number(p.revenue) > 0 ? Math.round((Number(p.net_profit) / Number(p.revenue)) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-5">
+      {notifState === "default" && (
+        <div className="flex items-center justify-between rounded border border-gold/30 bg-gold/5 px-3 py-2.5">
+          <p className="font-mono text-[11px] text-ink-soft">
+            Enable push notifications to get alerted when staff submits stock-in.
+          </p>
+          <button
+            onClick={enableNotifications}
+            className="ml-3 shrink-0 rounded bg-near-black px-3 py-1.5 font-mono text-[11px] font-semibold text-gold"
+          >
+            Enable
+          </button>
+        </div>
+      )}
+      {notifState === "denied" && (
+        <div className="rounded border border-chili/30 bg-chili/5 px-3 py-2 font-mono text-[11px] text-ink-soft">
+          Notifications blocked. Allow them in browser settings to receive alerts.
+        </div>
+      )}
+
       <div className="kpigrid">
         <div className="kpicard">
           <div className="l">Revenue today</div>
@@ -80,7 +115,7 @@ export default function OwnerDashboard() {
               <Stamp status="Pending" flat />
             </div>
             <div className="qmeta">
-              {r.items.length} line(s) · submitted {timeOf(r.created_at)} by {r.submitted_by_name}
+              {r.item_count ?? r.items?.length ?? 0} line(s) · submitted {timeOf(r.created_at)} by {r.submitted_by_name}
             </div>
             <div className="qbtns">
               <button className="approve" disabled={busy === r.id} onClick={() => act(`/stock-in/${r.id}/approve/`, r.id)}>

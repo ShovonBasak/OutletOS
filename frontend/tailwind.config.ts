@@ -24,9 +24,9 @@ const config: Config = {
         "action-hover": "#3A211D",
       },
       fontFamily: {
-        display: ["Space Grotesk", "sans-serif"],
-        mono: ["IBM Plex Mono", "monospace"],
-        body: ["Inter", "sans-serif"],
+        display: ["var(--font-display)", "sans-serif"],
+        mono: ["var(--font-mono)", "monospace"],
+        body: ["var(--font-body)", "sans-serif"],
       },
     },
   },

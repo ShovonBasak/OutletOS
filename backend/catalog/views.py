@@ -25,6 +25,8 @@ from .serializers import (
     IngredientSerializer,
     OutletSerializer,
     PackDefinitionSerializer,
+    PrepProductSerializer,
+    ProductListSerializer,
     ProductPriceSerializer,
     ProductSerializer,
     RecipeProductComponentSerializer,
@@ -40,26 +42,57 @@ class OutletViewSet(viewsets.ModelViewSet):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
+    # Full prefetch used for detail/create/update and for ?expand=full list requests.
     queryset = Product.objects.all().prefetch_related(
-        "components", "recipes__ingredient", "product_recipe_components__component_product"
+        "components", "recipes__ingredient", "product_recipe_components__component_product", "prices"
     )
     serializer_class = ProductSerializer
     permission_classes = [IsOwnerOrReadOnly]
 
+    def get_serializer_class(self):
+        if self.action == "list" and self.request.query_params.get("expand") != "full":
+            if self.request.query_params.get("prep") == "1":
+                return PrepProductSerializer
+            return ProductListSerializer
+        return ProductSerializer
+
     def get_queryset(self):
-        qs = super().get_queryset()
         p = self.request.query_params
         # Detail actions must see all products so inactive ones can be reactivated.
         if self.action != "list":
-            return qs
-        if not (self.request.user.is_owner and p.get("include_inactive") == "1"):
-            qs = qs.filter(is_active=True)
-        ptype = p.get("product_type")
-        if ptype:
-            qs = qs.filter(product_type=ptype)
-        category = p.get("category")
-        if category:
-            qs = qs.filter(category=category)
+            return super().get_queryset()
+
+        expand_full = p.get("expand") == "full"
+        prep = p.get("prep") == "1"
+
+        if expand_full:
+            qs = Product.objects.all().prefetch_related(
+                "components", "recipes__ingredient",
+                "product_recipe_components__component_product", "prices",
+            )
+        elif prep:
+            # Prep page: server-filtered to active SINGLE products requiring preparation.
+            # Skip combo components prefetch — PrepProductSerializer doesn't use it.
+            qs = Product.objects.filter(
+                is_active=True, requires_preparation=True, product_type="SINGLE",
+            ).prefetch_related(
+                "recipes__ingredient",
+                "product_recipe_components__component_product",
+                "prices",
+            )
+        else:
+            # Slim list: skip heavy nested prefetches, only fetch prices for selling_price.
+            qs = Product.objects.all().prefetch_related("prices")
+
+        if not prep:
+            if not (self.request.user.is_owner and p.get("include_inactive") == "1"):
+                qs = qs.filter(is_active=True)
+            ptype = p.get("product_type")
+            if ptype:
+                qs = qs.filter(product_type=ptype)
+            category = p.get("category")
+            if category:
+                qs = qs.filter(category=category)
         return qs
 
     def get_serializer_context(self):
@@ -195,6 +228,12 @@ class IngredientViewSet(viewsets.ModelViewSet):
         if mode:
             qs = qs.filter(tracking_mode=mode)
         return qs
+
+    def get_serializer_class(self):
+        from .serializers import IngredientPickerSerializer
+        if self.action == "list" and self.request.query_params.get("slim") == "1":
+            return IngredientPickerSerializer
+        return IngredientSerializer
 
     def destroy(self, request, *args, **kwargs):
         ingredient = self.get_object()

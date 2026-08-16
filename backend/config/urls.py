@@ -10,7 +10,7 @@ def health(_request):
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView
+from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView, PushSubscriptionViewSet
 from catalog.views import (
     OutletViewSet,
     ProductViewSet,
@@ -29,6 +29,7 @@ from stock.views import (
     DisplayStockViewSet,
     OperatingDayViewSet,
     PeriodicStockCheckViewSet,
+    StaffHomeSummaryView,
 )
 from sales.views import (
     SalesChannelViewSet,
@@ -46,6 +47,7 @@ from finance.views import (
     CapitalTransactionViewSet,
     AccountBalanceCheckViewSet,
     StaffCashView,
+    StaffCashHistoryView,
 )
 from income.views import OtherIncomeCategoryViewSet, OtherIncomeViewSet
 from reports.views import (
@@ -66,6 +68,7 @@ from reports.views import (
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
+router.register("push-subscriptions", PushSubscriptionViewSet, basename="push-subscriptions")
 router.register("outlets", OutletViewSet)
 router.register("products", ProductViewSet)
 router.register("product-prices", ProductPriceViewSet)
@@ -105,6 +108,8 @@ urlpatterns = [
     path("api/auth/me/", MeView.as_view(), name="me"),
     path("api/auth/change-password/", ChangePasswordView.as_view(), name="change_password"),
     path("api/cash/", StaffCashView.as_view(), name="staff_cash"),
+    path("api/cash/history/", StaffCashHistoryView.as_view(), name="staff_cash_history"),
+    path("api/home-summary/", StaffHomeSummaryView.as_view(), name="home_summary"),
     path("api/price-resolve/", price_resolve, name="price_resolve"),
     path("api/reports/pnl/", pnl_report, name="pnl_report"),
     path("api/reports/settlements/", settlement_report, name="settlement_report"),

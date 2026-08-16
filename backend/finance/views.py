@@ -289,3 +289,63 @@ class StaffCashView(APIView):
             "detail": "Transfer recorded.",
             "new_cash_balance": str(cash.current_balance),
         })
+
+
+class StaffCashHistoryView(APIView):
+    """Paginated cash-account transaction history — accessible to staff and owner."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.core.paginator import Paginator
+        from .models import TransactionType
+
+        cash = FinancialAccount.objects.filter(is_primary_cash=True, is_active=True).first()
+        if not cash:
+            return Response({"error": "No primary cash account configured."}, status=404)
+
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+            page_size = min(int(request.query_params.get("page_size", 20)), 50)
+        except (ValueError, TypeError):
+            page, page_size = 1, 20
+
+        qs = AccountTransaction.objects.filter(account=cash).order_by("-date", "-id")
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page)
+
+        type_display = dict(TransactionType.choices)
+        results = [
+            {
+                "id": t.id,
+                "transaction_type": t.transaction_type,
+                "transaction_type_display": type_display.get(t.transaction_type, t.transaction_type),
+                "amount": str(t.amount),
+                "date": str(t.date),
+                "source_type": t.source_type,
+                "note": t.note,
+            }
+            for t in page_obj.object_list
+        ]
+
+        others = list(
+            FinancialAccount.objects
+            .filter(is_active=True)
+            .exclude(pk=cash.pk)
+            .values("id", "name", "account_type")
+        )
+
+        return Response({
+            "cash": {
+                "id": cash.id,
+                "name": cash.name,
+                "balance": str(cash.current_balance),
+            },
+            "transactions": {
+                "count": paginator.count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": paginator.num_pages,
+                "results": results,
+            },
+            "accounts": others,
+        })

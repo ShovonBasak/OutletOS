@@ -32,7 +32,7 @@ export default function ClosingDetail() {
 
   useEffect(() => {
     Promise.all([
-      api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${date}`),
+      api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${date}&expand=full`),
       api<Paginated<Product>>("/products/?active=true"),
       api<Paginated<OperatingDay>>(`/operating-days/?outlet=${outlet}&date=${nextDate(date)}`),
       api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),

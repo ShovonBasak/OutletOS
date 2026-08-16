@@ -53,6 +53,38 @@ class StockInItemSerializer(serializers.ModelSerializer):
         )
 
 
+class StockInRecordListSerializer(serializers.ModelSerializer):
+    """Slim header-only serializer for list views. Items are NOT included.
+    Requires annotated queryset fields: item_count, slip_item_count, manual_item_count."""
+
+    submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
+    paid_from_account_name = serializers.SerializerMethodField()
+    item_count = serializers.IntegerField(read_only=True)
+    source_summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StockInRecord
+        fields = [
+            "id", "outlet", "stock_in_date", "invoice_number",
+            "submitted_by", "submitted_by_name", "status",
+            "reviewed_at", "slip_image", "notes",
+            "slip_grand_total", "paid_from_account", "paid_from_account_name",
+            "created_at", "item_count", "source_summary",
+        ]
+
+    def get_paid_from_account_name(self, obj):
+        return obj.paid_from_account.name if obj.paid_from_account_id else None
+
+    def get_source_summary(self, obj):
+        slip = getattr(obj, "slip_item_count", 0) or 0
+        manual = getattr(obj, "manual_item_count", 0) or 0
+        if slip > 0 and manual > 0:
+            return "Slip + manual"
+        if slip > 0:
+            return "Slip"
+        return "Manual"
+
+
 class StockInRecordSerializer(serializers.ModelSerializer):
     items = StockInItemSerializer(many=True, required=False)
     submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
@@ -123,6 +155,19 @@ class PreparationLogSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class PrepLogSlimSerializer(serializers.ModelSerializer):
+    """Slim read-only serializer for the prep log page list (?slim=1)."""
+
+    product_name = serializers.CharField(source="product.name", read_only=True)
+
+    class Meta:
+        model = PreparationLog
+        fields = [
+            "id", "product", "product_name", "source",
+            "timestamp", "prep_unit", "packs_used", "pieces_prepared",
+        ]
+
+
 class RawStockSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
     ingredient_group = serializers.CharField(source="ingredient.group", read_only=True)
@@ -155,6 +200,27 @@ class RawStockSerializer(serializers.ModelSerializer):
         ]
 
 
+class RawStockPrepSerializer(serializers.ModelSerializer):
+    """Slim serializer for the prep page (?slim=1). Skips aliases query, group, tracking_mode, cost."""
+
+    ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
+    # No alias lookup — avoids the ingredients__aliases prefetch entirely.
+    ingredient_display_name = serializers.CharField(source="ingredient.name", read_only=True)
+    base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
+    pieces_per_pack = serializers.SerializerMethodField()
+
+    def get_pieces_per_pack(self, obj):
+        pack = obj.ingredient.active_pack()
+        return str(pack.pieces_per_pack) if pack else None
+
+    class Meta:
+        model = RawStock
+        fields = [
+            "ingredient", "ingredient_name", "ingredient_display_name",
+            "base_unit", "quantity_available", "pieces_per_pack",
+        ]
+
+
 class DisplayStockSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_category = serializers.CharField(source="product.category", read_only=True)
@@ -162,6 +228,14 @@ class DisplayStockSerializer(serializers.ModelSerializer):
     class Meta:
         model = DisplayStock
         fields = ["id", "outlet", "product", "product_name", "product_category", "pieces_available"]
+
+
+class DisplayStockPrepSerializer(serializers.ModelSerializer):
+    """Ultra-slim serializer for the prep page (?slim=1). No product join required."""
+
+    class Meta:
+        model = DisplayStock
+        fields = ["product", "pieces_available"]
 
 
 class DayStartStockCheckSerializer(serializers.ModelSerializer):
@@ -198,6 +272,20 @@ class OperatingDaySerializer(serializers.ModelSerializer):
             "id", "outlet", "date", "status", "started_by", "started_at",
             "stock_confirmed_at", "carry_forward_confirmed_at", "daily_closing",
             "stock_in_unlocked", "full_unlocked", "stock_checks",
+        ]
+
+
+class OperatingDaySlimSerializer(serializers.ModelSerializer):
+    """Layout-only fields — no stock_checks array. Used with ?slim=1."""
+    stock_in_unlocked = serializers.BooleanField(read_only=True)
+    full_unlocked = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = OperatingDay
+        fields = [
+            "id", "outlet", "date", "status", "started_at",
+            "carry_forward_confirmed_at", "daily_closing",
+            "stock_in_unlocked", "full_unlocked",
         ]
 
 

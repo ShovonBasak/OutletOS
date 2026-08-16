@@ -6,18 +6,17 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, shortDate, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
-import type {
-  DailyClosing,
-  DisplayStock,
-  Outlet,
-  Paginated,
-  PreparationLog,
-  StockInRecord,
-} from "@/lib/types";
 
 interface CashInfo {
   cash: { id: number; name: string; balance: string };
   accounts: { id: number; name: string; account_type: string }[];
+}
+
+interface HomeSummary {
+  allow_staff_date_selection: boolean;
+  display_stock: { raw_stock_value: string; raw_category_count: number; raw_stock_out_count: number };
+  stock_in: { draft_item_count: number | null; latest_status: string } | null;
+  closing: { id: number; status: string; total_sale: string; has_flag: boolean } | null;
 }
 
 export default function StaffHome() {
@@ -25,64 +24,58 @@ export default function StaffHome() {
   const { day, refreshDay, workDate, setWorkDate } = useOperatingDay();
   const outlet = user?.outlet ?? 1;
 
-  const [outletObj, setOutletObj] = useState<Outlet | null>(null);
-  const [displayStock, setDisplayStock] = useState<DisplayStock[]>([]);
+  const [allowDateSelection, setAllowDateSelection] = useState(false);
+  const [rawStockValue, setRawStockValue] = useState<string | null>(null);
+  const [rawCategoryCount, setRawCategoryCount] = useState(0);
+  const [rawStockOutCount, setRawStockOutCount] = useState(0);
   const [stockInStatus, setStockInStatus] = useState("None today");
-  const [preparedToday, setPreparedToday] = useState(0);
   const [closingStatus, setClosingStatus] = useState("Not started");
+  const [rawClosingStatus, setRawClosingStatus] = useState<string | null>(null);
+  const [totalSale, setTotalSale] = useState<string | null>(null);
+  const [closingHasFlag, setClosingHasFlag] = useState(false);
   const [skipping, setSkipping] = useState(false);
-  const [staleDayClosingStatus, setStaleDayClosingStatus] = useState<string | null>(null);
 
-  // Cash card + transfer sheet
+  // Cash card
   const [cashInfo, setCashInfo] = useState<CashInfo | null>(null);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [toAccount, setToAccount] = useState("");
-  const [transferAmount, setTransferAmount] = useState("");
-  const [transferNote, setTransferNote] = useState("");
-  const [transferring, setTransferring] = useState(false);
-  const [transferMsg, setTransferMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const prevCtx = useRef({ outlet: 0, workDate: "" });
 
   useEffect(() => {
     const t = workDate || today();
-    api<Paginated<Outlet>>("/outlets/").then((d) => {
-      const o = d.results.find((x) => x.id === outlet) ?? d.results[0];
-      if (o) setOutletObj(o);
+    if (prevCtx.current.outlet === outlet && prevCtx.current.workDate === t) return;
+    prevCtx.current = { outlet, workDate: t };
+    Promise.allSettled([
+      api<HomeSummary>(`/home-summary/?outlet=${outlet}&date=${t}`),
+      api<CashInfo>("/cash/"),
+    ]).then(([summaryRes, cashRes]) => {
+      if (summaryRes.status === "fulfilled") {
+        const s = summaryRes.value;
+        setAllowDateSelection(s.allow_staff_date_selection);
+        setRawStockValue(s.display_stock.raw_stock_value);
+        setRawCategoryCount(s.display_stock.raw_category_count);
+        setRawStockOutCount(s.display_stock.raw_stock_out_count);
+        if (s.stock_in) {
+          const { draft_item_count, latest_status } = s.stock_in;
+          if (draft_item_count !== null) {
+            setStockInStatus(`Draft — ${draft_item_count} item${draft_item_count === 1 ? "" : "s"}`);
+          } else {
+            setStockInStatus(latest_status.charAt(0) + latest_status.slice(1).toLowerCase());
+          }
+        }
+        if (s.closing) {
+          setRawClosingStatus(s.closing.status);
+          setClosingStatus(s.closing.status.charAt(0) + s.closing.status.slice(1).toLowerCase());
+          setTotalSale(s.closing.total_sale);
+          setClosingHasFlag(s.closing.has_flag);
+        }
+      }
+      if (cashRes.status === "fulfilled") {
+        setCashInfo(cashRes.value);
+      }
     });
-    api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`).then((d) =>
-      setDisplayStock(d.results)
-    );
-    api<Paginated<StockInRecord>>(`/stock-in/?outlet=${outlet}`).then((d) => {
-      const draft = d.results.find((r) => r.status === "DRAFT");
-      const latest = d.results[0];
-      if (draft) setStockInStatus(`Draft — ${draft.items.length} item${draft.items.length === 1 ? "" : "s"}`);
-      else if (latest) setStockInStatus(latest.status.charAt(0) + latest.status.slice(1).toLowerCase());
-    });
-    api<Paginated<PreparationLog>>(`/preparation-logs/?outlet=${outlet}&today=true`).then((d) =>
-      setPreparedToday(d.results.reduce((s, l) => s + l.pieces_prepared, 0))
-    );
-    api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${t}`).then((d) => {
-      const c = d.results[0];
-      if (c) setClosingStatus(c.status.charAt(0) + c.status.slice(1).toLowerCase());
-      else setClosingStatus("Not started");
-    });
-    api<CashInfo>("/cash/").then((info) => {
-      setCashInfo(info);
-      if (!toAccount && info.accounts[0]) setToAccount(String(info.accounts[0].id));
-    }).catch(() => {});
   }, [outlet, workDate]);
 
-  // When a stale day is detected and it's IN_PROGRESS, fetch its closing status
-  // so we can decide whether to show "Go to closing" vs. "Force close".
-  useEffect(() => {
-    if (!day || day.date === today()) { setStaleDayClosingStatus(null); return; }
-    if (day.status !== "IN_PROGRESS") { setStaleDayClosingStatus(null); return; }
-    api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${day.date}`)
-      .then((d) => setStaleDayClosingStatus(d.results[0]?.status ?? null))
-      .catch(() => setStaleDayClosingStatus(null));
-  }, [day, outlet]);
-
   const status = day?.status ?? "NOT_STARTED";
-  const readyPieces = displayStock.reduce((s, d) => s + d.pieces_available, 0);
 
   // A stale day is one where the backend returned a previous (unclosed) day
   // instead of creating today's day.
@@ -92,27 +85,6 @@ export default function StaffHome() {
     closingStatus === "Locked" ? "text-leaf-deep font-semibold" :
     closingStatus === "Submitted" ? "text-leaf" :
     "text-ink-soft";
-
-  async function handleTransfer(e: React.FormEvent) {
-    e.preventDefault();
-    setTransferMsg(null);
-    setTransferring(true);
-    try {
-      const res = await api<{ detail: string; new_cash_balance: string }>("/cash/", {
-        method: "POST",
-        body: JSON.stringify({ to_account: Number(toAccount), amount: transferAmount, note: transferNote }),
-      });
-      setCashInfo((prev) => prev ? { ...prev, cash: { ...prev.cash, balance: res.new_cash_balance } } : prev);
-      setTransferMsg({ ok: true, text: "Transfer recorded." });
-      setTransferAmount("");
-      setTransferNote("");
-    } catch (err: unknown) {
-      const body = (err as { body?: { error?: string } })?.body;
-      setTransferMsg({ ok: false, text: body?.error ?? "Transfer failed." });
-    } finally {
-      setTransferring(false);
-    }
-  }
 
   async function handleSkipDay() {
     if (!day) return;
@@ -128,7 +100,7 @@ export default function StaffHome() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="font-display text-xl font-bold">{outletObj?.name ?? "outlet"}</h1>
+        <h1 className="font-display text-xl font-bold">{user?.outlet_name ?? "outlet"}</h1>
         <p className="text-xs text-ink-soft">{shortDate(day?.date || workDate || today())}</p>
       </div>
 
@@ -156,10 +128,10 @@ export default function StaffHome() {
           )}
 
           {/* Closing is locked or submitted — nothing left to do, just force-close the day */}
-          {status === "IN_PROGRESS" && (staleDayClosingStatus === "LOCKED" || staleDayClosingStatus === "SUBMITTED") && (
+          {status === "IN_PROGRESS" && (rawClosingStatus === "LOCKED" || rawClosingStatus === "SUBMITTED") && (
             <>
               <p className="font-mono text-[11px] text-ink-soft">
-                Closing is {staleDayClosingStatus.toLowerCase()}. Force close this day to start today.
+                Closing is {rawClosingStatus.toLowerCase()}. Force close this day to start today.
               </p>
               <button
                 className="btn btn-primary self-start !py-1.5 !px-4 !text-xs"
@@ -172,7 +144,7 @@ export default function StaffHome() {
           )}
 
           {/* Closing still open — staff needs to complete it first, but also offer escape hatch */}
-          {status === "IN_PROGRESS" && staleDayClosingStatus !== "LOCKED" && staleDayClosingStatus !== "SUBMITTED" && (
+          {status === "IN_PROGRESS" && rawClosingStatus !== "LOCKED" && rawClosingStatus !== "SUBMITTED" && (
             <>
               <p className="font-mono text-[11px] text-ink-soft">
                 Complete and submit the daily closing to start today.
@@ -198,7 +170,7 @@ export default function StaffHome() {
           {status === "NOT_STARTED" && (
             <>
               {/* Date selector — only when owner has enabled it */}
-              {outletObj?.allow_staff_date_selection && (
+              {allowDateSelection && (
                 <div className="ticket overflow-hidden flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-[11px] uppercase tracking-wide text-ink-soft shrink-0">
@@ -270,35 +242,39 @@ export default function StaffHome() {
                 <span className="qty">{timeOf(day.started_at)}</span>
               </div>
             )}
-            <div className="ticket-row">
-              <span>Prepared today</span>
-              <span className="qty text-ink-soft">{preparedToday} pcs</span>
-            </div>
+            {totalSale !== null && Number(totalSale) > 0 && (
+              <div className="ticket-row">
+                <span>Revenue</span>
+                <span className="qty text-leaf-deep">{bdt(totalSale)}</span>
+              </div>
+            )}
             <div className="ticket-row">
               <span>Stock in</span>
               <span className="qty text-ink-soft">{stockInStatus}</span>
             </div>
             <div className="ticket-row">
               <span>Closing</span>
-              <span className={`qty ${closingColor}`}>{closingStatus}</span>
+              <span className={`qty ${closingColor}`}>
+                {closingStatus}
+                {closingHasFlag && <span className="ml-1.5 font-mono text-[10px] text-chili">⚠ variance</span>}
+              </span>
             </div>
           </div>
 
-          {/* Cash card */}
+          {/* Cash card — taps through to full history + transfer */}
           {cashInfo && (
-            <button
-              type="button"
+            <Link
+              href="/staff/cash"
               className="ticket flex items-center justify-between text-left w-full"
-              onClick={() => { setTransferOpen(true); setTransferMsg(null); }}
             >
               <div>
                 <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Shop Cash</p>
                 <p className="font-mono text-2xl font-bold text-ink">{bdt(cashInfo.cash.balance)}</p>
               </div>
               <span className="rounded border border-chrome px-2.5 py-1 font-mono text-[11px] text-chrome">
-                Transfer →
+                View →
               </span>
-            </button>
+            </Link>
           )}
 
           {/* Edit links */}
@@ -314,7 +290,17 @@ export default function StaffHome() {
           {/* Quick action tiles */}
           <div className="tilegrid">
             <Link href="/staff/stock" className="tile">
-              <span className="n">{readyPieces}</span>
+              <div className="flex items-start justify-between gap-1">
+                <span className="n">{rawCategoryCount}</span>
+                <div className="flex flex-col items-end gap-0.5 pt-0.5">
+                  {Number(rawStockValue) > 0 && (
+                    <span className="font-mono text-[10px] text-ink-soft leading-tight">{bdt(rawStockValue!)}</span>
+                  )}
+                  {rawStockOutCount > 0 && (
+                    <span className="font-mono text-[9px] text-chili leading-tight">{rawStockOutCount} out</span>
+                  )}
+                </div>
+              </div>
               <span className="l">Stock overview</span>
             </Link>
             <Link href="/staff/closing/history" className="tile">
@@ -337,135 +323,6 @@ export default function StaffHome() {
         </>
       )}
 
-      {/* Transfer bottom sheet */}
-      {transferOpen && cashInfo && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-end" onClick={() => setTransferOpen(false)}>
-          <div className="absolute inset-0 bg-ink/40" />
-          <div
-            className="relative w-full max-w-[420px] flex max-h-[85vh] flex-col gap-4 overflow-y-auto rounded-t-2xl bg-paper p-5 pb-8 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="font-display text-base font-bold">Transfer cash</h2>
-                <p className="font-mono text-[11px] text-ink-soft">
-                  Available: {bdt(cashInfo.cash.balance)}
-                </p>
-              </div>
-              <button
-                className="font-mono text-[11px] text-ink-soft underline"
-                onClick={() => setTransferOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
-
-            <form onSubmit={handleTransfer} className="flex flex-col gap-3">
-              <div className="field">
-                <span className="field-label">Transfer to</span>
-                <CustomSelect
-                  options={cashInfo.accounts.map((a) => ({ value: String(a.id), label: a.name }))}
-                  value={toAccount}
-                  onChange={setToAccount}
-                  placeholder="Select account…"
-                />
-              </div>
-
-              <label className="field">
-                <span className="field-label">Amount (৳)</span>
-                <input
-                  className="field-input"
-                  type="number"
-                  inputMode="decimal"
-                  min="1"
-                  max={cashInfo.cash.balance}
-                  step="any"
-                  value={transferAmount}
-                  onChange={(e) => setTransferAmount(e.target.value)}
-                  required
-                />
-              </label>
-
-              <label className="field">
-                <span className="field-label">Note (optional)</span>
-                <input
-                  className="field-input"
-                  value={transferNote}
-                  onChange={(e) => setTransferNote(e.target.value)}
-                  placeholder="e.g. Bank deposit"
-                />
-              </label>
-
-              {transferMsg && (
-                <p className={`font-mono text-xs ${transferMsg.ok ? "text-leaf-deep" : "text-chili-deep"}`}>
-                  {transferMsg.text}
-                </p>
-              )}
-
-              <button type="submit" className="btn btn-primary" disabled={transferring || !toAccount || !transferAmount}>
-                {transferring ? "Transferring…" : "Confirm transfer"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CustomSelect({
-  options,
-  value,
-  onChange,
-  placeholder = "Select…",
-}: {
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const selected = options.find((o) => o.value === value);
-
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    if (open) document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [open]);
-
-  return (
-    <div ref={ref} className="relative mt-1">
-      <button
-        type="button"
-        className="field-input flex w-full items-center justify-between text-left"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className={selected ? "text-ink" : "text-ink-soft"}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <span className="font-mono text-[11px] text-ink-soft">{open ? "▴" : "▾"}</span>
-      </button>
-
-      {open && (
-        <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded border border-[#d8cdb0] bg-paper shadow-lg">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              className={`flex w-full items-center justify-between border-b border-dotted border-[#d8cdb0] px-3 py-2.5 text-left font-mono text-sm last:border-0 transition-colors active:bg-paper-dim ${
-                o.value === value ? "bg-action text-gold" : "text-ink hover:bg-paper-dim"
-              }`}
-              onClick={() => { onChange(o.value); setOpen(false); }}
-            >
-              {o.label}
-              {o.value === value && <span className="text-xs">✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

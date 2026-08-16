@@ -259,7 +259,7 @@ export default function MapRecipes() {
 
   async function refresh() {
     const [p, ing] = await Promise.all([
-      api<Paginated<Product>>("/products/?product_type=SINGLE"),
+      api<Paginated<Product>>("/products/?product_type=SINGLE&expand=full"),
       api<Paginated<Ingredient>>("/ingredients/?tracking_mode=RECIPE_LINKED&active=true"),
     ]);
     setProducts(p.results);

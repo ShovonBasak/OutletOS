@@ -71,10 +71,9 @@ class SalesLineSerializer(serializers.ModelSerializer):
         model = DailyClosingSalesLine
         fields = [
             "id", "product", "product_name", "channel", "channel_name",
-            "quantity_sold", "unit_price", "gross_amount", "commission_amount",
-            "net_amount", "source",
+            "quantity_sold", "unit_price", "gross_amount", "net_amount", "source",
         ]
-        read_only_fields = ["gross_amount", "commission_amount", "net_amount", "source"]
+        read_only_fields = ["gross_amount", "net_amount", "source"]
 
 
 class ChannelDiscountSerializer(serializers.ModelSerializer):
@@ -82,17 +81,16 @@ class ChannelDiscountSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DailyChannelDiscount
-        fields = ["id", "channel", "channel_name", "discount_amount", "note"]
+        fields = ["id", "channel", "channel_name", "discount_amount"]
 
 
 class PaymentEntrySerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
-    account_type = serializers.CharField(source="account.account_type", read_only=True)
     is_primary_cash = serializers.BooleanField(source="account.is_primary_cash", read_only=True)
 
     class Meta:
         model = PaymentEntry
-        fields = ["id", "account", "account_name", "account_type", "is_primary_cash", "amount"]
+        fields = ["id", "account", "account_name", "is_primary_cash", "amount"]
 
 
 class DailyClosingSerializer(serializers.ModelSerializer):
@@ -134,6 +132,25 @@ class DailyClosingSerializer(serializers.ModelSerializer):
             "total_offline_sales", "computed_cash", "has_flag", "carried_forward_value",
         ]
         read_only_fields = ["status", "submitted_at", "staff"]
+
+
+class DailyClosingListSerializer(serializers.ModelSerializer):
+    """Slim serializer for the closing list — no nested arrays, no N+1 CF query.
+    Financial rollups come from model properties (require sales_lines / payments prefetch)."""
+
+    staff_name = serializers.CharField(source="staff.name", read_only=True)
+    total_sale = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    channel_day_net_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    computed_cash = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    has_flag = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = DailyClosing
+        fields = [
+            "id", "outlet", "closing_date", "staff", "staff_name",
+            "status", "submitted_at",
+            "total_sale", "channel_day_net_revenue", "computed_cash", "has_flag",
+        ]
 
 
 class ChannelSettlementSerializer(serializers.ModelSerializer):

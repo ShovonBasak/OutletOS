@@ -62,3 +62,19 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def is_staff_role(self):
         return self.role == Role.STAFF
+
+
+class PushSubscription(models.Model):
+    """Stores a browser Web Push subscription endpoint for a user."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.TextField(unique=True)
+    p256dh = models.TextField()
+    auth = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"PushSub({self.user.name}, ...{self.endpoint[-20:]})"

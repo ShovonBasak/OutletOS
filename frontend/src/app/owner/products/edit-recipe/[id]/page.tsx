@@ -17,7 +17,7 @@ export default function EditRecipe() {
 
   async function refresh() {
     // No product-detail endpoint filter needed — list is small.
-    const d = await api<Paginated<Product>>("/products/");
+    const d = await api<Paginated<Product>>("/products/?expand=full");
     const p = d.results.find((x) => x.id === productId) ?? null;
     setProduct(p);
     setRows(p?.recipes ?? []);

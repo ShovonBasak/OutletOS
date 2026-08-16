@@ -52,6 +52,16 @@ export interface Ingredient {
   aliases: SupplierProductAlias[];
 }
 
+/** Slim ingredient shape returned by GET /ingredients/?slim=1.
+ *  Used on pages that only need picker data and not aliases or pack cost details. */
+export interface IngredientSummary {
+  id: number;
+  name: string;
+  base_unit: string;
+  group: IngredientGroup;
+  active_pack: { id: number; pieces_per_pack: string } | null;
+}
+
 export interface ExtractCandidate {
   raw_text: string;
   suggested_name: string;
@@ -127,10 +137,21 @@ export interface Product {
   requires_preparation: boolean;
   /** Computed from the active ProductPrice — read-only in GET responses. */
   selling_price: string;
-  /** Full active ProductPrice object, null if no price set yet. */
-  active_price: ProductPrice | null;
+  /** Full active ProductPrice object, null if no price set yet. Absent on slim list responses. */
+  active_price?: ProductPrice | null;
   is_active: boolean;
   components: ComboComponent[];
+  recipes: Recipe[];
+  product_recipe_components: RecipeProductComponent[];
+}
+
+/** Slim product shape returned by /products/?prep=1 — excludes combo components and active_price. */
+export interface PrepProduct {
+  id: number;
+  name: string;
+  category: ProductCategory | string;
+  requires_preparation: boolean;
+  selling_price: string;
   recipes: Recipe[];
   product_recipe_components: RecipeProductComponent[];
 }
@@ -188,7 +209,8 @@ export interface OperatingDay {
   daily_closing: number | null;
   stock_in_unlocked: boolean;
   full_unlocked: boolean;
-  stock_checks: DayStartStockCheck[];
+  /** Absent when fetched with ?slim=1 (layout nav calls). Present on full OperatingDay. */
+  stock_checks?: DayStartStockCheck[];
 }
 
 // A day-start-stock row (the reconcile list, before it becomes a check).
@@ -256,11 +278,18 @@ export interface StockInRecord {
   slip_image: string | null;
   notes: string;
   slip_vat_total?: string | null;
+  slip_grand_total?: string | null;
   paid_from_account: number | null;
   paid_from_account_name: string | null;
   created_at: string;
-  items: StockInItem[];
-  unresolved_count: number;
+  /** Present on detail/full responses; absent on slim list responses. */
+  items?: StockInItem[];
+  /** Present only on slim list responses. */
+  item_count?: number;
+  /** Present only on slim list responses: "Slip", "Manual", or "Slip + manual". */
+  source_summary?: string;
+  /** Present only on full detail responses. */
+  unresolved_count?: number;
 }
 
 // ---- Preparation -----------------------------------------------------------
@@ -282,6 +311,18 @@ export interface PreparationLog {
   wastage_pieces: number | null;
 }
 
+/** Slim prep log returned by /preparation-logs/?slim=1. */
+export interface PrepLog {
+  id: number;
+  product: number;
+  product_name: string;
+  source: PrepSource;
+  timestamp: string;
+  prep_unit: "PACK" | "PIECE";
+  packs_used: string | null;
+  pieces_prepared: number;
+}
+
 export type IngredientGroup = "BEVERAGE" | "CHICKEN_PIECE" | "SNACK" | "BURGER_WRAP" | "SUPPLY" | "OTHER";
 
 export interface RawStock {
@@ -297,11 +338,27 @@ export interface RawStock {
   cost_per_base_unit: string | null;
 }
 
+/** Slim raw stock returned by /raw-stock/?slim=1. */
+export interface RawStockSlim {
+  ingredient: number;
+  ingredient_name: string;
+  ingredient_display_name: string;
+  base_unit: string;
+  quantity_available: string;
+  pieces_per_pack: string | null;
+}
+
 export interface DisplayStock {
   id: number;
   product: number;
   product_name: string;
   product_category: string;
+  pieces_available: number;
+}
+
+/** Slim display stock returned by /display-stock/?slim=1. */
+export interface DisplayStockSlim {
+  product: number;
   pieces_available: number;
 }
 
@@ -376,7 +433,6 @@ export interface SalesLine {
   quantity_sold: number;
   unit_price: string;
   gross_amount: string;
-  commission_amount: string;
   net_amount: string;
   source: "STAFF_ENTRY" | "SYSTEM_DERIVED";
 }
@@ -385,7 +441,6 @@ export interface PaymentEntry {
   id: number;
   account: number;
   account_name: string;
-  account_type: string;
   is_primary_cash: boolean;
   amount: string;
 }
@@ -397,11 +452,9 @@ export interface DailyClosing {
   staff: number;
   staff_name: string;
   status: ClosingStatus;
-  submitted_at: string | null;
-  has_variance_flag: boolean;
   stock_counts: StockCount[];
   sales_lines: SalesLine[];
-  channel_discounts: { id: number; channel: number; channel_name: string; discount_amount: string; note: string }[];
+  channel_discounts: { id: number; channel: number; channel_name: string; discount_amount: string }[];
   payments: PaymentEntry[];
   total_sale: string;
   channel_day_net_revenue: string;

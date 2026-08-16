@@ -1,10 +1,12 @@
 from decimal import Decimal
 
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
@@ -29,11 +31,16 @@ from .models import (
 )
 from .serializers import (
     DayStartStockCheckSerializer,
+    DisplayStockPrepSerializer,
     DisplayStockSerializer,
     OperatingDaySerializer,
+    OperatingDaySlimSerializer,
     PeriodicStockCheckSerializer,
+    PrepLogSlimSerializer,
     PreparationLogSerializer,
+    RawStockPrepSerializer,
     RawStockSerializer,
+    StockInRecordListSerializer,
     StockInRecordSerializer,
 )
 from .services import (
@@ -45,21 +52,59 @@ from .services import (
 )
 
 
+class StockInListPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
 class StockInRecordViewSet(viewsets.ModelViewSet):
-    queryset = StockInRecord.objects.prefetch_related("items__ingredient").select_related(
-        "outlet", "submitted_by"
-    )
+    queryset = StockInRecord.objects.all()  # required by DRF router for basename detection
     serializer_class = StockInRecordSerializer
+    pagination_class = StockInListPagination
+
+    _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
+        "items__ingredient", "items__pack_definition"
+    ).select_related("outlet", "submitted_by", "paid_from_account")
+
+    def _list_queryset(self):
+        return StockInRecord.objects.select_related(
+            "submitted_by", "paid_from_account"
+        ).annotate(
+            item_count=Count("items", distinct=True),
+            slip_item_count=Count(
+                "items", filter=Q(items__source="SLIP_EXTRACTED"), distinct=True
+            ),
+            manual_item_count=Count(
+                "items", filter=Q(items__source="MANUAL"), distinct=True
+            ),
+        )
+
+    def _is_slim(self):
+        return (
+            self.action == "list"
+            and self.request.query_params.get("expand") != "full"
+        )
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = self._list_queryset() if self._is_slim() else self._FULL_QUERYSET
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
         outlet = self.request.query_params.get("outlet")
         if outlet:
             qs = qs.filter(outlet_id=outlet)
-        return qs
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(invoice_number__icontains=search) | Q(id__icontains=search)
+            )
+        return qs.order_by("-stock_in_date", "-created_at")
+
+    def get_serializer_class(self):
+        if self._is_slim():
+            return StockInRecordListSerializer
+        return StockInRecordSerializer
 
     def perform_create(self, serializer):
         serializer.save(submitted_by=self.request.user)
@@ -292,6 +337,18 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             )
         record.status = StockInStatus.PENDING
         record.save()
+
+        try:
+            from accounts.push import send_push_to_owners
+            item_count = record.items.count()
+            send_push_to_owners(
+                title="Stock-in waiting for approval",
+                body=f"{record.submitted_by.name} submitted {item_count} item(s) for {record.stock_in_date}",
+                url="/owner/stock-in",
+            )
+        except Exception:
+            pass
+
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwner])
@@ -681,8 +738,16 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
     queryset = PreparationLog.objects.select_related("product", "outlet")
     serializer_class = PreparationLogSerializer
 
+    def get_serializer_class(self):
+        if self.action == "list" and self.request.query_params.get("slim") == "1":
+            return PrepLogSlimSerializer
+        return PreparationLogSerializer
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        if self.action == "list" and self.request.query_params.get("slim") == "1":
+            qs = PreparationLog.objects.select_related("product")
+        else:
+            qs = super().get_queryset()
         outlet = self.request.query_params.get("outlet")
         if outlet:
             qs = qs.filter(outlet_id=outlet)
@@ -806,8 +871,19 @@ class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
     )
     serializer_class = RawStockSerializer
 
+    def get_serializer_class(self):
+        if self.request.query_params.get("slim") == "1":
+            return RawStockPrepSerializer
+        return RawStockSerializer
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        if self.request.query_params.get("slim") == "1":
+            # Skip the aliases prefetch — RawStockPrepSerializer doesn't use it.
+            qs = RawStock.objects.select_related("ingredient").prefetch_related(
+                "ingredient__pack_definitions"
+            )
+        else:
+            qs = super().get_queryset()
         outlet = self.request.query_params.get("outlet")
         if outlet:
             qs = qs.filter(outlet_id=outlet)
@@ -818,8 +894,14 @@ class DisplayStockViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DisplayStock.objects.select_related("product", "outlet")
     serializer_class = DisplayStockSerializer
 
+    def get_serializer_class(self):
+        if self.request.query_params.get("slim") == "1":
+            return DisplayStockPrepSerializer
+        return DisplayStockSerializer
+
     def get_queryset(self):
-        qs = super().get_queryset()
+        # Slim mode: drop select_related("product") — DisplayStockPrepSerializer doesn't access it.
+        qs = DisplayStock.objects.all() if self.request.query_params.get("slim") == "1" else super().get_queryset()
         outlet = self.request.query_params.get("outlet")
         if outlet:
             qs = qs.filter(outlet_id=outlet)
@@ -881,7 +963,8 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
     def today(self, request):
         """Get (or lazily create) an OperatingDay. Accepts ?date=YYYY-MM-DD;
         defaults to today when omitted. If a previous day is not yet CLOSED,
-        returns it instead of creating a new day (day boundary enforcement)."""
+        returns it instead of creating a new day (day boundary enforcement).
+        Pass ?slim=1 to skip stock_checks (layout nav calls only need status fields)."""
         from datetime import date as dt_date
         outlet = self._outlet(request)
         on_date = None
@@ -892,16 +975,19 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
             except ValueError:
                 pass
 
+        slim = request.query_params.get("slim") == "1"
+        serializer_class = OperatingDaySlimSerializer if slim else OperatingDaySerializer
+
         # Day boundary guard: applies when requesting today (explicit or implicit).
         # Explicit past dates (backdating for historical entry) bypass the guard.
         actual_date = timezone.localdate()
         if on_date is None or on_date == actual_date:
             latest = OperatingDay.objects.filter(outlet=outlet).order_by("-date").first()
             if latest and latest.date < actual_date and latest.status != OperatingDayStatus.CLOSED:
-                return Response(self.get_serializer(latest).data)
+                return Response(serializer_class(latest, context={"request": request}).data)
 
         day = get_or_create_today(outlet, on_date=on_date)
-        return Response(self.get_serializer(day).data)
+        return Response(serializer_class(day, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="force-close")
     def force_close(self, request, pk=None):
@@ -1194,3 +1280,95 @@ def _outlet_obj(outlet_or_id):
     if hasattr(outlet_or_id, "pk"):
         return outlet_or_id
     return Outlet.objects.get(pk=outlet_or_id)
+
+
+from rest_framework.views import APIView as _HomeSummaryBase
+from rest_framework.permissions import IsAuthenticated as _HomeSummaryAuth
+
+
+class StaffHomeSummaryView(_HomeSummaryBase):
+    """Single endpoint aggregating all data the staff home page needs.
+
+    Replaces four separate API calls (/outlets/, /display-stock/, /stock-in/,
+    /daily-closings/) with one server-side computed response.
+    """
+
+    permission_classes = [_HomeSummaryAuth]
+
+    def get(self, request):
+        import datetime
+        from catalog.models import Outlet
+        from closing.models import DailyClosing
+
+        outlet_id = int(request.query_params.get("outlet", 1))
+        date_str = request.query_params.get("date", str(datetime.date.today()))
+
+        # Outlet — only the one flag needed on the home page
+        try:
+            outlet_obj = Outlet.objects.only("allow_staff_date_selection").get(id=outlet_id)
+            allow_date_selection = outlet_obj.allow_staff_date_selection
+        except Outlet.DoesNotExist:
+            allow_date_selection = True
+
+        # Raw stock — all ingredient balances for the outlet.
+        # active_pack() is prefetch-cache-aware, so this stays 2 queries total.
+        raw_stocks = list(
+            RawStock.objects
+            .filter(outlet_id=outlet_id)
+            .select_related("ingredient")
+            .prefetch_related("ingredient__pack_definitions")
+        )
+        raw_stock_value = sum(
+            s.quantity_available * s.ingredient.cost_per_base_unit
+            for s in raw_stocks
+            if s.quantity_available > 0
+        )
+        raw_category_count = len({
+            s.ingredient.group
+            for s in raw_stocks
+            if s.quantity_available > 0 and s.ingredient.group
+        })
+        raw_stock_out_count = sum(1 for s in raw_stocks if s.quantity_available <= 0)
+
+        # Stock-in — one annotated query covers draft detection and latest status
+        si_records = list(
+            StockInRecord.objects
+            .filter(outlet_id=outlet_id, stock_in_date=date_str)
+            .annotate(item_count=Count("items", distinct=True))
+            .order_by("-created_at")
+        )
+        draft_si = next((r for r in si_records if r.status == StockInStatus.DRAFT), None)
+        latest_si = si_records[0] if si_records else None
+        stock_in_data = None
+        if latest_si:
+            stock_in_data = {
+                "draft_item_count": draft_si.item_count if draft_si else None,
+                "latest_status": latest_si.status,
+            }
+
+        # Closing — prefetch what total_sale / has_flag need
+        closing = (
+            DailyClosing.objects
+            .prefetch_related("sales_lines", "channel_discounts", "payments")
+            .filter(outlet_id=outlet_id, closing_date=date_str)
+            .first()
+        )
+        closing_data = None
+        if closing:
+            closing_data = {
+                "id": closing.id,
+                "status": closing.status,
+                "total_sale": str(closing.total_sale),
+                "has_flag": closing.has_flag,
+            }
+
+        return Response({
+            "allow_staff_date_selection": allow_date_selection,
+            "display_stock": {
+                "raw_stock_value": str(raw_stock_value),
+                "raw_category_count": raw_category_count,
+                "raw_stock_out_count": raw_stock_out_count,
+            },
+            "stock_in": stock_in_data,
+            "closing": closing_data,
+        })

@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { getOrCreateTodayClosing } from "@/lib/closing";
+import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { bdt, shortDate, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { Stamp } from "@/components/Stamp";
@@ -38,9 +38,11 @@ function ClosingHub() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
 
+  const prevCtx = useRef({ outlet: 0, opDate: "", viewYesterday: false });
+
   async function refresh() {
     if (viewYesterday) {
-      const res = await api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${opDate}`);
+      const res = await api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${opDate}&expand=full`);
       if (res.results[0]) {
         setClosing(res.results[0]);
       } else {
@@ -48,12 +50,21 @@ function ClosingHub() {
       }
       return;
     }
-    const c = await getOrCreateTodayClosing(outlet, opDate);
+    const [c, p] = await Promise.all([
+      getOrCreateTodayClosing(outlet, opDate),
+      api<Paginated<Product>>("/products/?active=true&product_type=SINGLE"),
+    ]);
     setClosing(c);
-    const p = await api<Paginated<Product>>("/products/?active=true");
-    setTotalProducts(p.results.filter((x) => x.product_type === "SINGLE").length);
+    setTotalProducts(p.results.length);
   }
   useEffect(() => {
+    const ctx = { outlet, opDate, viewYesterday };
+    if (
+      prevCtx.current.outlet === ctx.outlet &&
+      prevCtx.current.opDate === ctx.opDate &&
+      prevCtx.current.viewYesterday === ctx.viewYesterday
+    ) return;
+    prevCtx.current = ctx;
     setClosing(null);
     setNotFound(false);
     refresh();
@@ -77,6 +88,7 @@ function ClosingHub() {
     setBusy(true);
     try {
       const c = await api<DailyClosing>(`/daily-closings/${closing!.id}/submit/`, { method: "POST" });
+      invalidateClosingCache(outlet, opDate);
       setClosing(c);
     } finally {
       setBusy(false);
@@ -144,21 +156,51 @@ function ClosingHub() {
         </Link>
       )}
 
-      <div className="ticket">
-        <div className="ticket-row">
-          <span>Net revenue (after discount)</span>
-          <span>{bdt(closing.channel_day_net_revenue)}</span>
-        </div>
-        <div className="ticket-row">
-          <span>Computed cash</span>
-          <span>{bdt(closing.computed_cash)}</span>
-        </div>
-        {closing.has_flag && (
-          <p className="mt-2 font-mono text-[11px] text-chili-deep">
-            ⚑ A stock count is flagged (walk-in derived below zero). Owner review required.
-          </p>
-        )}
-      </div>
+      {(() => {
+        const onlineSell = closing.sales_lines
+          .filter((l) => l.source === "STAFF_ENTRY")
+          .reduce((s, l) => s + Number(l.gross_amount), 0);
+        const nonCashPayments = closing.payments.filter(
+          (p) => !p.is_primary_cash && Number(p.amount) > 0
+        );
+        return (
+          <div className="ticket flex flex-col gap-0">
+            <div className="ticket-row">
+              <span>Net revenue</span>
+              <span className="qty font-semibold">{bdt(closing.channel_day_net_revenue)}</span>
+            </div>
+
+            {onlineSell > 0 && (
+              <div className="ticket-row text-ink-soft">
+                <span className="pl-3 text-[11px]">Online sell</span>
+                <span className="qty text-[11px]">{bdt(String(onlineSell))}</span>
+              </div>
+            )}
+
+            {nonCashPayments.length > 0 && (
+              <div className="my-1 border-t border-dashed border-[#d8cdb0]" />
+            )}
+
+            {nonCashPayments.map((p) => (
+              <div key={p.id} className="ticket-row text-ink-soft">
+                <span className="pl-3 text-[11px]">{p.account_name}</span>
+                <span className="qty text-[11px]">{bdt(p.amount)}</span>
+              </div>
+            ))}
+
+            <div className="ticket-row">
+              <span>Cash (computed)</span>
+              <span className="qty">{bdt(closing.computed_cash)}</span>
+            </div>
+
+            {closing.has_flag && (
+              <p className="mt-2 font-mono text-[11px] text-chili-deep">
+                ⚑ A stock count is flagged (walk-in derived below zero). Owner review required.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {!viewYesterday && closing.status === "DRAFT" && (
         <button className="btn btn-primary" disabled={busy} onClick={submit}>

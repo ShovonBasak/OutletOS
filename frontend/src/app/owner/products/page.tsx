@@ -62,7 +62,7 @@ export default function ProductsPage() {
   }
 
   async function loadProducts() {
-    const url = showInactive ? "/products/?include_inactive=1" : "/products/";
+    const url = showInactive ? "/products/?include_inactive=1&expand=full" : "/products/?expand=full";
     const d = await api<Paginated<Product>>(url);
     setProducts(d.results);
   }
