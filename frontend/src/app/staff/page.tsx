@@ -232,9 +232,9 @@ export default function StaffHome() {
         </div>
       )}
 
+      {/* Day summary — only while the day is open */}
       {(status === "IN_PROGRESS" || status === "CLOSED") && (
         <>
-          {/* Day summary */}
           <div className="ticket flex flex-col gap-0">
             {day?.started_at && (
               <div className="ticket-row">
@@ -261,23 +261,6 @@ export default function StaffHome() {
             </div>
           </div>
 
-          {/* Cash card — taps through to full history + transfer */}
-          {cashInfo && (
-            <Link
-              href="/staff/cash"
-              className="ticket flex items-center justify-between text-left w-full"
-            >
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Shop Cash</p>
-                <p className="font-mono text-2xl font-bold text-ink">{bdt(cashInfo.cash.balance)}</p>
-              </div>
-              <span className="rounded border border-chrome px-2.5 py-1 font-mono text-[11px] text-chrome">
-                View →
-              </span>
-            </Link>
-          )}
-
-          {/* Edit links */}
           <div className="flex flex-wrap gap-3 text-[11px]">
             <Link href="/staff/day-start" className="font-mono text-gold-deep underline">
               Edit day-start stock
@@ -286,27 +269,47 @@ export default function StaffHome() {
               Edit carry-forward
             </Link>
           </div>
+        </>
+      )}
 
-          {/* Quick action tiles */}
-          <div className="tilegrid">
-            <Link href="/staff/stock" className="tile">
-              <div className="flex items-start justify-between gap-1">
-                <span className="n">{rawCategoryCount}</span>
-                <div className="flex flex-col items-end gap-0.5 pt-0.5">
-                  {Number(rawStockValue) > 0 && (
-                    <span className="font-mono text-[10px] text-ink-soft leading-tight">{bdt(rawStockValue!)}</span>
-                  )}
-                  {rawStockOutCount > 0 && (
-                    <span className="font-mono text-[9px] text-chili leading-tight">{rawStockOutCount} out</span>
-                  )}
-                </div>
-              </div>
-              <span className="l">Stock overview</span>
-            </Link>
-            <Link href="/staff/closing/history" className="tile">
-              <span className="n">≡</span>
-              <span className="l">Closing history</span>
-            </Link>
+      {/* Cash card — always visible */}
+      {cashInfo && (
+        <Link
+          href="/staff/cash"
+          className="ticket flex items-center justify-between text-left w-full"
+        >
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Shop Cash</p>
+            <p className="font-mono text-2xl font-bold text-ink">{bdt(cashInfo.cash.balance)}</p>
+          </div>
+          <span className="rounded border border-chrome px-2.5 py-1 font-mono text-[11px] text-chrome">
+            View →
+          </span>
+        </Link>
+      )}
+
+      {/* Quick action tiles — always visible */}
+      <div className="tilegrid">
+        <Link href="/staff/stock" className="tile">
+          <div className="flex items-start justify-between gap-1">
+            <span className="n">{rawCategoryCount}</span>
+            <div className="flex flex-col items-end gap-0.5 pt-0.5">
+              {Number(rawStockValue) > 0 && (
+                <span className="font-mono text-[10px] text-ink-soft leading-tight">{bdt(rawStockValue!)}</span>
+              )}
+              {rawStockOutCount > 0 && (
+                <span className="font-mono text-[9px] text-chili leading-tight">{rawStockOutCount} out</span>
+              )}
+            </div>
+          </div>
+          <span className="l">Stock overview</span>
+        </Link>
+        <Link href="/staff/closing/history" className="tile">
+          <span className="n">≡</span>
+          <span className="l">Closing history</span>
+        </Link>
+        {(status === "IN_PROGRESS" || status === "CLOSED") && (
+          <>
             <Link href="/staff/packaging" className="tile">
               <span className="n">▦</span>
               <span className="l">Packaging &amp; supplies</span>
@@ -319,9 +322,9 @@ export default function StaffHome() {
               <span className="n">+</span>
               <span className="l">Other income</span>
             </Link>
-          </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
 
     </div>
   );

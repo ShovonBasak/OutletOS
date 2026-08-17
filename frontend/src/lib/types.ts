@@ -700,6 +700,23 @@ export interface OtherIncome {
   description: string;
 }
 
+export interface PurchaseSummaryRecord {
+  id: number;
+  date: string;
+  invoice_number: string;
+  amount: string;
+  source: "slip_total" | "line_totals" | "computed";
+}
+
+export interface PurchaseSummary {
+  start: string;
+  end: string;
+  total: string;
+  record_count: number;
+  records: PurchaseSummaryRecord[];
+  daily: { date: string; amount: string }[];
+}
+
 export interface Paginated<T> {
   count: number;
   next: string | null;

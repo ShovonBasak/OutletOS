@@ -38,6 +38,7 @@ from stock.models import (
     StockInItem,
     StockInRecord,
     StockInStatus,
+    UnitCaptured,
 )
 
 
@@ -857,6 +858,81 @@ def correct_sells(request):
             raise ValueError("; ".join(errors))
 
     return Response({"ok": True, "applied": applied})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def purchase_summary(request):
+    """Total approved purchase cost for the period (what was actually paid to suppliers).
+
+    Three-tier fallback per record:
+      1. slip_grand_total — the slip's printed grand total (most accurate)
+      2. Σ item.line_total — sum of per-line net amounts parsed from the slip
+      3. pack_definition.cost_per_pack × confirmed_quantity — computed from registered cost
+
+    ?start=&end=&outlet=
+    """
+    start, end = _default_range(request)
+    outlet = request.query_params.get("outlet")
+
+    records = (
+        StockInRecord.objects
+        .filter(
+            status=StockInStatus.APPROVED,
+            stock_in_date__gte=start,
+            stock_in_date__lte=end,
+        )
+        .prefetch_related("items__pack_definition")
+        .order_by("stock_in_date")
+    )
+    if outlet:
+        records = records.filter(outlet_id=outlet)
+
+    total = Decimal("0")
+    daily: dict[str, Decimal] = {}
+    rows = []
+
+    for rec in records:
+        if rec.slip_grand_total is not None:
+            amount = rec.slip_grand_total
+            source = "slip_total"
+        else:
+            amount = Decimal("0")
+            source = "computed"
+            for item in rec.items.all():
+                if item.line_total is not None:
+                    amount += item.line_total
+                    source = "line_totals"
+                elif item.pack_definition is not None:
+                    if item.unit_captured == UnitCaptured.PACK:
+                        amount += item.pack_definition.cost_per_pack * item.confirmed_quantity
+                    elif item.pack_definition.pieces_per_pack:
+                        cpu = item.pack_definition.cost_per_pack / item.pack_definition.pieces_per_pack
+                        amount += cpu * item.confirmed_quantity
+
+        total += amount
+        d = str(rec.stock_in_date)
+        daily[d] = daily.get(d, Decimal("0")) + amount
+
+        rows.append({
+            "id": rec.id,
+            "date": d,
+            "invoice_number": rec.invoice_number or "",
+            "amount": amount.quantize(Decimal("0.01")),
+            "source": source,
+        })
+
+    return Response({
+        "start": start,
+        "end": end,
+        "total": total.quantize(Decimal("0.01")),
+        "record_count": len(rows),
+        "records": rows,
+        "daily": [
+            {"date": k, "amount": v.quantize(Decimal("0.01"))}
+            for k, v in sorted(daily.items())
+        ],
+    })
 
 
 def _do_rebuild(outlet: Outlet) -> dict:
