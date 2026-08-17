@@ -85,7 +85,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
   return (
     <OperatingDayContext.Provider value={{ day, refreshDay, workDate, setWorkDate }}>
-      <div className="mx-auto flex min-h-screen w-full max-w-[420px] flex-col bg-paper shadow-xl">
+      <div className="flex min-h-screen w-full flex-col bg-paper">
         <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper">
           <Brand name={user?.outlet_name} />
           <button
@@ -98,7 +98,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
         <main className="flex-1 overflow-y-auto p-4 pb-24">{children}</main>
 
-        <nav className="fixed bottom-0 left-1/2 flex w-full max-w-[420px] -translate-x-1/2 border-t border-white/10 bg-chrome">
+        <nav className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome">
           {TABS.map((t) => {
             const unlocked = isUnlocked(t.gate);
             const cls = `flex-1 py-3.5 text-center font-mono text-[10px] uppercase tracking-wide ${
