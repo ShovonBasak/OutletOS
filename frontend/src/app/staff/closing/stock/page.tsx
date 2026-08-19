@@ -222,9 +222,14 @@ export default function StockSummaryScreen() {
         </Section>
       )}
 
-      <button className="btn btn-ghost" onClick={() => router.push("/staff/closing")}>
-        Back to checklist
-      </button>
+      <div className="flex gap-4">
+        <button className="btn btn-ghost flex-1" onClick={() => router.push("/staff/closing")}>
+          Back to checklist
+        </button>
+        <button className="btn btn-ghost flex-1" onClick={() => router.push("/staff")}>
+          Home
+        </button>
+      </div>
     </div>
   );
 }

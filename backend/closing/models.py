@@ -41,9 +41,8 @@ class DailyClosing(models.Model):
 
     @property
     def channel_day_net_revenue(self):
-        """Σ net_amount − DailyChannelDiscount, across channels."""
-        discounts = sum((d.discount_amount for d in self.channel_discounts.all()), Decimal("0"))
-        return self.total_sale - discounts
+        """Σ net_amount across channels (commission already deducted per line; DailyChannelDiscount is reconciliation only and not subtracted from revenue)."""
+        return self.total_sale
 
     @property
     def online_payments(self):

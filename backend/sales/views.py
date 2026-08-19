@@ -21,6 +21,21 @@ from .serializers import (
 )
 
 
+def _recompute_channel_lines(channel):
+    """Recompute gross/commission/net for all sales lines on this channel.
+    Called automatically when commission_rate changes, and available via API.
+    Returns the number of lines updated.
+    """
+    from closing.models import DailyClosingSalesLine
+    lines = DailyClosingSalesLine.objects.filter(channel=channel).select_related("channel")
+    count = 0
+    for line in lines:
+        line.recompute()
+        line.save(update_fields=["gross_amount", "commission_amount", "net_amount"])
+        count += 1
+    return count
+
+
 class SalesChannelViewSet(viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
@@ -30,6 +45,21 @@ class SalesChannelViewSet(viewsets.ModelViewSet):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
             return SalesChannelSlimSerializer
         return SalesChannelSerializer
+
+    def perform_update(self, serializer):
+        old_rate = serializer.instance.commission_rate
+        channel = serializer.save()
+        if channel.commission_rate != old_rate:
+            _recompute_channel_lines(channel)
+
+    from rest_framework.decorators import action as _action
+
+    @_action(detail=True, methods=["post"], url_path="recompute-commissions")
+    def recompute_commissions(self, request, pk=None):
+        """POST /sales-channels/<id>/recompute-commissions/ — manually trigger line recompute."""
+        channel = self.get_object()
+        count = _recompute_channel_lines(channel)
+        return Response({"recomputed": count})
 
 
 class ChannelPromotionViewSet(viewsets.ModelViewSet):

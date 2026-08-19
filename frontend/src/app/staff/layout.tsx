@@ -12,10 +12,10 @@ import { today } from "@/lib/format";
 import type { OperatingDay } from "@/lib/types";
 
 const TABS = [
-  { href: "/staff", label: "Home", gate: "always" as const },
-  { href: "/staff/stock-in", label: "Stock In", gate: "stock" as const },
-  { href: "/staff/prep", label: "Prep log", gate: "full" as const },
-  { href: "/staff/closing", label: "Closing", gate: "closing" as const },
+  { href: "/staff",          label: "Home",     icon: "⌂", gate: "always"  as const },
+  { href: "/staff/stock-in", label: "Stock In", icon: "↓", gate: "stock"   as const },
+  { href: "/staff/prep",     label: "Prep",     icon: "♨", gate: "full"    as const },
+  { href: "/staff/closing",  label: "Closing",  icon: "✓", gate: "closing" as const },
 ];
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
@@ -98,19 +98,42 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
         <main className="flex-1 overflow-y-auto p-4 pb-24">{children}</main>
 
-        <nav className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome">
+        <nav
+          className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
           {TABS.map((t) => {
             const unlocked = isUnlocked(t.gate);
-            const cls = `flex-1 py-3.5 text-center font-mono text-[10px] uppercase tracking-wide ${
-              isActive(t.href) ? "text-gold" : unlocked ? "text-white/50" : "text-white/25"
-            }`;
+            const active = isActive(t.href);
+            const content = (
+              <>
+                <span className={`text-[18px] leading-none ${
+                  active ? "text-gold" : unlocked ? "text-white/60" : "text-white/25"
+                }`}>
+                  {unlocked ? t.icon : "🔒"}
+                </span>
+                <span className={`font-mono text-[9px] uppercase tracking-widest ${
+                  active ? "text-gold" : unlocked ? "text-white/40" : "text-white/20"
+                }`}>
+                  {t.label}
+                </span>
+              </>
+            );
             return unlocked ? (
-              <Link key={t.href} href={t.href} className={cls}>
-                {t.label}
+              <Link
+                key={t.href}
+                href={t.href}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px] transition-colors"
+              >
+                {content}
               </Link>
             ) : (
-              <span key={t.href} className={cls} title="Finish day-start steps first">
-                🔒 {t.label}
+              <span
+                key={t.href}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px] cursor-not-allowed"
+                title="Finish day-start steps first"
+              >
+                {content}
               </span>
             );
           })}

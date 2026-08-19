@@ -446,45 +446,96 @@ export default function PrepPage() {
         </>
       )}
 
-      <div>
-        <p className="mb-1 font-mono text-[11px] uppercase tracking-wide text-ink-soft">
-          Today&apos;s fresh entries
-        </p>
-        {logs.length === 0 && <p className="font-mono text-xs text-ink-soft">No entries yet.</p>}
-        {logs.map((l) => (
-          <div
-            key={l.id}
-            className="flex items-center justify-between border-b border-dotted border-[#d8cdb0] py-1.5 font-mono text-[11px] text-ink-soft"
-          >
+      <PrepLogList logs={logs} onDeleted={loadLive} />
+
+      <Link href="/staff/prep/carry-forward" className="btn btn-ghost text-center">
+        Carry-forward from yesterday
+      </Link>
+    </div>
+  );
+}
+
+// ── PrepLogList with inline per-row confirmation ───────────────────────────
+
+function PrepLogList({ logs, onDeleted }: { logs: PrepLog[]; onDeleted: () => void }) {
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [errMsg, setErrMsg] = useState<{ id: number; msg: string } | null>(null);
+
+  async function doDelete(id: number) {
+    setDeleting(id);
+    setErrMsg(null);
+    try {
+      await api(`/preparation-logs/${id}/`, { method: "DELETE" });
+      setConfirming(null);
+      onDeleted();
+    } catch (err) {
+      const body = (err as { body?: { detail?: string } })?.body;
+      setErrMsg({ id, msg: body?.detail ?? "Could not delete. Try again." });
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  return (
+    <div>
+      <p className="mb-1 font-mono text-[11px] uppercase tracking-wide text-ink-soft">
+        Today&apos;s fresh entries
+      </p>
+      {logs.length === 0 && <p className="font-mono text-xs text-ink-soft">No entries yet.</p>}
+      {logs.map((l) => (
+        <div key={l.id} className="border-b border-dotted border-[#d8cdb0]">
+          {/* normal row */}
+          <div className="flex items-center justify-between py-1.5 font-mono text-[11px] text-ink-soft">
             <span>{timeOf(l.timestamp)} · {l.product_name}</span>
             <span className="flex items-center gap-2">
               <span>
                 {l.prep_unit === "PACK" ? `${l.packs_used} pack` : "manual"} → {l.pieces_prepared} pcs
               </span>
-              <button
-                className="text-chili opacity-60 hover:opacity-100"
-                title="Delete and revert stock"
-                onClick={async () => {
-                  if (!confirm("Delete this entry? Stock will be restored.")) return;
-                  try {
-                    await api(`/preparation-logs/${l.id}/`, { method: "DELETE" });
-                    loadLive();
-                  } catch (err) {
-                    const body = (err as { body?: { detail?: string } })?.body;
-                    alert(body?.detail ?? "Could not delete prep log. Please try again.");
-                  }
-                }}
-              >
-                ✕
-              </button>
+              {confirming !== l.id && (
+                <button
+                  className="h-6 w-6 flex items-center justify-center rounded text-chili opacity-60 hover:opacity-100 active:opacity-100"
+                  title="Delete this entry"
+                  onClick={() => { setConfirming(l.id); setErrMsg(null); }}
+                >
+                  ✕
+                </button>
+              )}
             </span>
           </div>
-        ))}
-      </div>
 
-      <Link href="/staff/prep/carry-forward" className="btn btn-ghost text-center">
-        Carry-forward from yesterday
-      </Link>
+          {/* inline confirmation — only visible for the row being confirmed */}
+          {confirming === l.id && (
+            <div className="mb-2 rounded-lg border border-chili/30 bg-chili/5 px-3 py-2.5">
+              <p className="font-mono text-[11px] font-semibold text-chili mb-2">
+                Delete this prep entry?
+              </p>
+              <p className="font-mono text-[10px] text-ink-soft mb-2.5">
+                {l.product_name} · {l.pieces_prepared} pcs — raw stock will be restored.
+              </p>
+              {errMsg?.id === l.id && (
+                <p className="font-mono text-[10px] text-chili mb-2">{errMsg.msg}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  className="flex-1 rounded border border-chili bg-chili/10 py-2 font-mono text-[11px] font-semibold text-chili disabled:opacity-50"
+                  disabled={deleting === l.id}
+                  onClick={() => doDelete(l.id)}
+                >
+                  {deleting === l.id ? "Deleting…" : "Yes, delete"}
+                </button>
+                <button
+                  className="flex-1 rounded border border-[#d8cdb0] bg-paper py-2 font-mono text-[11px] text-ink-soft"
+                  disabled={deleting === l.id}
+                  onClick={() => { setConfirming(null); setErrMsg(null); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

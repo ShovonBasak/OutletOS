@@ -8,6 +8,12 @@ export function bdt2(value: string | number | null | undefined): string {
   return `৳ ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Like bdt but shows up to 2 decimal places only when needed (e.g. 25 → ৳ 25, 25.5 → ৳ 25.5, 25.56 → ৳ 25.56) */
+export function bdtD(value: string | number | null | undefined): string {
+  const n = Number(value ?? 0);
+  return `৳ ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
+
 export function today(): string {
   const d = new Date();
   const yyyy = d.getFullYear();

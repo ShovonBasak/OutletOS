@@ -11,7 +11,10 @@ export interface NavGroup {
 export const OWNER_NAV: NavGroup[] = [
   {
     group: "Overview",
-    items: [{ href: "/owner", label: "Dashboard" }],
+    items: [
+      { href: "/owner",     label: "Dashboard" },
+      { href: "/owner/day", label: "Day overview" },
+    ],
   },
   {
     group: "Approvals",
@@ -75,7 +78,8 @@ const FLAT = OWNER_NAV.flatMap((g) => g.items).sort((a, b) => b.href.length - a.
 // Titles for sub-pages that aren't in the sidebar (reached via buttons/hubs).
 const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/approvals", "Approvals"],
-  ["/owner/reports", "Reports"],
+  ["/owner/reports",   "Reports"],
+  ["/owner/day",       "Day overview"],
   ["/owner/more", "More"],
   ["/owner/profile", "Profile"],
   ["/owner/products/edit-recipe", "Edit recipe"],
@@ -98,16 +102,20 @@ export function titleFor(pathname: string): string {
 
 // Mobile bottom-tab entry points — each opens a hub screen (per the sitemap's
 // Home / Approvals / Reports / More tabs), from which every section is reachable.
-export const OWNER_MOBILE_TABS: NavItem[] = [
-  { href: "/owner", label: "Home" },
-  { href: "/owner/approvals", label: "Approvals" },
-  { href: "/owner/reports", label: "Reports" },
-  { href: "/owner/more", label: "More" },
+export interface MobileTab extends NavItem {
+  icon: string;
+}
+export const OWNER_MOBILE_TABS: MobileTab[] = [
+  { href: "/owner/day",       label: "Day",       icon: "⌂" },
+  { href: "/owner/approvals", label: "Approvals", icon: "✓" },
+  { href: "/owner/reports",   label: "Reports",   icon: "↗" },
+  { href: "/owner/more",      label: "More",      icon: "⋯" },
 ];
 
 // Map any owner route to the bottom tab that should stay highlighted on mobile,
 // so drilling into a section from a hub keeps its tab active.
 const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
+  { tab: "/owner/day", prefixes: ["/owner/day"] },
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
     tab: "/owner/reports",

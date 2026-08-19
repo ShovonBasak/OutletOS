@@ -483,7 +483,7 @@ export interface ChannelBreakdownRow {
   units_sold: number;
   gross_revenue: string;
   commission: string;
-  discount: string;
+  platform_discount: string;
   net_revenue: string;
 }
 
@@ -530,6 +530,39 @@ export interface DashboardSummary {
   pnl_today: Pnl;
   pending_stock_ins: number;
   closings_awaiting_review: number;
+}
+
+export interface DashboardDailyRow {
+  date: string;
+  units_sold: number;
+  revenue: string;
+  cogs: string;
+}
+
+export interface DashboardProductRow {
+  product_name: string;
+  category: string;
+  units_sold: number;
+  revenue: string;
+  cogs: string;
+  gross_profit: string;
+  margin_pct: string;
+}
+
+export interface DashboardChannelRow {
+  channel: string;
+  units_sold: number;
+  revenue: string;
+  commission: string;
+}
+
+export interface DashboardData {
+  start: string;
+  end: string;
+  pnl: Pnl;
+  daily: DashboardDailyRow[];
+  top_products: DashboardProductRow[];
+  channels: DashboardChannelRow[];
 }
 
 
@@ -715,6 +748,108 @@ export interface PurchaseSummary {
   record_count: number;
   records: PurchaseSummaryRecord[];
   daily: { date: string; amount: string }[];
+}
+
+export interface ShrinkageRow {
+  date: string;
+  ingredient: string;
+  base_unit: string;
+  system_qty: string;
+  confirmed_qty: string;
+  shortfall_qty: string;
+  cost_per_unit: string;
+  cost: string;
+  reason: string;
+  note: string;
+}
+
+export interface ShrinkageDetail {
+  start: string;
+  end: string;
+  total: string;
+  rows: ShrinkageRow[];
+}
+
+// ---- Owner day overview ---------------------------------------------------
+
+export interface DayOverviewStockCheck {
+  ingredient: string;
+  base_unit: string;
+  system_qty: string;
+  confirmed_qty: string;
+  discrepancy_qty: string;
+  discrepancy_reason: string;
+  note: string;
+  shrinkage_cost: string;
+}
+
+export interface DayOverviewStockIn {
+  id: number;
+  status: StockInStatus;
+  item_count: number;
+  submitted_by_name: string;
+  notes: string;
+  invoice_number: string;
+}
+
+export interface DayOverviewPrepLog {
+  id: number;
+  product_name: string;
+  product_category: string;
+  source: PrepSource;
+  prep_unit: "PACK" | "PIECE";
+  packs_used: string | null;
+  pieces_prepared: number;
+  wastage_pieces: number | null;
+  timestamp: string;
+  selling_price: string;
+}
+
+export interface DayOverviewDisplayStock {
+  product_name: string;
+  product_category: string;
+  pieces_available: number;
+  requires_preparation: boolean;
+  selling_price: string;
+  purchase_price: string | null;
+}
+
+export interface DayOverviewRawStock {
+  ingredient: string;
+  base_unit: string;
+  quantity_available: string;
+  cost_per_base_unit: string;
+}
+
+export interface DayOverviewClosing {
+  id: number;
+  status: ClosingStatus;
+  total_sale: string;
+  channel_day_net_revenue: string;
+  online_payments: string;
+  total_offline_sales: string;
+  computed_cash: string;
+  has_flag: boolean;
+  flagged_products: { product_name: string; derived_walkin_sold: number }[];
+  payments: { account_name: string; is_primary_cash: boolean; amount: string }[];
+}
+
+export interface DayOverview {
+  date: string;
+  operating_day: {
+    id: number;
+    status: OperatingDayStatus;
+    started_at: string | null;
+    stock_confirmed_at: string | null;
+    carry_forward_confirmed_at: string | null;
+  } | null;
+  day_start_checks: DayOverviewStockCheck[];
+  stock_ins: DayOverviewStockIn[];
+  prep_logs: DayOverviewPrepLog[];
+  display_stock: DayOverviewDisplayStock[];
+  raw_stock: DayOverviewRawStock[];
+  closing: DayOverviewClosing | null;
+  pnl: { revenue: string; net_profit: string; cogs: string; gross_profit: string };
 }
 
 export interface Paginated<T> {

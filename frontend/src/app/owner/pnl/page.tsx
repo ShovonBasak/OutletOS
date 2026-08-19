@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { bdt, today } from "@/lib/format";
-import type { Pnl } from "@/lib/types";
+import type { Pnl, ShrinkageDetail } from "@/lib/types";
 
 type Preset = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
 
@@ -32,7 +32,6 @@ function rangeFor(preset: Preset, customStart: string, customEnd: string): { sta
 
   if (preset === "last_week") {
     const d = new Date(now);
-    // last Mon–Sun
     const day = d.getDay() || 7;
     d.setDate(d.getDate() - day - 6);
     const s = isoDate(d);
@@ -69,14 +68,21 @@ export default function PnlPage() {
   const [customEnd, setCustomEnd] = useState(today());
   const [pnl, setPnl] = useState<Pnl | null>(null);
   const [loading, setLoading] = useState(false);
+  const [shrinkage, setShrinkage] = useState<ShrinkageDetail | null>(null);
+  const [showShrinkage, setShowShrinkage] = useState(false);
 
   const { start, end } = rangeFor(preset, customStart, customEnd);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setShrinkage(null);
     try {
-      const data = await api<Pnl>(`/reports/pnl/?outlet=1&start=${start}&end=${end}`);
+      const q = `outlet=1&start=${start}&end=${end}`;
+      const data = await api<Pnl>(`/reports/pnl/?${q}`);
       setPnl(data);
+      api<ShrinkageDetail>(`/reports/shrinkage-detail/?${q}`)
+        .then(setShrinkage)
+        .catch(() => setShrinkage({ start, end, total: "0", rows: [] }));
     } finally {
       setLoading(false);
     }
@@ -173,13 +179,67 @@ export default function PnlPage() {
               <td>Wastage (made but not sold)</td>
               <td className="neg">− {bdt(pnl.wastage_cost)}</td>
             </tr>
-            <tr>
-              <td>Shrinkage (day-start ingredient loss)</td>
+
+            {/* Shrinkage row — clickable to expand detail */}
+            <tr
+              className="cursor-pointer select-none hover:bg-black/[0.02]"
+              onClick={() => setShowShrinkage((v) => !v)}
+            >
+              <td>
+                Shrinkage (day-start ingredient loss)
+                <span className="ml-2 text-ink-soft">
+                  {shrinkage === null
+                    ? "…"
+                    : `${showShrinkage ? "▲" : "▼"} ${shrinkage.rows.length > 0 ? `${shrinkage.rows.length} event${shrinkage.rows.length !== 1 ? "s" : ""}` : "details"}`}
+                </span>
+              </td>
               <td className="neg">− {bdt(pnl.shrinkage_cost)}</td>
             </tr>
+            {showShrinkage && (
+              <tr>
+                <td colSpan={2} className="!p-0 !border-0">
+                  {shrinkage === null ? (
+                    <p className="px-2 py-2 font-mono text-[11px] text-ink-soft">Loading…</p>
+                  ) : shrinkage.rows.length === 0 ? (
+                    <p className="px-2 py-2 font-mono text-[11px] text-ink-soft italic">No shrinkage events in this period.</p>
+                  ) : (
+                    <div className="border border-dashed border-[#d8cdb0] rounded mt-1 mb-1 overflow-hidden">
+                      <table className="w-full font-mono text-[11px]">
+                        <thead>
+                          <tr className="bg-[#f5f0e8]">
+                            <th className="px-2 py-1.5 text-left text-[10px] uppercase tracking-wide text-ink-soft">Date</th>
+                            <th className="px-2 py-1.5 text-left text-[10px] uppercase tracking-wide text-ink-soft">Ingredient</th>
+                            <th className="px-2 py-1.5 text-right text-[10px] uppercase tracking-wide text-ink-soft">Shortfall</th>
+                            <th className="px-2 py-1.5 text-right text-[10px] uppercase tracking-wide text-ink-soft">Cost</th>
+                            <th className="px-2 py-1.5 text-left text-[10px] uppercase tracking-wide text-ink-soft">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-dashed divide-[#e8dfc8]">
+                          {shrinkage.rows.map((r, i) => (
+                            <tr key={i}>
+                              <td className="px-2 py-1.5 text-ink-soft">{r.date}</td>
+                              <td className="px-2 py-1.5 text-ink">{r.ingredient}</td>
+                              <td className="px-2 py-1.5 text-right text-chili">
+                                −{Number(r.shortfall_qty).toFixed(2)} {r.base_unit}
+                              </td>
+                              <td className="px-2 py-1.5 text-right text-chili">− {bdt(r.cost)}</td>
+                              <td className="px-2 py-1.5 text-ink-soft capitalize">
+                                {r.reason ? r.reason.toLowerCase().replace(/_/g, " ") : "—"}
+                                {r.note && <span className="ml-1 opacity-60">· {r.note}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            )}
+
             <tr>
               <td>Packaging &amp; supplies</td>
-              <td>{bdt(pnl.packaging_cost)}</td>
+              <td className="neg">− {bdt(pnl.packaging_cost)}</td>
             </tr>
             <tr className="section">
               <td colSpan={2}>Costs</td>

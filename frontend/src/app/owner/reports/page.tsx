@@ -10,6 +10,7 @@ import type {
   Pnl,
   ProductPerformanceRow,
   PurchaseSummary,
+  ShrinkageDetail,
   StockValueReport,
 } from "@/lib/types";
 
@@ -61,6 +62,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [showInvoices, setShowInvoices] = useState(false);
   const [showStockDetail, setShowStockDetail] = useState(false);
+  const [showShrinkage, setShowShrinkage] = useState(false);
 
   const [pnl, setPnl] = useState<Pnl | null>(null);
   const [products, setProducts] = useState<ProductPerformanceRow[]>([]);
@@ -68,6 +70,7 @@ export default function ReportsPage() {
   const [stock, setStock] = useState<StockValueReport | null>(null);
   const [trend, setTrend] = useState<DailyTrendRow[]>([]);
   const [purchase, setPurchase] = useState<PurchaseSummary | null>(null);
+  const [shrinkage, setShrinkage] = useState<ShrinkageDetail | null>(null);
 
   const [sortCol, setSortCol] = useState<ProdCol>("net_revenue");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -76,6 +79,7 @@ export default function ReportsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setShrinkage(null);
     try {
       const q = `outlet=1&start=${start}&end=${end}`;
       const [p, prod, ch, tr, pur] = await Promise.all([
@@ -90,6 +94,10 @@ export default function ReportsPage() {
       setChannels(ch.rows);
       setTrend(tr.rows);
       setPurchase(pur);
+      // Load shrinkage separately so a failure here doesn't block the rest
+      api<ShrinkageDetail>(`/reports/shrinkage-detail/?${q}`)
+        .then(setShrinkage)
+        .catch(() => setShrinkage({ start, end, total: "0", rows: [] }));
     } finally {
       setLoading(false);
     }
@@ -151,6 +159,26 @@ export default function ReportsPage() {
       <div>
         <h1 className="font-display text-xl font-bold">Reports</h1>
         <p className="font-mono text-[11px] text-ink-soft">{rangeLabel} · accrual basis</p>
+      </div>
+
+      {/* ── Quick links to sub-report pages ── */}
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { href: "/owner/pnl",              label: "P&L statement" },
+          { href: "/owner/sell-history",     label: "Sell history" },
+          { href: "/owner/settlements",      label: "Settlements" },
+          { href: "/owner/stock-in-history", label: "Stock in history" },
+          { href: "/owner/packaging",        label: "Packaging" },
+          { href: "/owner/stock",            label: "Stock levels" },
+        ].map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            className="flex items-center justify-center rounded border border-[#d8cdb0] bg-paper px-2 py-2.5 text-center font-mono text-[10px] text-ink-soft leading-tight hover:border-action/40 hover:text-ink transition-colors"
+          >
+            {l.label}
+          </Link>
+        ))}
       </div>
 
       {/* ── Date presets ── */}
@@ -303,7 +331,61 @@ export default function ReportsPage() {
               </tr>
               <tr className="section"><td colSpan={2}>Losses</td></tr>
               <tr><td>Wastage (prepared, not sold)</td><td className="neg">− {bdt(pnl.wastage_cost)}</td></tr>
-              <tr><td>Shrinkage (day-start ingredient loss)</td><td className="neg">− {bdt(pnl.shrinkage_cost)}</td></tr>
+              <tr
+                className="cursor-pointer select-none hover:bg-black/[0.02]"
+                onClick={() => setShowShrinkage((v) => !v)}
+              >
+                <td>
+                  Shrinkage (day-start ingredient loss)
+                  <span className="ml-2 font-mono text-[10px] text-ink-soft/60">
+                    {shrinkage === null
+                      ? "…"
+                      : shrinkage.rows.length > 0
+                        ? `${showShrinkage ? "▲" : "▼"} ${shrinkage.rows.length} event${shrinkage.rows.length !== 1 ? "s" : ""}`
+                        : `${showShrinkage ? "▲" : "▼"} details`}
+                  </span>
+                </td>
+                <td className="neg">− {bdt(pnl.shrinkage_cost)}</td>
+              </tr>
+              {showShrinkage && (
+                <tr>
+                  <td colSpan={2} className="!p-0">
+                    {shrinkage === null ? (
+                      <p className="px-3 py-2 font-mono text-[11px] text-ink-soft/60">Loading…</p>
+                    ) : shrinkage.rows.length === 0 ? (
+                      <p className="px-3 py-2 font-mono text-[11px] text-ink-soft/60 italic">No shrinkage events in this period.</p>
+                    ) : (
+                      <table className="w-full text-[11px] font-mono border-t border-dashed border-[#d8cdb0]">
+                        <thead>
+                          <tr className="bg-[#f5f0e8]">
+                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Date</th>
+                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Ingredient</th>
+                            <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Shortfall</th>
+                            <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Cost</th>
+                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-dashed divide-[#e8dfc8]">
+                          {shrinkage.rows.map((r, i) => (
+                            <tr key={i} className="bg-paper">
+                              <td className="px-3 py-1.5 text-ink-soft">{r.date}</td>
+                              <td className="px-3 py-1.5 text-ink">{r.ingredient}</td>
+                              <td className="px-3 py-1.5 text-right text-chili">
+                                −{Number(r.shortfall_qty).toFixed(2)} {r.base_unit}
+                              </td>
+                              <td className="px-3 py-1.5 text-right text-chili">− {bdt(r.cost)}</td>
+                              <td className="px-3 py-1.5 text-ink-soft capitalize">
+                                {r.reason ? r.reason.toLowerCase().replace(/_/g, " ") : "—"}
+                                {r.note && <span className="ml-1 text-ink-soft/50">· {r.note}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </td>
+                </tr>
+              )}
               <tr className="section"><td colSpan={2}>Operating costs</td></tr>
               <tr><td>Fixed (rent, salary)</td><td className="neg">− {bdt(pnl.fixed_costs)}</td></tr>
               <tr><td>Variable (gas, oil)</td><td className="neg">− {bdt(pnl.variable_costs)}</td></tr>
@@ -366,7 +448,7 @@ export default function ReportsPage() {
                   <th className="text-right">Units</th>
                   <th className="text-right">Gross</th>
                   <th className="text-right">Commission</th>
-                  <th className="text-right">Discount</th>
+                  <th className="text-right">Platform discount</th>
                   <th className="text-right">Net revenue</th>
                   <th className="text-right">Share</th>
                 </tr>
@@ -380,8 +462,8 @@ export default function ReportsPage() {
                     <td className="text-right font-mono text-chili">
                       {Number(c.commission) > 0 ? `− ${bdt(c.commission)}` : "—"}
                     </td>
-                    <td className="text-right font-mono text-chili">
-                      {Number(c.discount) > 0 ? `− ${bdt(c.discount)}` : "—"}
+                    <td className="text-right font-mono text-ink-soft">
+                      {Number(c.platform_discount) > 0 ? bdt(c.platform_discount) : "—"}
                     </td>
                     <td className="text-right font-mono font-semibold">{bdt(c.net_revenue)}</td>
                     <td className="text-right font-mono text-ink-soft">

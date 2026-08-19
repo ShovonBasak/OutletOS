@@ -14,7 +14,6 @@ interface CashInfo {
 
 interface HomeSummary {
   allow_staff_date_selection: boolean;
-  display_stock: { raw_stock_value: string; raw_category_count: number; raw_stock_out_count: number };
   stock_in: { draft_item_count: number | null; latest_status: string } | null;
   closing: { id: number; status: string; total_sale: string; has_flag: boolean } | null;
 }
@@ -25,9 +24,6 @@ export default function StaffHome() {
   const outlet = user?.outlet ?? 1;
 
   const [allowDateSelection, setAllowDateSelection] = useState(false);
-  const [rawStockValue, setRawStockValue] = useState<string | null>(null);
-  const [rawCategoryCount, setRawCategoryCount] = useState(0);
-  const [rawStockOutCount, setRawStockOutCount] = useState(0);
   const [stockInStatus, setStockInStatus] = useState("None today");
   const [closingStatus, setClosingStatus] = useState("Not started");
   const [rawClosingStatus, setRawClosingStatus] = useState<string | null>(null);
@@ -51,9 +47,6 @@ export default function StaffHome() {
       if (summaryRes.status === "fulfilled") {
         const s = summaryRes.value;
         setAllowDateSelection(s.allow_staff_date_selection);
-        setRawStockValue(s.display_stock.raw_stock_value);
-        setRawCategoryCount(s.display_stock.raw_category_count);
-        setRawStockOutCount(s.display_stock.raw_stock_out_count);
         if (s.stock_in) {
           const { draft_item_count, latest_status } = s.stock_in;
           if (draft_item_count !== null) {
@@ -290,26 +283,16 @@ export default function StaffHome() {
 
       {/* Quick action tiles — always visible */}
       <div className="tilegrid">
-        <Link href="/staff/stock" className="tile">
-          <div className="flex items-start justify-between gap-1">
-            <span className="n">{rawCategoryCount}</span>
-            <div className="flex flex-col items-end gap-0.5 pt-0.5">
-              {Number(rawStockValue) > 0 && (
-                <span className="font-mono text-[10px] text-ink-soft leading-tight">{bdt(rawStockValue!)}</span>
-              )}
-              {rawStockOutCount > 0 && (
-                <span className="font-mono text-[9px] text-chili leading-tight">{rawStockOutCount} out</span>
-              )}
-            </div>
-          </div>
-          <span className="l">Stock overview</span>
-        </Link>
         <Link href="/staff/closing/history" className="tile">
           <span className="n">≡</span>
           <span className="l">Closing history</span>
         </Link>
         {(status === "IN_PROGRESS" || status === "CLOSED") && (
           <>
+            <Link href="/staff/closing/stock" className="tile">
+              <span className="n">▦</span>
+              <span className="l">Stock summary</span>
+            </Link>
             <Link href="/staff/packaging" className="tile">
               <span className="n">▦</span>
               <span className="l">Packaging &amp; supplies</span>

@@ -65,6 +65,8 @@ from reports.views import (
     correct_sells,
     rebuild_rawstock_api,
     purchase_summary,
+    shrinkage_detail,
+    day_overview,
 )
 
 router = DefaultRouter()
@@ -126,6 +128,8 @@ urlpatterns = [
     path("api/reports/correct-sells/", correct_sells, name="correct_sells"),
     path("api/reports/rebuild-rawstock/", rebuild_rawstock_api, name="rebuild_rawstock_api"),
     path("api/reports/purchase-summary/", purchase_summary, name="purchase_summary"),
+    path("api/reports/shrinkage-detail/", shrinkage_detail, name="shrinkage_detail"),
+    path("api/reports/day-overview/", day_overview, name="day_overview"),
     path("api/", include(router.urls)),
 ]
 

@@ -31,6 +31,8 @@ from sales.models import SalesChannel
 from sales.pricing import resolve_price
 from stock.models import (
     DayStartStockCheck,
+    DisplayStock,
+    OperatingDay,
     PeriodicStockCheck,
     PrepSource,
     PreparationLog,
@@ -161,20 +163,16 @@ def compute_pnl(start, end, outlet=None):
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
     )
-    discounts = DailyChannelDiscount.objects.filter(
-        daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
-    )
     expenses = Expense.objects.filter(date__gte=start, date__lte=end).select_related("category")
     other_incomes = OtherIncome.objects.filter(date__gte=start, date__lte=end)
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
-        discounts = discounts.filter(daily_closing__outlet_id=outlet)
         expenses = expenses.filter(outlet_id=outlet)
         other_incomes = other_incomes.filter(outlet_id=outlet)
 
-    gross_net = sum((l.net_amount for l in lines), Decimal("0"))
-    discount_total = sum((d.discount_amount for d in discounts), Decimal("0"))
-    revenue = gross_net - discount_total
+    # Revenue = Σ net_amount (gross already reduced by commission_rate per channel).
+    # DailyChannelDiscount is retained for reconciliation but not deducted from P&L.
+    revenue = sum((l.net_amount for l in lines), Decimal("0"))
     cogs = _cogs(outlet, start, end, cost_cache)
     gross_profit = revenue - cogs
     wastage = _wastage_cost(outlet, start, end, cost_cache)
@@ -193,6 +191,7 @@ def compute_pnl(start, end, outlet=None):
         gross_profit
         - wastage
         - shrinkage
+        - packaging
         - sum(by_type.values(), Decimal("0"))
         + other_income_total
     )
@@ -407,8 +406,9 @@ def channel_breakdown(request):
             "units_sold": c["units_sold"],
             "gross_revenue": c["gross_revenue"].quantize(Decimal("0.01")),
             "commission": c["commission"].quantize(Decimal("0.01")),
-            "discount": c["discount"].quantize(Decimal("0.01")),
-            "net_revenue": (c["net_revenue"] - c["discount"]).quantize(Decimal("0.01")),
+            "platform_discount": c["discount"].quantize(Decimal("0.01")),
+            # net_revenue = gross − commission only; platform_discount is informational
+            "net_revenue": c["net_revenue"].quantize(Decimal("0.01")),
         })
 
     return Response({"start": start, "end": end, "rows": rows})
@@ -483,21 +483,90 @@ def daily_trend(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def dashboard_summary(request):
-    """Owner home: today's P&L + pending review counts."""
-    today = timezone.localdate()
+    """Analytics dashboard: P&L summary + daily trend with COGS + top products + channel split.
+    ?start=YYYY-MM-DD&end=YYYY-MM-DD&outlet=1  (default: last 30 days)
+    """
+    from datetime import date as date_cls, timedelta
     outlet = request.query_params.get("outlet")
+    today_d = timezone.localdate()
 
-    pending_stock = StockInRecord.objects.filter(status=StockInStatus.PENDING)
-    awaiting = DailyClosing.objects.filter(status="SUBMITTED")
+    end_d = date_cls.fromisoformat(request.query_params["end"]) if request.query_params.get("end") else today_d
+    start_d = date_cls.fromisoformat(request.query_params["start"]) if request.query_params.get("start") else end_d - timedelta(days=29)
+    start, end = start_d.isoformat(), end_d.isoformat()
+
+    lines_qs = (
+        DailyClosingSalesLine.objects.filter(
+            daily_closing__closing_date__gte=start,
+            daily_closing__closing_date__lte=end,
+        )
+        .select_related("product", "daily_closing", "channel")
+    )
     if outlet:
-        pending_stock = pending_stock.filter(outlet_id=outlet)
-        awaiting = awaiting.filter(outlet_id=outlet)
+        lines_qs = lines_qs.filter(daily_closing__outlet_id=outlet)
+
+    cost_cache: dict = {}
+    by_date: dict = {}
+    by_product: dict = {}
+    by_channel: dict = {}
+
+    for line in lines_qs:
+        d = str(line.daily_closing.closing_date)
+        unit_cost = _product_unit_cost(line.product, cost_cache)
+        line_cogs = unit_cost * Decimal(line.quantity_sold)
+
+        day = by_date.setdefault(d, {"date": d, "units_sold": 0, "revenue": Decimal("0"), "cogs": Decimal("0")})
+        day["units_sold"] += line.quantity_sold
+        day["revenue"] += line.net_amount
+        day["cogs"] += line_cogs
+
+        pid = line.product_id
+        prod = by_product.setdefault(pid, {
+            "product_name": line.product.name, "category": line.product.category,
+            "units_sold": 0, "revenue": Decimal("0"), "cogs": Decimal("0"),
+        })
+        prod["units_sold"] += line.quantity_sold
+        prod["revenue"] += line.net_amount
+        prod["cogs"] += line_cogs
+
+        ch_name = line.channel.name if line.channel else "Walk-in"
+        ch = by_channel.setdefault(ch_name, {"channel": ch_name, "units_sold": 0, "revenue": Decimal("0"), "gross_revenue": Decimal("0")})
+        ch["units_sold"] += line.quantity_sold
+        ch["revenue"] += line.net_amount
+        ch["gross_revenue"] += line.gross_amount
+
+    q, q1 = Decimal("0.01"), Decimal("0.1")
+
+    daily = [
+        {"date": k, "units_sold": v["units_sold"],
+         "revenue": str(v["revenue"].quantize(q)), "cogs": str(v["cogs"].quantize(q))}
+        for k, v in sorted(by_date.items())
+    ]
+
+    top_products = []
+    for p in sorted(by_product.values(), key=lambda x: -x["revenue"])[:10]:
+        gp = p["revenue"] - p["cogs"]
+        margin = (gp / p["revenue"] * 100) if p["revenue"] else Decimal("0")
+        top_products.append({
+            "product_name": p["product_name"], "category": p["category"],
+            "units_sold": p["units_sold"],
+            "revenue": str(p["revenue"].quantize(q)), "cogs": str(p["cogs"].quantize(q)),
+            "gross_profit": str(gp.quantize(q)), "margin_pct": str(margin.quantize(q1)),
+        })
+
+    channels = []
+    for ch, v in sorted(by_channel.items(), key=lambda x: -x[1]["revenue"]):
+        channels.append({
+            "channel": ch, "units_sold": v["units_sold"],
+            "revenue": str(v["revenue"].quantize(q)),
+            "commission": str((v["gross_revenue"] - v["revenue"]).quantize(q)),
+        })
 
     return Response({
-        "date": today,
-        "pnl_today": compute_pnl(today.isoformat(), today.isoformat(), outlet),
-        "pending_stock_ins": pending_stock.count(),
-        "closings_awaiting_review": awaiting.count(),
+        "start": start, "end": end,
+        "pnl": compute_pnl(start, end, outlet),
+        "daily": daily,
+        "top_products": top_products,
+        "channels": channels,
     })
 
 
@@ -862,6 +931,58 @@ def correct_sells(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def shrinkage_detail(request):
+    """Per-day, per-ingredient shrinkage breakdown for the period.
+
+    Only shortfalls (discrepancy_qty > 0) are returned — surpluses are a
+    counting anomaly and not a cost.
+
+    ?start=&end=&outlet=
+    """
+    start, end = _default_range(request)
+    outlet = request.query_params.get("outlet")
+
+    checks = (
+        DayStartStockCheck.objects
+        .filter(operating_day__date__gte=start, operating_day__date__lte=end)
+        .select_related("ingredient", "operating_day")
+        .order_by("operating_day__date", "ingredient__name")
+    )
+    if outlet:
+        checks = checks.filter(operating_day__outlet_id=outlet)
+
+    rows = []
+    total = Decimal("0")
+    for chk in checks:
+        shortfall = chk.discrepancy_qty
+        if shortfall <= 0:
+            continue
+        cpu = chk.ingredient.cost_per_base_unit or Decimal("0")
+        cost = (shortfall * cpu).quantize(Decimal("0.01"))
+        total += cost
+        rows.append({
+            "date": str(chk.operating_day.date),
+            "ingredient": chk.ingredient.name,
+            "base_unit": chk.ingredient.base_unit,
+            "system_qty": str(chk.system_carried_qty),
+            "confirmed_qty": str(chk.confirmed_qty),
+            "shortfall_qty": str(shortfall),
+            "cost_per_unit": str(cpu),
+            "cost": str(cost),
+            "reason": chk.discrepancy_reason,
+            "note": chk.note,
+        })
+
+    return Response({
+        "start": start,
+        "end": end,
+        "total": str(total.quantize(Decimal("0.01"))),
+        "rows": rows,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def purchase_summary(request):
     """Total approved purchase cost for the period (what was actually paid to suppliers).
 
@@ -1057,3 +1178,210 @@ def rebuild_rawstock_api(request):
 
     result = _do_rebuild(outlet)
     return Response({"ok": True, **result})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def day_overview(request):
+    """Owner's consolidated day view: operating-day status, stock-in, prep log,
+    display stock, day-start discrepancies, closing snapshot, and today's P&L.
+    ?outlet=1&date=YYYY-MM-DD (date defaults to today)."""
+    import datetime
+    from django.db.models import Count
+
+    outlet = request.query_params.get("outlet", "1")
+    date_str = request.query_params.get("date")
+    try:
+        date = datetime.date.fromisoformat(date_str) if date_str else timezone.localdate()
+    except ValueError:
+        date = timezone.localdate()
+
+    # ── Operating day ──────────────────────────────────────────────────────
+    op_day = OperatingDay.objects.filter(outlet_id=outlet, date=date).first()
+    op_day_data = None
+    if op_day:
+        op_day_data = {
+            "id": op_day.id,
+            "status": op_day.status,
+            "started_at": op_day.started_at.isoformat() if op_day.started_at else None,
+            "stock_confirmed_at": op_day.stock_confirmed_at.isoformat() if op_day.stock_confirmed_at else None,
+            "carry_forward_confirmed_at": op_day.carry_forward_confirmed_at.isoformat() if op_day.carry_forward_confirmed_at else None,
+        }
+
+    # ── Day-start stock checks ─────────────────────────────────────────────
+    def _display_name(ingredient):
+        alias = next((a for a in ingredient.aliases.all() if a.is_active), None)
+        return alias.alias_text if alias else ingredient.name
+
+    day_start_checks = []
+    if op_day:
+        checks = list(
+            DayStartStockCheck.objects.filter(operating_day=op_day)
+            .select_related("ingredient")
+            .prefetch_related("ingredient__aliases")
+        )
+        for chk in sorted(checks, key=lambda c: _display_name(c.ingredient).lower()):
+            disc = chk.discrepancy_qty
+            cpu = chk.ingredient.cost_per_base_unit or Decimal("0")
+            shrinkage_cost = (max(disc, Decimal("0")) * cpu).quantize(Decimal("0.01"))
+            day_start_checks.append({
+                "ingredient": _display_name(chk.ingredient),
+                "base_unit": chk.ingredient.base_unit,
+                "system_qty": str(chk.system_carried_qty),
+                "confirmed_qty": str(chk.confirmed_qty),
+                "discrepancy_qty": str(disc),
+                "discrepancy_reason": chk.discrepancy_reason,
+                "note": chk.note,
+                "shrinkage_cost": str(shrinkage_cost),
+            })
+
+    # ── Stock-in records for this date ────────────────────────────────────
+    stock_ins_qs = StockInRecord.objects.filter(
+        outlet_id=outlet, stock_in_date=date
+    ).annotate(item_count=Count("items")).select_related("submitted_by").order_by("-id")
+    stock_ins = [
+        {
+            "id": r.id,
+            "status": r.status,
+            "item_count": r.item_count,
+            "submitted_by_name": r.submitted_by.name if r.submitted_by else "",
+            "notes": r.notes,
+            "invoice_number": r.invoice_number,
+        }
+        for r in stock_ins_qs
+    ]
+
+    # ── Prep logs for this date ───────────────────────────────────────────
+    prep_logs_qs = PreparationLog.objects.filter(
+        outlet_id=outlet, op_date=date
+    ).select_related("product").order_by("timestamp")
+    prep_logs = []
+    for p in prep_logs_qs:
+        price_obj = p.product.active_price(as_of=date)
+        selling_price = price_obj.price if price_obj else Decimal("0")
+        prep_logs.append({
+            "id": p.id,
+            "product_name": p.product.name,
+            "product_category": p.product.category,
+            "source": p.source,
+            "prep_unit": p.prep_unit,
+            "packs_used": str(p.packs_used) if p.packs_used is not None else None,
+            "pieces_prepared": p.pieces_prepared,
+            "wastage_pieces": p.wastage_pieces,
+            "timestamp": p.timestamp.isoformat(),
+            "selling_price": str(selling_price),
+        })
+
+    # ── Current display stock (prepared + ready-to-sell) ─────────────────
+    from catalog.models import Recipe
+    # Pre-fetch purchase cost per non-prep product (sum of recipe lines × ingredient cost).
+    _display_qs = list(
+        DisplayStock.objects.filter(outlet_id=outlet)
+        .select_related("product")
+        .order_by("product__category", "product__name")
+    )
+    non_prep_ids = [s.product_id for s in _display_qs if not s.product.requires_preparation]
+    _recipe_cost: dict = {}
+    for r in (
+        Recipe.objects.filter(product_id__in=non_prep_ids)
+        .select_related("ingredient")
+        .prefetch_related("ingredient__pack_definitions")
+    ):
+        cost = (r.ingredient.cost_per_base_unit or Decimal("0")) * r.quantity_per_unit
+        _recipe_cost[r.product_id] = _recipe_cost.get(r.product_id, Decimal("0")) + cost
+
+    display_stock = []
+    for s in _display_qs:
+        if s.pieces_available <= 0:
+            continue
+        price_obj = s.product.active_price(as_of=date)
+        selling_price = price_obj.price if price_obj else Decimal("0")
+        purchase_price = _recipe_cost.get(s.product_id, Decimal("0")) if not s.product.requires_preparation else None
+        display_stock.append({
+            "product_name": s.product.name,
+            "product_category": s.product.category,
+            "pieces_available": s.pieces_available,
+            "requires_preparation": s.product.requires_preparation,
+            "selling_price": str(selling_price),
+            "purchase_price": str(purchase_price) if purchase_price is not None else None,
+        })
+
+    # ── Raw ingredient stock (RECIPE_LINKED, qty > 0) ─────────────────────
+    # Exclude ingredients that back non-preparation (beverage/ready) products —
+    # those already appear in the "ready to sell" section via DisplayStock.
+    ready_ingredient_ids = set(
+        Recipe.objects.filter(product__requires_preparation=False)
+        .values_list("ingredient_id", flat=True)
+    )
+    _raw_qs = [
+        rs for rs in RawStock.objects.filter(
+            outlet_id=outlet, ingredient__tracking_mode="RECIPE_LINKED"
+        )
+        .select_related("ingredient")
+        .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
+        if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
+    ]
+    raw_stock = [
+        {
+            "ingredient": _display_name(rs.ingredient),
+            "base_unit": rs.ingredient.base_unit,
+            "quantity_available": str(rs.quantity_available),
+            "cost_per_base_unit": str(rs.ingredient.cost_per_base_unit or Decimal("0")),
+        }
+        for rs in sorted(_raw_qs, key=lambda r: _display_name(r.ingredient).lower())
+    ]
+
+    # ── Closing snapshot ──────────────────────────────────────────────────
+    closing_data = None
+    closing = (
+        DailyClosing.objects.filter(outlet_id=outlet, closing_date=date)
+        .prefetch_related("stock_counts", "sales_lines__channel", "channel_discounts", "payments")
+        .first()
+    )
+    if closing:
+        flagged_counts = [sc for sc in closing.stock_counts.all() if sc.flag]
+        closing_data = {
+            "id": closing.id,
+            "status": closing.status,
+            "total_sale": str(closing.total_sale),
+            "channel_day_net_revenue": str(closing.channel_day_net_revenue),
+            "online_payments": str(closing.online_payments),
+            "total_offline_sales": str(closing.total_offline_sales),
+            "computed_cash": str(closing.computed_cash),
+            "has_flag": closing.has_flag,
+            "flagged_products": [
+                {
+                    "product_name": fc.product_name,
+                    "derived_walkin_sold": fc.derived_walkin_sold,
+                }
+                for fc in flagged_counts
+            ],
+            "payments": [
+                {
+                    "account_name": p.account.name,
+                    "is_primary_cash": p.account.is_primary_cash,
+                    "amount": str(p.amount),
+                }
+                for p in closing.payments.select_related("account")
+            ],
+        }
+
+    # ── Today's P&L ───────────────────────────────────────────────────────
+    pnl = compute_pnl(date, date, outlet)
+
+    return Response({
+        "date": str(date),
+        "operating_day": op_day_data,
+        "day_start_checks": day_start_checks,
+        "stock_ins": stock_ins,
+        "prep_logs": prep_logs,
+        "display_stock": display_stock,
+        "raw_stock": raw_stock,
+        "closing": closing_data,
+        "pnl": {
+            "revenue": str(pnl["revenue"]),
+            "net_profit": str(pnl["net_profit"]),
+            "cogs": str(pnl["cogs"]),
+            "gross_profit": str(pnl["gross_profit"]),
+        },
+    })

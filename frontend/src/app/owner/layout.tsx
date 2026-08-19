@@ -11,6 +11,7 @@ import {
   activeGroupFor,
   mobileTabFor,
   titleFor,
+  type MobileTab,
 } from "./nav";
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
@@ -117,19 +118,28 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         </div>
       </div>
 
-      {/* Mobile bottom tabs — each opens a hub screen */}
-      <nav className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome md:hidden">
-        {OWNER_MOBILE_TABS.map((t) => (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={`flex-1 py-3.5 text-center font-mono text-[10px] uppercase tracking-wide ${
-              activeMobileTab === t.href ? "text-gold" : "text-white/50"
-            }`}
-          >
-            {t.label}
-          </Link>
-        ))}
+      {/* Mobile bottom tabs — large tap targets with icon + label */}
+      <nav className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome md:hidden"
+           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {OWNER_MOBILE_TABS.map((t: MobileTab) => {
+          const active = activeMobileTab === t.href;
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-3 min-h-[56px] transition-colors ${
+                active ? "text-gold" : "text-white/50"
+              }`}
+            >
+              <span className={`text-[18px] leading-none ${active ? "text-gold" : "text-white/60"}`}>
+                {t.icon}
+              </span>
+              <span className={`font-mono text-[9px] uppercase tracking-widest ${active ? "text-gold" : "text-white/40"}`}>
+                {t.label}
+              </span>
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

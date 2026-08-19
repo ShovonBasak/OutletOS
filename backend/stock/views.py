@@ -1178,7 +1178,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             .first()
         )
         since = prev.checked_at if prev else None
-        stock_in = stock_in_since(outlet, ingredient, since) if since else Decimal("0")
+        stock_in = stock_in_since(outlet, ingredient, since)
         prev_qty = prev.counted_qty if prev else Decimal("0")
         consumed = prev_qty + stock_in - counted_qty
         return PeriodicStockCheck.objects.create(
