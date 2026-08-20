@@ -35,7 +35,7 @@ export default function TeamPage() {
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td className="capitalize">{u.role.toLowerCase()}</td>
-                <td>{u.role === "OWNER" ? "All" : outletName(u.outlet)}</td>
+                <td>{u.role === "OWNER" || u.role === "ADMIN" ? "All" : outletName(u.outlet)}</td>
                 <td>
                   <Stamp status={u.is_active ? "Active" : "Inactive"} flat />
                 </td>

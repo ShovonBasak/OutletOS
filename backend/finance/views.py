@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsOwner, IsOwnerOrReadOnly
+from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
 from .models import (
     FinancialAccount, AccountTransaction, AccountTransfer,
     CapitalTransaction, AccountBalanceCheck,
@@ -22,14 +22,14 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
-        if self.request.user.is_owner:
+        if self.request.user.is_owner_or_admin:
             return FinancialAccountSerializer
         return FinancialAccountNameSerializer
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [IsAuthenticated()]
-        return [IsOwner()]
+        return [IsAdmin()]
 
     def get_queryset(self):
         qs = FinancialAccount.objects.all()
@@ -37,7 +37,7 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
         # inactive accounts can be fetched and reactivated — only filter on list.
         if self.action != "list":
             return qs
-        if not self.request.user.is_owner:
+        if not self.request.user.is_owner_or_admin:
             return qs.filter(is_active=True)
         if self.request.query_params.get("is_active") != "all":
             return qs.filter(is_active=True)
@@ -49,7 +49,7 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
             FinancialAccount.objects.exclude(pk=kwargs["pk"]).update(is_primary_cash=False)
         return super().partial_update(request, *args, **kwargs)
 
-    @action(detail=False, methods=["get"], permission_classes=[IsOwner])
+    @action(detail=False, methods=["get"], permission_classes=[IsOwnerOrAdmin])
     def summary(self, request):
         """All active accounts with current balances — owner dashboard."""
         accounts = FinancialAccount.objects.filter(is_active=True)
@@ -64,7 +64,7 @@ class AccountTransactionViewSet(viewsets.ModelViewSet):
     """
     queryset = AccountTransaction.objects.select_related("account", "entered_by")
     serializer_class = AccountTransactionSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsOwnerOrAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -86,7 +86,7 @@ class AccountTransactionViewSet(viewsets.ModelViewSet):
 class AccountTransferViewSet(viewsets.ModelViewSet):
     queryset = AccountTransfer.objects.select_related("from_account", "to_account", "entered_by")
     serializer_class = AccountTransferSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsOwnerOrAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -130,7 +130,7 @@ class AccountTransferViewSet(viewsets.ModelViewSet):
 class CapitalTransactionViewSet(viewsets.ModelViewSet):
     queryset = CapitalTransaction.objects.select_related("account", "entered_by")
     serializer_class = CapitalTransactionSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsOwnerOrAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -166,7 +166,7 @@ class CapitalTransactionViewSet(viewsets.ModelViewSet):
 class AccountBalanceCheckViewSet(viewsets.ModelViewSet):
     queryset = AccountBalanceCheck.objects.select_related("account", "checked_by")
     serializer_class = AccountBalanceCheckSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsOwnerOrAdmin]
 
     def perform_create(self, serializer):
         account = serializer.validated_data["account"]

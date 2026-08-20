@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwnerOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly
 from .models import (
     ComboComponent,
     Ingredient,
@@ -38,7 +38,7 @@ from .serializers import (
 class OutletViewSet(viewsets.ModelViewSet):
     queryset = Outlet.objects.all()
     serializer_class = OutletSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -47,7 +47,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         "components", "recipes__ingredient", "product_recipe_components__component_product", "prices"
     )
     serializer_class = ProductSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("expand") != "full":
@@ -85,7 +85,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             qs = Product.objects.all().prefetch_related("prices")
 
         if not prep:
-            if not (self.request.user.is_owner and p.get("include_inactive") == "1"):
+            if not (self.request.user.is_owner_or_admin and p.get("include_inactive") == "1"):
                 qs = qs.filter(is_active=True)
             ptype = p.get("product_type")
             if ptype:
@@ -214,13 +214,13 @@ class ProductViewSet(viewsets.ModelViewSet):
 class ComboComponentViewSet(viewsets.ModelViewSet):
     queryset = ComboComponent.objects.select_related("combo_product", "component_product")
     serializer_class = ComboComponentSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class IngredientViewSet(viewsets.ModelViewSet):
     queryset = Ingredient.objects.prefetch_related("aliases", "pack_definitions")
     serializer_class = IngredientSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset().filter(is_active=True)
@@ -330,7 +330,7 @@ class IngredientViewSet(viewsets.ModelViewSet):
 class SupplierProductAliasViewSet(viewsets.ModelViewSet):
     queryset = SupplierProductAlias.objects.select_related("ingredient")
     serializer_class = SupplierProductAliasSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -343,7 +343,7 @@ class SupplierProductAliasViewSet(viewsets.ModelViewSet):
 class PackDefinitionViewSet(viewsets.ModelViewSet):
     queryset = PackDefinition.objects.select_related("ingredient")
     serializer_class = PackDefinitionSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -366,7 +366,7 @@ class PackDefinitionViewSet(viewsets.ModelViewSet):
 class RecipeViewSet(viewsets.ModelViewSet):
     queryset = Recipe.objects.select_related("product", "ingredient")
     serializer_class = RecipeSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -379,7 +379,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
 class RecipeProductComponentViewSet(viewsets.ModelViewSet):
     queryset = RecipeProductComponent.objects.select_related("product", "component_product")
     serializer_class = RecipeProductComponentSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -399,7 +399,7 @@ class ProductPriceViewSet(viewsets.ModelViewSet):
 
     queryset = ProductPrice.objects.select_related("product", "changed_by").order_by("-effective_from")
     serializer_class = ProductPriceSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()

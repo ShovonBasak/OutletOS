@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwnerOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly
 from catalog.models import Product
 from .models import (
     ChannelMenuMap,
@@ -39,7 +39,7 @@ def _recompute_channel_lines(channel):
 class SalesChannelViewSet(viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -65,19 +65,19 @@ class SalesChannelViewSet(viewsets.ModelViewSet):
 class ChannelPromotionViewSet(viewsets.ModelViewSet):
     queryset = ChannelPromotion.objects.all()
     serializer_class = ChannelPromotionSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class OrderLevelOfferViewSet(viewsets.ModelViewSet):
     queryset = OrderLevelOffer.objects.all()
     serializer_class = OrderLevelOfferSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class ChannelMenuMapViewSet(viewsets.ModelViewSet):
     queryset = ChannelMenuMap.objects.select_related("channel", "product")
     serializer_class = ChannelMenuMapSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()

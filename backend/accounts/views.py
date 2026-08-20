@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import PushSubscription, User
-from .permissions import IsOwner
+from .permissions import IsAdmin
 from .serializers import RoleTokenObtainPairSerializer, UserSerializer
 
 
@@ -19,7 +19,7 @@ class RoleTokenObtainPairView(TokenObtainPairView):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [IsAdmin]
 
 
 class MeView(APIView):

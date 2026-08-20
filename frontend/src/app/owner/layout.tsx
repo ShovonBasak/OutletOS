@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import {
-  OWNER_NAV,
+  navFor,
   OWNER_MOBILE_TABS,
   activeGroupFor,
   mobileTabFor,
@@ -15,9 +15,11 @@ import {
 } from "./nav";
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
-  const { loading } = useRequireRole("OWNER");
+  const { loading, isAdmin } = useRequireRole(["OWNER", "ADMIN"]);
   const { user, logout } = useAuth();
   const pathname = usePathname();
+
+  const nav = navFor(isAdmin);
 
   // Collapsible accordion: groups start collapsed, the active group auto-opens.
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -43,6 +45,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     setOpen((prev) => (prev.has(group) ? new Set() : new Set([group])));
 
   const activeMobileTab = mobileTabFor(pathname);
+  const roleLabel = isAdmin ? "ADMIN" : "OWNER";
 
   return (
     <div className="flex min-h-screen flex-col bg-paper-dim md:items-center md:py-8">
@@ -50,11 +53,11 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
       <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper md:hidden">
         <Brand />
         <button onClick={logout} className="rounded-full border border-white/20 px-2.5 py-1 font-mono text-[10px] text-white/70">
-          OWNER · exit
+          {roleLabel} · exit
         </button>
       </header>
 
-      {/* Desktop shell card — mirrors the sitemap's .desktop layout */}
+      {/* Desktop shell card */}
       <div className="desktop max-w-[960px]">
         {/* Grouped, collapsible sidebar (accordion) */}
         <aside className="sidebar hidden md:flex">
@@ -63,9 +66,9 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
             <span className="font-display text-[13px] font-bold text-gold">{user?.outlet_name ?? "CP FIVE STAR"}</span>
           </div>
           <nav className="flex flex-1 flex-col overflow-y-auto">
-            {OWNER_NAV.map((g) =>
+            {nav.map((g) =>
               g.group === "Overview" ? (
-                // Dashboard is a plain top-level link, not a collapsible group.
+                // Overview items are plain top-level links, not collapsible.
                 g.items.map((n) => (
                   <Link
                     key={n.href}
@@ -118,7 +121,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         </div>
       </div>
 
-      {/* Mobile bottom tabs — large tap targets with icon + label */}
+      {/* Mobile bottom tabs */}
       <nav className="fixed bottom-0 left-0 flex w-full border-t border-white/10 bg-chrome md:hidden"
            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
         {OWNER_MOBILE_TABS.map((t: MobileTab) => {

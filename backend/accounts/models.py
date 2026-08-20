@@ -5,6 +5,7 @@ from django.db import models
 class Role(models.TextChoices):
     STAFF = "STAFF", "Staff"
     OWNER = "OWNER", "Owner"
+    ADMIN = "ADMIN", "Admin"
 
 
 class UserManager(BaseUserManager):
@@ -27,7 +28,7 @@ class UserManager(BaseUserManager):
         return self._create_user(phone, password, **extra)
 
     def create_superuser(self, phone, password=None, **extra):
-        extra.setdefault("role", Role.OWNER)
+        extra.setdefault("role", Role.ADMIN)
         extra.setdefault("is_staff", True)
         extra.setdefault("is_superuser", True)
         return self._create_user(phone, password, **extra)
@@ -58,6 +59,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def is_owner(self):
         return self.role == Role.OWNER
+
+    @property
+    def is_admin(self):
+        return self.role == Role.ADMIN
+
+    @property
+    def is_owner_or_admin(self):
+        return self.role in (Role.OWNER, Role.ADMIN)
 
     @property
     def is_staff_role(self):

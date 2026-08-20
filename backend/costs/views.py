@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 
-from accounts.permissions import IsOwnerOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
 from .models import CostCategory, Expense
 from .serializers import CostCategorySerializer, ExpenseSerializer
 
@@ -8,7 +8,7 @@ from .serializers import CostCategorySerializer, ExpenseSerializer
 class CostCategoryViewSet(viewsets.ModelViewSet):
     queryset = CostCategory.objects.all()
     serializer_class = CostCategorySerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class ExpenseViewSet(viewsets.ModelViewSet):

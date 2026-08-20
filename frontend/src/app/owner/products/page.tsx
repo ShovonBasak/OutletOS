@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { bdt } from "@/lib/format";
 import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Paginated, Product } from "@/lib/types";
 
 export default function ProductsPage() {
+  const { isAdmin } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -116,38 +118,48 @@ export default function ProductsPage() {
                 <td>{p.name}</td>
                 <td className="capitalize">{p.product_type.toLowerCase()}</td>
                 <td>
-                  {catFlash?.id === p.id ? (
-                    <span className={`font-mono text-[11px] ${catFlash.ok ? "text-leaf-deep" : "text-chili"}`}>
-                      {catFlash.ok ? "✓ saved" : "✗ error"}
-                    </span>
+                  {isAdmin ? (
+                    catFlash?.id === p.id ? (
+                      <span className={`font-mono text-[11px] ${catFlash.ok ? "text-leaf-deep" : "text-chili"}`}>
+                        {catFlash.ok ? "✓ saved" : "✗ error"}
+                      </span>
+                    ) : (
+                      <select
+                        className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus:border-chrome disabled:opacity-40"
+                        value={p.category}
+                        disabled={savingCat === p.id}
+                        onChange={(e) => changeCategory(p, e.target.value)}
+                      >
+                        {PRODUCT_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    )
                   ) : (
-                    <select
-                      className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-0.5 font-mono text-[11px] text-ink outline-none focus:border-chrome disabled:opacity-40"
-                      value={p.category}
-                      disabled={savingCat === p.id}
-                      onChange={(e) => changeCategory(p, e.target.value)}
-                    >
-                      {PRODUCT_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
+                    <span className="font-mono text-[11px] text-ink">{p.category}</span>
                   )}
                 </td>
                 <td className="font-mono">{bdt(p.selling_price)}</td>
                 <td>
                   {p.product_type === "SINGLE" ? (
-                    <button
-                      disabled={toggling === p.id}
-                      onClick={() => togglePrep(p)}
-                      className={`font-mono text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                        p.requires_preparation
-                          ? "border-chrome/40 bg-chrome/10 text-chrome"
-                          : "border-leaf/40 bg-leaf/10 text-leaf-deep"
-                      } disabled:opacity-40`}
-                      title="Click to toggle between Prepared and Direct stock"
-                    >
-                      {p.requires_preparation ? "Prepared" : "Direct stock"}
-                    </button>
+                    isAdmin ? (
+                      <button
+                        disabled={toggling === p.id}
+                        onClick={() => togglePrep(p)}
+                        className={`font-mono text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                          p.requires_preparation
+                            ? "border-chrome/40 bg-chrome/10 text-chrome"
+                            : "border-leaf/40 bg-leaf/10 text-leaf-deep"
+                        } disabled:opacity-40`}
+                        title="Click to toggle between Prepared and Direct stock"
+                      >
+                        {p.requires_preparation ? "Prepared" : "Direct stock"}
+                      </button>
+                    ) : (
+                      <span className={`font-mono text-[10px] ${p.requires_preparation ? "text-chrome" : "text-leaf-deep"}`}>
+                        {p.requires_preparation ? "Prepared" : "Direct stock"}
+                      </span>
+                    )
                   ) : (
                     <span className="font-mono text-[10px] text-ink-soft">—</span>
                   )}
@@ -162,34 +174,40 @@ export default function ProductsPage() {
                         return all.length ? all.join(", ") : "— no recipe";
                       })()}
                 </td>
-                <td>
-                  {p.product_type === "SINGLE" && (
+                {isAdmin && (
+                  <td>
+                    {p.product_type === "SINGLE" && (
+                      <Link
+                        href={`/owner/products/edit-recipe/${p.id}`}
+                        className="font-mono text-[11px] text-gold-deep underline"
+                      >
+                        Edit recipe
+                      </Link>
+                    )}
+                  </td>
+                )}
+                {isAdmin && (
+                  <td>
                     <Link
-                      href={`/owner/products/edit-recipe/${p.id}`}
-                      className="font-mono text-[11px] text-gold-deep underline"
+                      href={`/owner/products/edit/${p.id}`}
+                      className="font-mono text-[11px] text-ink-soft underline"
                     >
-                      Edit recipe
+                      Change price
                     </Link>
-                  )}
-                </td>
-                <td>
-                  <Link
-                    href={`/owner/products/edit/${p.id}`}
-                    className="font-mono text-[11px] text-ink-soft underline"
-                  >
-                    Change price
-                  </Link>
-                </td>
-                <td>
-                  <button
-                    disabled={toggling === p.id}
-                    onClick={() => setActive(p, false)}
-                    className="font-mono text-[10px] px-2 py-0.5 rounded border border-chili/40 text-chili hover:bg-chili/10 disabled:opacity-40 transition-colors"
-                    title="Deactivate this product"
-                  >
-                    Deactivate
-                  </button>
-                </td>
+                  </td>
+                )}
+                {isAdmin && (
+                  <td>
+                    <button
+                      disabled={toggling === p.id}
+                      onClick={() => setActive(p, false)}
+                      className="font-mono text-[10px] px-2 py-0.5 rounded border border-chili/40 text-chili hover:bg-chili/10 disabled:opacity-40 transition-colors"
+                      title="Deactivate this product"
+                    >
+                      Deactivate
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {rows.length === 0 && (
@@ -224,16 +242,18 @@ export default function ProductsPage() {
                     <td className="capitalize">{p.product_type.toLowerCase()}</td>
                     <td>{p.category}</td>
                     <td className="font-mono">{bdt(p.selling_price)}</td>
-                    <td>
-                      <button
-                        disabled={toggling === p.id}
-                        onClick={() => setActive(p, true)}
-                        className="font-mono text-[10px] px-2 py-0.5 rounded border border-leaf/60 text-leaf-deep hover:bg-leaf/10 disabled:opacity-40 transition-colors"
-                        title="Reactivate this product"
-                      >
-                        Reactivate
-                      </button>
-                    </td>
+                    {isAdmin && (
+                      <td>
+                        <button
+                          disabled={toggling === p.id}
+                          onClick={() => setActive(p, true)}
+                          className="font-mono text-[10px] px-2 py-0.5 rounded border border-leaf/60 text-leaf-deep hover:bg-leaf/10 disabled:opacity-40 transition-colors"
+                          title="Reactivate this product"
+                        >
+                          Reactivate
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -245,14 +265,16 @@ export default function ProductsPage() {
       <p className="text-xs text-ink-soft">
         Packs &amp; costs live on ingredients now. Set quantities on Edit recipe; assign ingredients in Setup → Map recipes.
       </p>
-      <div className="flex gap-2">
-        <Link href="/owner/products/add" className="btn btn-ghost w-40">
-          + Add product
-        </Link>
-        <Link href="/owner/setup/map-recipes" className="btn btn-ghost w-40">
-          Map recipes
-        </Link>
-      </div>
+      {isAdmin && (
+        <div className="flex gap-2">
+          <Link href="/owner/products/add" className="btn btn-ghost w-40">
+            + Add product
+          </Link>
+          <Link href="/owner/setup/map-recipes" className="btn btn-ghost w-40">
+            Map recipes
+          </Link>
+        </div>
+      )}
 
       <h2 className="sec mt-2">Combo composition</h2>
       <div className="overflow-x-auto">
@@ -287,9 +309,11 @@ export default function ProductsPage() {
       <p className="text-xs text-ink-soft">
         Selling a combo deducts each component from display stock automatically.
       </p>
-      <Link href="/owner/products/add-combo" className="btn btn-ghost w-40">
-        + Add combo
-      </Link>
+      {isAdmin && (
+        <Link href="/owner/products/add-combo" className="btn btn-ghost w-40">
+          + Add combo
+        </Link>
+      )}
     </div>
   );
 }

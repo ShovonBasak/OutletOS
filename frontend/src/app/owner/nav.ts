@@ -1,11 +1,16 @@
-// Owner desktop nav — grouped exactly per updated-cp-five-star-full-sitemap.html sidebar.
+// Owner/Admin desktop nav.
+// adminOnly: true  — item/group visible only to ADMIN role.
+// Items without adminOnly are visible to both OWNER and ADMIN.
+
 export interface NavItem {
   href: string;
   label: string;
+  adminOnly?: boolean;
 }
 export interface NavGroup {
   group: string;
   items: NavItem[];
+  adminOnly?: boolean;
 }
 
 export const OWNER_NAV: NavGroup[] = [
@@ -26,45 +31,65 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Reports",
     items: [
-      { href: "/owner/stock", label: "Stock levels" },
-      { href: "/owner/sales", label: "Sales report" },
-      { href: "/owner/sell-history", label: "Sell history" },
+      { href: "/owner/stock",            label: "Stock levels" },
+      { href: "/owner/sales",            label: "Sales report" },
+      { href: "/owner/sell-history",     label: "Sell history" },
       { href: "/owner/stock-in-history", label: "Stock in history" },
-      { href: "/owner/settlements", label: "Settlements" },
-      { href: "/owner/pnl", label: "Profit & loss" },
-      { href: "/owner/packaging", label: "Packaging report" },
+      { href: "/owner/settlements",      label: "Settlements" },
+      { href: "/owner/pnl",              label: "Profit & loss" },
+      { href: "/owner/packaging",        label: "Packaging report" },
     ],
   },
   {
     group: "Manage",
     items: [
-      { href: "/owner/sell-corrections", label: "Sell corrections" },
-      { href: "/owner/accounts", label: "Accounts" },
-      { href: "/owner/expenses", label: "Expenses" },
-      { href: "/owner/other-income", label: "Other income" },
-      { href: "/owner/products", label: "Products & recipes" },
-      { href: "/owner/team", label: "Team & outlets" },
+      { href: "/owner/sell-corrections", label: "Sell corrections", adminOnly: true },
+      { href: "/owner/accounts",         label: "Accounts" },
+      { href: "/owner/expenses",         label: "Expenses" },
+      { href: "/owner/other-income",     label: "Other income" },
     ],
   },
   {
     group: "Settings",
     items: [
-      { href: "/owner/settings/outlet", label: "Outlet" },
-      { href: "/owner/settings/channels", label: "Sales channels" },
-      { href: "/owner/settings/pricing", label: "Pricing & promos" },
-      { href: "/owner/settings/menu-mapping", label: "Menu mapping" },
+      { href: "/owner/settings/outlet",          label: "Outlet" },
+      { href: "/owner/settings/channels",        label: "Sales channels" },
+      { href: "/owner/settings/pricing",         label: "Pricing & promos" },
+      { href: "/owner/settings/menu-mapping",    label: "Menu mapping" },
       { href: "/owner/settings/cost-categories", label: "Cost categories" },
     ],
   },
+  // Administration group — visible to Admin only
+  {
+    group: "Administration",
+    adminOnly: true,
+    items: [
+      { href: "/owner/products", label: "Products & recipes" },
+      { href: "/owner/team",     label: "Team & outlets" },
+    ],
+  },
+  // Setup group — Admin only
   {
     group: "Setup",
+    adminOnly: true,
     items: [
-      { href: "/owner/setup/extract", label: "Extract ingredients" },
-      { href: "/owner/setup/import-menu", label: "Import menu" },
-      { href: "/owner/setup/map-recipes", label: "Map recipes" },
+      { href: "/owner/setup/extract",      label: "Extract ingredients" },
+      { href: "/owner/setup/import-menu",  label: "Import menu" },
+      { href: "/owner/setup/map-recipes",  label: "Map recipes" },
     ],
   },
 ];
+
+/** Filter nav groups for a given role, dropping adminOnly entries for OWNER. */
+export function navFor(isAdmin: boolean): NavGroup[] {
+  return OWNER_NAV
+    .filter((g) => !g.adminOnly || isAdmin)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((item) => !item.adminOnly || isAdmin),
+    }))
+    .filter((g) => g.items.length > 0);
+}
 
 // True when pathname is exactly href or is a sub-route under it (requires a
 // "/" boundary so "/owner/stock-in" never matches "/owner/stock-in-history").
@@ -72,7 +97,7 @@ function under(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-// Flattened, longest-href-first so sub-routes resolve to their parent nav item.
+// Flattened all items (all roles), longest-href-first so sub-routes resolve correctly.
 const FLAT = OWNER_NAV.flatMap((g) => g.items).sort((a, b) => b.href.length - a.href.length);
 
 // Titles for sub-pages that aren't in the sidebar (reached via buttons/hubs).
@@ -80,16 +105,16 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/approvals", "Approvals"],
   ["/owner/reports",   "Reports"],
   ["/owner/day",       "Day overview"],
-  ["/owner/more", "More"],
-  ["/owner/profile", "Profile"],
+  ["/owner/more",      "More"],
+  ["/owner/profile",   "Profile"],
   ["/owner/products/edit-recipe", "Edit recipe"],
-  ["/owner/products/add-combo", "Add combo"],
-  ["/owner/products/add", "Add product"],
-  ["/owner/team/add-outlet", "Add outlet"],
-  ["/owner/settings/outlet", "Outlet"],
-  ["/owner/settings/channels", "Sales channels"],
-  ["/owner/settings/pricing", "Pricing & promos"],
-  ["/owner/settings/menu-mapping", "Menu mapping"],
+  ["/owner/products/add-combo",   "Add combo"],
+  ["/owner/products/add",         "Add product"],
+  ["/owner/team/add-outlet",      "Add outlet"],
+  ["/owner/settings/outlet",          "Outlet"],
+  ["/owner/settings/channels",        "Sales channels"],
+  ["/owner/settings/pricing",         "Pricing & promos"],
+  ["/owner/settings/menu-mapping",    "Menu mapping"],
   ["/owner/settings/cost-categories", "Cost categories"],
 ];
 
@@ -100,32 +125,32 @@ export function titleFor(pathname: string): string {
   return match?.label ?? "Dashboard";
 }
 
-// Mobile bottom-tab entry points — each opens a hub screen (per the sitemap's
-// Home / Approvals / Reports / More tabs), from which every section is reachable.
+// Mobile bottom-tab entry points.
 export interface MobileTab extends NavItem {
   icon: string;
 }
 export const OWNER_MOBILE_TABS: MobileTab[] = [
+  { href: "/owner",           label: "Analytics", icon: "↗" },
   { href: "/owner/day",       label: "Day",       icon: "⌂" },
   { href: "/owner/approvals", label: "Approvals", icon: "✓" },
-  { href: "/owner/reports",   label: "Reports",   icon: "↗" },
   { href: "/owner/more",      label: "More",      icon: "⋯" },
 ];
 
-// Map any owner route to the bottom tab that should stay highlighted on mobile,
-// so drilling into a section from a hub keeps its tab active.
+// Map any owner route to the bottom tab that should stay highlighted on mobile.
 const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
   { tab: "/owner/day", prefixes: ["/owner/day"] },
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
-    tab: "/owner/reports",
-    prefixes: ["/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history", "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging"],
-  },
-  {
     tab: "/owner/more",
-    prefixes: ["/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts", "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/settings", "/owner/setup"],
-    // /owner/settings covers all sub-routes (outlet, channels, pricing, menu-mapping, cost-categories)
+    prefixes: [
+      "/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts",
+      "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team",
+      "/owner/settings", "/owner/setup",
+      "/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history",
+      "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging",
+    ],
   },
+  // Analytics tab matches /owner exactly — caught by the fallback below for anything not above.
 ];
 
 export function mobileTabFor(pathname: string): string {
@@ -135,7 +160,7 @@ export function mobileTabFor(pathname: string): string {
   return "/owner";
 }
 
-// Which accordion group (if any) contains the active route — used to auto-open it.
+// Which accordion group contains the active route — used to auto-open it.
 export function activeGroupFor(pathname: string): string | null {
   for (const g of OWNER_NAV) {
     if (g.items.some((n) => (n.href === "/owner" ? false : under(pathname, n.href)))) {

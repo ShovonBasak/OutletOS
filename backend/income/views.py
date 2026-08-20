@@ -1,6 +1,6 @@
 from rest_framework import viewsets
 
-from accounts.permissions import IsOwnerOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
 from .models import OtherIncomeCategory, OtherIncome
 from .serializers import OtherIncomeCategorySerializer, OtherIncomeSerializer
 
@@ -8,7 +8,7 @@ from .serializers import OtherIncomeCategorySerializer, OtherIncomeSerializer
 class OtherIncomeCategoryViewSet(viewsets.ModelViewSet):
     queryset = OtherIncomeCategory.objects.all()
     serializer_class = OtherIncomeCategorySerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
 
 class OtherIncomeViewSet(viewsets.ModelViewSet):

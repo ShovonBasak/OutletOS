@@ -163,7 +163,7 @@ function TopProductsChart({ products }: { products: DashboardData["top_products"
         return (
           <div key={i}>
             <div className="grid grid-cols-[1fr_5.5rem_5.5rem_3.5rem] gap-x-2 items-baseline mb-0.5">
-              <span className="font-mono text-[10px] text-ink truncate">{p.product_name}</span>
+              <span className="font-mono text-[10px] text-ink">{p.product_name}</span>
               <span className="font-mono text-[10px] text-ink text-right">{bdt(rev)}</span>
               <span className="font-mono text-[10px] text-ink-soft text-right">{bdt(cogs)}</span>
               <span className={`font-mono text-[10px] font-semibold text-right ${marginColor}`}>{margin.toFixed(0)}%</span>
@@ -241,14 +241,16 @@ function ChannelBars({ channels, total }: { channels: DashboardData["channels"];
   }
   const COLORS = ["#7A2420", "#C9A227", "#3F6B3F", "#C9601C", "#5C6B8A"];
 
+  const ROW = "grid grid-cols-[1fr_6rem_4rem] sm:grid-cols-[1fr_4.5rem_6rem_4.5rem_5rem] gap-x-3";
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-[1fr_4.5rem_6rem_4.5rem_5rem] gap-x-3 pb-1">
+      <div className={`${ROW} pb-1`}>
         <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Channel</span>
-        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Units</span>
+        <span className="hidden sm:block font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Units</span>
         <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
         <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Share</span>
-        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Commission</span>
+        <span className="hidden sm:block font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Commission</span>
       </div>
       {channels.map((ch, i) => {
         const rev  = Number(ch.revenue);
@@ -256,12 +258,12 @@ function ChannelBars({ channels, total }: { channels: DashboardData["channels"];
         const color = COLORS[i % COLORS.length];
         return (
           <div key={i}>
-            <div className="grid grid-cols-[1fr_4.5rem_6rem_4.5rem_5rem] gap-x-3 items-center mb-1">
+            <div className={`${ROW} items-center mb-1`}>
               <span className="font-mono text-[11px] text-ink font-medium">{ch.channel}</span>
-              <span className="font-mono text-[10px] text-ink-soft text-right">{ch.units_sold}</span>
+              <span className="hidden sm:block font-mono text-[10px] text-ink-soft text-right">{ch.units_sold}</span>
               <span className="font-mono text-[11px] text-ink font-semibold text-right">{bdt(rev)}</span>
               <span className="font-mono text-[10px] text-ink-soft text-right">{share.toFixed(0)}%</span>
-              <span className="font-mono text-[10px] text-ink-soft text-right">{Number(ch.commission) > 0 ? `− ${bdt(ch.commission)}` : "—"}</span>
+              <span className="hidden sm:block font-mono text-[10px] text-ink-soft text-right">{Number(ch.commission) > 0 ? `− ${bdt(ch.commission)}` : "—"}</span>
             </div>
             <div className="h-2 bg-paper-dim rounded overflow-hidden">
               <div className="h-full rounded" style={{ width: `${share}%`, backgroundColor: color, opacity: 0.7 }} />
@@ -364,26 +366,20 @@ export default function OwnerDashboard() {
 
       {/* ── Period picker ─────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <div className="flex gap-1.5 flex-wrap">
-            {PERIODS.map(p => (
-              <button
-                key={p.value}
-                onClick={() => selectPeriod(p.value)}
-                className={`rounded-full px-3.5 py-1.5 font-mono text-[10px] font-medium transition-colors ${
-                  period === p.value
-                    ? "bg-near-black text-gold"
-                    : "border border-[#d8cdb0] text-ink-soft hover:border-ink-soft"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <Link href="/owner/day"
-                className="hidden md:flex items-center gap-1.5 rounded-full border border-[#d8cdb0] px-3.5 py-1.5 font-mono text-[10px] text-ink-soft hover:border-ink-soft">
-            Day view →
-          </Link>
+        <div className="flex gap-1.5 flex-wrap">
+          {PERIODS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => selectPeriod(p.value)}
+              className={`rounded-full px-3.5 py-1.5 font-mono text-[10px] font-medium transition-colors ${
+                period === p.value
+                  ? "bg-near-black text-gold"
+                  : "border border-[#d8cdb0] text-ink-soft hover:border-ink-soft"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
 
         {period === "custom" && (

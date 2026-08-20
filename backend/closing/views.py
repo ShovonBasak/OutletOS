@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwner, IsOwnerOrReadOnly
+from accounts.permissions import IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
 from catalog.models import Product
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
@@ -404,7 +404,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def lock(self, request, pk=None):
         """Owner reviews a flagged closing and locks it."""
         closing = self.get_object()
@@ -457,4 +457,4 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
 class ChannelSettlementViewSet(viewsets.ModelViewSet):
     queryset = ChannelSettlement.objects.select_related("channel", "outlet")
     serializer_class = ChannelSettlementSerializer
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsOwnerOrAdminOrReadOnly]

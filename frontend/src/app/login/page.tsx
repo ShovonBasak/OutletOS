@@ -21,7 +21,7 @@ export default function LoginPage() {
     try {
       const user = await login(phone, password);
       setUser(user);
-      router.replace(user.role === "OWNER" ? "/owner" : "/staff");
+      router.replace(user.role === "OWNER" || user.role === "ADMIN" ? "/owner" : "/staff");
     } catch {
       setError("Invalid phone or password.");
     } finally {

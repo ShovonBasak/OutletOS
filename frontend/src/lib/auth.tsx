@@ -3,11 +3,13 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearSession, getStoredUser, getAccess } from "./api";
-import type { User } from "./types";
+import type { Role, User } from "./types";
 
 interface AuthState {
   user: User | null;
   loading: boolean;
+  isAdmin: boolean;
+  isOwnerOrAdmin: boolean;
   setUser: (user: User | null) => void;
   logout: () => void;
 }
@@ -15,6 +17,8 @@ interface AuthState {
 const AuthContext = createContext<AuthState>({
   user: null,
   loading: true,
+  isAdmin: false,
+  isOwnerOrAdmin: false,
   setUser: () => {},
   logout: () => {},
 });
@@ -34,8 +38,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.href = "/login";
   };
 
+  const isAdmin = user?.role === "ADMIN";
+  const isOwnerOrAdmin = user?.role === "OWNER" || user?.role === "ADMIN";
+
   return (
-    <AuthContext.Provider value={{ user, loading, setUser, logout }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, isOwnerOrAdmin, setUser, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -43,17 +50,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export const useAuth = () => useContext(AuthContext);
 
-/** Guard a page to a role; redirect to /login if unauthenticated. */
-export function useRequireRole(role: "STAFF" | "OWNER") {
-  const { user, loading } = useAuth();
+function ownerOrAdminRedirect(role: Role | undefined): string {
+  return role === "OWNER" || role === "ADMIN" ? "/owner" : "/staff";
+}
+
+/** Guard a page to one or more roles; redirects to /login if unauthenticated. */
+export function useRequireRole(role: Role | Role[]) {
+  const { user, loading, isAdmin, isOwnerOrAdmin } = useAuth();
   const router = useRouter();
+  const allowed = Array.isArray(role) ? role : [role];
+
   useEffect(() => {
     if (loading) return;
     if (!getAccess() || !user) {
       router.replace("/login");
-    } else if (user.role !== role) {
-      router.replace(user.role === "OWNER" ? "/owner" : "/staff");
+    } else if (!allowed.includes(user.role)) {
+      router.replace(ownerOrAdminRedirect(user.role));
     }
-  }, [user, loading, role, router]);
-  return { user, loading };
+  }, [user, loading, router]);
+
+  return { user, loading, isAdmin, isOwnerOrAdmin };
 }

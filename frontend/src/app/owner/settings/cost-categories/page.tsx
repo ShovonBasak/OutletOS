@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { CostCategory, Paginated } from "@/lib/types";
 
 const COST_TYPES: { value: CostCategory["cost_type"]; label: string }[] = [
@@ -11,6 +12,7 @@ const COST_TYPES: { value: CostCategory["cost_type"]; label: string }[] = [
 ];
 
 export default function CostCategoriesPage() {
+  const { isAdmin } = useAuth();
   const [categories, setCategories] = useState<CostCategory[]>([]);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -87,40 +89,50 @@ export default function CostCategoriesPage() {
             {categories.map((c) => (
               <tr key={c.id}>
                 <td>
-                  <input
-                    className="w-full rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
-                    value={c.name}
-                    onChange={(e) => patch(c.id, { name: e.target.value })}
-                  />
+                  {isAdmin ? (
+                    <input
+                      className="w-full rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
+                      value={c.name}
+                      onChange={(e) => patch(c.id, { name: e.target.value })}
+                    />
+                  ) : (
+                    <span className="font-mono text-[11px] text-ink">{c.name}</span>
+                  )}
                 </td>
                 <td>
-                  <select
-                    className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
-                    value={c.cost_type}
-                    onChange={(e) => patch(c.id, { cost_type: e.target.value as CostCategory["cost_type"] })}
-                  >
-                    {COST_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </select>
+                  {isAdmin ? (
+                    <select
+                      className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
+                      value={c.cost_type}
+                      onChange={(e) => patch(c.id, { cost_type: e.target.value as CostCategory["cost_type"] })}
+                    >
+                      {COST_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-mono text-[11px] text-ink-soft">{COST_TYPES.find(t => t.value === c.cost_type)?.label}</span>
+                  )}
                 </td>
                 <td>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="rounded-sm bg-action px-2 py-1 text-[10px] uppercase text-gold disabled:opacity-50"
-                      disabled={savingId === c.id}
-                      onClick={() => save(c)}
-                    >
-                      {savingId === c.id ? "…" : "Save"}
-                    </button>
-                    <button
-                      className="font-mono text-[10px] text-chili disabled:opacity-50"
-                      disabled={deletingId === c.id}
-                      onClick={() => remove(c)}
-                    >
-                      {deletingId === c.id ? "…" : "Delete"}
-                    </button>
-                  </div>
+                  {isAdmin && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="rounded-sm bg-action px-2 py-1 text-[10px] uppercase text-gold disabled:opacity-50"
+                        disabled={savingId === c.id}
+                        onClick={() => save(c)}
+                      >
+                        {savingId === c.id ? "…" : "Save"}
+                      </button>
+                      <button
+                        className="font-mono text-[10px] text-chili disabled:opacity-50"
+                        disabled={deletingId === c.id}
+                        onClick={() => remove(c)}
+                      >
+                        {deletingId === c.id ? "…" : "Delete"}
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -131,38 +143,40 @@ export default function CostCategoriesPage() {
                 </td>
               </tr>
             )}
-            {/* Add new row */}
-            <tr className="border-t-2 border-[#d8cdb0]">
-              <td>
-                <input
-                  className="w-full rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px] placeholder:text-ink-soft/50"
-                  placeholder="New category name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addCategory()}
-                />
-              </td>
-              <td>
-                <select
-                  className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
-                  value={newType}
-                  onChange={(e) => setNewType(e.target.value as CostCategory["cost_type"])}
-                >
-                  {COST_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <button
-                  className="rounded-sm bg-action px-2 py-1 text-[10px] uppercase text-gold disabled:opacity-50"
-                  disabled={adding || !newName.trim()}
-                  onClick={addCategory}
-                >
-                  {adding ? "…" : "Add"}
-                </button>
-              </td>
-            </tr>
+            {/* Add new row — Admin only */}
+            {isAdmin && (
+              <tr className="border-t-2 border-[#d8cdb0]">
+                <td>
+                  <input
+                    className="w-full rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px] placeholder:text-ink-soft/50"
+                    placeholder="New category name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                  />
+                </td>
+                <td>
+                  <select
+                    className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-1.5 py-1 font-mono text-[11px]"
+                    value={newType}
+                    onChange={(e) => setNewType(e.target.value as CostCategory["cost_type"])}
+                  >
+                    {COST_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <button
+                    className="rounded-sm bg-action px-2 py-1 text-[10px] uppercase text-gold disabled:opacity-50"
+                    disabled={adding || !newName.trim()}
+                    onClick={addCategory}
+                  >
+                    {adding ? "…" : "Add"}
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

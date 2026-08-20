@@ -25,7 +25,7 @@ def send_push_to_owners(title: str, body: str, url: str = "/owner/stock-in") -> 
 
     from .models import PushSubscription, Role
 
-    subs = list(PushSubscription.objects.filter(user__role=Role.OWNER).select_related("user"))
+    subs = list(PushSubscription.objects.filter(user__role__in=[Role.OWNER, Role.ADMIN]).select_related("user"))
     if not subs:
         return
 

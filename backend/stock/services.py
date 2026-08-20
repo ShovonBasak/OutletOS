@@ -25,10 +25,12 @@ from .models import (
 
 def consume_for_preparation(outlet, product, pieces):
     """Deduct all inputs needed to prepare `pieces` units of `product`:
-    - Raw ingredients (Recipe rows) → deducted from RawStock
+    - Raw ingredients (Recipe rows, RECIPE_LINKED only) → deducted from RawStock
     - Prepared product components (RecipeProductComponent rows) → deducted from DisplayStock
     """
     for row in product.recipes.select_related("ingredient"):
+        if row.ingredient.tracking_mode == TrackingMode.PERIODIC_COUNT:
+            continue  # tracked via periodic checks, not RawStock
         delta = Decimal(pieces) * row.quantity_per_unit
         RawStock.adjust(outlet, row.ingredient, -delta)
     for row in product.product_recipe_components.select_related("component_product"):
@@ -39,6 +41,8 @@ def consume_for_preparation(outlet, product, pieces):
 def restock_from_preparation(outlet, product, pieces):
     """Inverse of consume_for_preparation — credits back both raw and prepared inputs."""
     for row in product.recipes.select_related("ingredient"):
+        if row.ingredient.tracking_mode == TrackingMode.PERIODIC_COUNT:
+            continue
         delta = Decimal(pieces) * row.quantity_per_unit
         RawStock.adjust(outlet, row.ingredient, delta)
     for row in product.product_recipe_components.select_related("component_product"):

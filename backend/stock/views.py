@@ -10,7 +10,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwner
+from accounts.permissions import IsOwnerOrAdmin
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
 from .models import (
@@ -351,7 +351,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(record).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def approve(self, request, pk=None):
         """Owner approves PENDING → APPROVED; RawStock increments (base units).
 
@@ -378,8 +378,8 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         for item in record.items.select_related("ingredient", "pack_definition"):
             if not item.ingredient_id:
                 continue
-            if item.ingredient.tracking_mode == TrackingMode.ONE_TIME:
-                continue  # cost captured in line_total for audit; don't add to RawStock
+            if item.ingredient.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
+                continue  # ONE_TIME: cost audit only; PERIODIC_COUNT: tracked via periodic checks
             RawStock.adjust(record.outlet, item.ingredient, item.base_unit_quantity())
 
             if (item.pack_definition_id
@@ -421,7 +421,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         _initialize_direct_stock(record.outlet)
         return Response(self.get_serializer(record).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def reject(self, request, pk=None):
         record = self.get_object()
         if record.status != StockInStatus.PENDING:
@@ -1252,8 +1252,10 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             check = latest_by_ing.get(ing.id)
             pack = ing.active_pack()
             if check:
-                current_qty = str(check.counted_qty)
-                source = "counted"
+                # Add any stock-in received since the last physical count.
+                new_stock = stock_in_since(outlet, ing, since_dt=check.checked_at)
+                current_qty = str(check.counted_qty + new_stock)
+                source = "counted" if new_stock == 0 else "counted_plus_stock_in"
                 last_at = check.checked_at.isoformat()
             else:
                 total = stock_in_since(outlet, ing, since_dt=None)
