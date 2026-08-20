@@ -76,47 +76,90 @@ def _clamped_range(request):
 # ---------------------------------------------------------------------------
 # Recipe-based costing
 # ---------------------------------------------------------------------------
-def _product_unit_cost(product, cache):
+
+def _build_pack_history():
+    """Load all PackDefinitions into memory as {ingredient_id: [(from, to, cpu), ...]}
+    sorted descending by effective_from. One query; used by all cost functions so
+    COGS uses the price that was active on the date of sale/wastage/shrinkage."""
+    from catalog.models import PackDefinition
+    rows = PackDefinition.objects.values(
+        "ingredient_id", "effective_from", "effective_to",
+        "cost_per_pack", "pieces_per_pack",
+    ).order_by("ingredient_id", "-effective_from")
+    history: dict = {}
+    for r in rows:
+        if not r["pieces_per_pack"]:
+            continue
+        cpu = (
+            Decimal(str(r["cost_per_pack"])) / Decimal(str(r["pieces_per_pack"]))
+        ).quantize(Decimal("0.0001"))
+        history.setdefault(r["ingredient_id"], []).append(
+            (r["effective_from"], r["effective_to"], cpu)
+        )
+    return history
+
+
+def _cost_at_date(ingredient_id, on_date, pack_history):
+    """Cost per base unit for an ingredient on a specific date, from the
+    pre-loaded pack_history dict. Returns 0 if no matching pack found."""
+    for eff_from, eff_to, cpu in pack_history.get(ingredient_id, []):
+        if eff_from <= on_date and (eff_to is None or eff_to >= on_date):
+            return cpu
+    return Decimal("0")
+
+
+def _product_unit_cost(product, cache, on_date=None, pack_history=None):
     """Cost to make one unit of a product = Σ recipe qty × ingredient cost per
-    base unit. Combos expand through their component products' own recipes."""
-    if product.id in cache:
-        return cache[product.id]
+    base unit. Pass on_date + pack_history for date-accurate pricing; omit both
+    for a quick current-price estimate."""
+    cache_key = (product.id, on_date)
+    if cache_key in cache:
+        return cache[cache_key]
     total = Decimal("0")
     if product.product_type == ProductType.COMBO:
         for comp in product.components.select_related("component_product"):
-            total += _product_unit_cost(comp.component_product, cache) * comp.quantity_per_combo
+            total += (
+                _product_unit_cost(comp.component_product, cache, on_date, pack_history)
+                * comp.quantity_per_combo
+            )
     else:
         for row in product.recipes.select_related("ingredient"):
-            total += row.quantity_per_unit * row.ingredient.cost_per_base_unit
-    cache[product.id] = total
+            if on_date is not None and pack_history is not None:
+                cost = _cost_at_date(row.ingredient_id, on_date, pack_history)
+            else:
+                cost = row.ingredient.cost_per_base_unit
+            total += row.quantity_per_unit * cost
+    cache[cache_key] = total
     return total
 
 
-def _cogs(outlet, start, end, cost_cache):
-    """Σ over every unit actually SOLD: recipe cost."""
+def _cogs(outlet, start, end, cost_cache, pack_history=None):
+    """Σ over every unit actually SOLD: recipe cost at the price on the sale date."""
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
-    ).select_related("product")
+    ).select_related("product", "daily_closing")
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
     total = Decimal("0")
     for line in lines:
-        total += _product_unit_cost(line.product, cost_cache) * line.quantity_sold
+        sale_date = line.daily_closing.closing_date
+        total += _product_unit_cost(line.product, cost_cache, on_date=sale_date, pack_history=pack_history) * line.quantity_sold
     return total
 
 
-def _wastage_cost(outlet, start, end, cost_cache):
+def _wastage_cost(outlet, start, end, cost_cache, pack_history=None):
     """Prepared product that never became a sale: closing wastage + carry-forward
     leftover that wasn't moved the next morning."""
     total = Decimal("0")
     counts = DailyClosingStockCount.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
-    ).select_related("product")
+    ).select_related("product", "daily_closing")
     if outlet:
         counts = counts.filter(daily_closing__outlet_id=outlet)
     for c in counts:
         if c.wastage_pieces:
-            total += _product_unit_cost(c.product, cost_cache) * c.wastage_pieces
+            waste_date = c.daily_closing.closing_date
+            total += _product_unit_cost(c.product, cost_cache, on_date=waste_date, pack_history=pack_history) * c.wastage_pieces
 
     carried = PreparationLog.objects.filter(
         source=PrepSource.CARRIED_FORWARD,
@@ -126,26 +169,31 @@ def _wastage_cost(outlet, start, end, cost_cache):
         carried = carried.filter(outlet_id=outlet)
     for log in carried:
         if log.wastage_pieces:
-            total += _product_unit_cost(log.product, cost_cache) * log.wastage_pieces
+            prep_date = log.timestamp.date()
+            total += _product_unit_cost(log.product, cost_cache, on_date=prep_date, pack_history=pack_history) * log.wastage_pieces
     return total
 
 
-def _shrinkage_cost(outlet, start, end):
+def _shrinkage_cost(outlet, start, end, pack_history=None):
     """Ingredient loss found at day-start, before anything was prepared/sold."""
     checks = DayStartStockCheck.objects.filter(
         operating_day__date__gte=start, operating_day__date__lte=end
-    ).select_related("ingredient")
+    ).select_related("ingredient", "operating_day")
     if outlet:
         checks = checks.filter(operating_day__outlet_id=outlet)
     total = Decimal("0")
     for chk in checks:
         shortfall = chk.discrepancy_qty
         if shortfall > 0:  # shortfalls only; a surplus flags a counting problem
-            total += shortfall * chk.ingredient.cost_per_base_unit
+            if pack_history is not None:
+                cpu = _cost_at_date(chk.ingredient_id, chk.operating_day.date, pack_history)
+            else:
+                cpu = chk.ingredient.cost_per_base_unit
+            total += shortfall * cpu
     return total
 
 
-def _packaging_cost(outlet, start, end):
+def _packaging_cost(outlet, start, end, pack_history=None):
     checks = PeriodicStockCheck.objects.filter(
         checked_at__date__gte=start, checked_at__date__lte=end
     ).select_related("ingredient")
@@ -154,12 +202,17 @@ def _packaging_cost(outlet, start, end):
     total = Decimal("0")
     for chk in checks:
         if chk.consumed_since_last_check > 0:
-            total += chk.consumed_since_last_check * chk.ingredient.cost_per_base_unit
+            if pack_history is not None:
+                cpu = _cost_at_date(chk.ingredient_id, chk.checked_at.date(), pack_history)
+            else:
+                cpu = chk.ingredient.cost_per_base_unit
+            total += chk.consumed_since_last_check * cpu
     return total
 
 
 def compute_pnl(start, end, outlet=None):
     cost_cache = {}
+    pack_history = _build_pack_history()
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
     )
@@ -173,11 +226,11 @@ def compute_pnl(start, end, outlet=None):
     # Revenue = Σ net_amount (gross already reduced by commission_rate per channel).
     # DailyChannelDiscount is retained for reconciliation but not deducted from P&L.
     revenue = sum((l.net_amount for l in lines), Decimal("0"))
-    cogs = _cogs(outlet, start, end, cost_cache)
+    cogs = _cogs(outlet, start, end, cost_cache, pack_history)
     gross_profit = revenue - cogs
-    wastage = _wastage_cost(outlet, start, end, cost_cache)
-    shrinkage = _shrinkage_cost(outlet, start, end)
-    packaging = _packaging_cost(outlet, start, end)
+    wastage = _wastage_cost(outlet, start, end, cost_cache, pack_history)
+    shrinkage = _shrinkage_cost(outlet, start, end, pack_history)
+    packaging = _packaging_cost(outlet, start, end, pack_history)
 
     by_type = {
         CostType.FIXED: Decimal("0"),
@@ -505,13 +558,15 @@ def dashboard_summary(request):
         lines_qs = lines_qs.filter(daily_closing__outlet_id=outlet)
 
     cost_cache: dict = {}
+    pack_history = _build_pack_history()
     by_date: dict = {}
     by_product: dict = {}
     by_channel: dict = {}
 
     for line in lines_qs:
         d = str(line.daily_closing.closing_date)
-        unit_cost = _product_unit_cost(line.product, cost_cache)
+        sale_date = line.daily_closing.closing_date
+        unit_cost = _product_unit_cost(line.product, cost_cache, on_date=sale_date, pack_history=pack_history)
         line_cogs = unit_cost * Decimal(line.quantity_sold)
 
         day = by_date.setdefault(d, {"date": d, "units_sold": 0, "revenue": Decimal("0"), "cogs": Decimal("0")})
