@@ -876,6 +876,14 @@ class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
             return RawStockPrepSerializer
         return RawStockSerializer
 
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        if self.get_serializer_class() is RawStockSerializer:
+            from catalog.utils import build_ingredient_category_map, build_ingredient_product_map
+            ctx["ingredient_category_map"] = build_ingredient_category_map()
+            ctx["ingredient_product_map"] = build_ingredient_product_map()
+        return ctx
+
     def get_queryset(self):
         if self.request.query_params.get("slim") == "1":
             # Skip the aliases prefetch — RawStockPrepSerializer doesn't use it.
@@ -1014,8 +1022,11 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
     def day_start_stock(self, request, pk=None):
         """Rows to reconcile: every RECIPE_LINKED ingredient with its carried
         RawStock balance, merged with any already-saved confirmations."""
+        from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
         day = self.get_object()
         existing = {c.ingredient_id: c for c in day.stock_checks.select_related("ingredient")}
+        category_map = build_ingredient_category_map()
+        product_map = build_ingredient_product_map()
         rows = []
         ingredients = Ingredient.objects.filter(
             is_active=True, tracking_mode=TrackingMode.RECIPE_LINKED
@@ -1031,7 +1042,8 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
                     "ingredient": ing.id,
                     "ingredient_name": ing.name,
                     "ingredient_display_name": alias.alias_text if alias else ing.name,
-                    "ingredient_group": ing.group,
+                    "ingredient_group": resolve_ingredient_group(ing, category_map),
+                    "primary_product": product_map.get(ing.id, ""),
                     "base_unit": ing.base_unit,
                     "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
                     "system_carried_qty": carried,
@@ -1247,6 +1259,8 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             if c.ingredient_id not in latest_by_ing:
                 latest_by_ing[c.ingredient_id] = c
 
+        from catalog.utils import build_ingredient_category_map, resolve_ingredient_group
+        category_map = build_ingredient_category_map()
         result = []
         for ing in ingredients:
             check = latest_by_ing.get(ing.id)
@@ -1265,6 +1279,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             result.append({
                 "ingredient": ing.id,
                 "ingredient_name": ing.name,
+                "ingredient_group": resolve_ingredient_group(ing, category_map),
                 "base_unit": ing.base_unit,
                 "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
                 "current_qty": current_qty,

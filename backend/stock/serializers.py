@@ -170,12 +170,22 @@ class PrepLogSlimSerializer(serializers.ModelSerializer):
 
 class RawStockSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
-    ingredient_group = serializers.CharField(source="ingredient.group", read_only=True)
+    ingredient_group = serializers.SerializerMethodField()
+    primary_product = serializers.SerializerMethodField()
     ingredient_display_name = serializers.SerializerMethodField()
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
     tracking_mode = serializers.CharField(source="ingredient.tracking_mode", read_only=True)
     pieces_per_pack = serializers.SerializerMethodField()
     cost_per_base_unit = serializers.SerializerMethodField()
+
+    def get_ingredient_group(self, obj):
+        from catalog.utils import resolve_ingredient_group
+        category_map = self.context.get("ingredient_category_map", {})
+        return resolve_ingredient_group(obj.ingredient, category_map)
+
+    def get_primary_product(self, obj):
+        product_map = self.context.get("ingredient_product_map", {})
+        return product_map.get(obj.ingredient_id, "")
 
     def get_ingredient_display_name(self, obj):
         alias = next((a for a in obj.ingredient.aliases.all() if a.is_active), None)
@@ -195,8 +205,8 @@ class RawStockSerializer(serializers.ModelSerializer):
         model = RawStock
         fields = [
             "id", "outlet", "ingredient", "ingredient_name", "ingredient_display_name",
-            "ingredient_group", "base_unit", "tracking_mode", "quantity_available",
-            "pieces_per_pack", "cost_per_base_unit",
+            "ingredient_group", "primary_product", "base_unit", "tracking_mode",
+            "quantity_available", "pieces_per_pack", "cost_per_base_unit",
         ]
 
 

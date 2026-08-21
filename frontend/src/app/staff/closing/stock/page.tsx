@@ -7,7 +7,8 @@ import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing } from "@/lib/closing";
 import { bdt, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
-import type { DailyClosing, Paginated, RawStock, StockCount } from "@/lib/types";
+import type { DailyClosing, PackagingLevel, Paginated, RawStock, StockCount } from "@/lib/types";
+import { INGREDIENT_GROUPS } from "@/lib/types";
 
 const CATEGORY_ORDER = [
   "Fried Chicken", "Snacks", "Light Snacks", "Meals",
@@ -43,6 +44,7 @@ export default function StockSummaryScreen() {
 
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [rawStock, setRawStock] = useState<RawStock[]>([]);
+  const [periodicLevels, setPeriodicLevels] = useState<PackagingLevel[]>([]);
 
   const prevCtx = useRef({ outlet: 0, opDate: "" });
 
@@ -52,9 +54,11 @@ export default function StockSummaryScreen() {
     Promise.all([
       getOrCreateTodayClosing(outlet, opDate),
       api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),
-    ]).then(([c, rs]) => {
+      api<PackagingLevel[]>(`/periodic-stock-checks/levels/?outlet=${outlet}`),
+    ]).then(([c, rs, pl]) => {
       setClosing(c);
       setRawStock(rs.results.filter((r) => Number(r.quantity_available) > 0));
+      setPeriodicLevels(pl.filter((p) => Number(p.current_qty) > 0));
     });
   }, [outlet, opDate]);
 
@@ -69,12 +73,20 @@ export default function StockSummaryScreen() {
     .filter((sc) => !sc.requires_preparation)
     .sort((a, b) => a.product_name.localeCompare(b.product_name));
 
-  // Raw ingredients that are RECIPE_LINKED — exclude BEVERAGE group since those
-  // are already shown as products in the "Beverages & ready stock" section above.
+  // Recipe-linked food ingredients — exclude Beverages (shown as products above)
+  // and supply items (shown in Packaging & Supplies section below).
   const recipeIngredients = rawStock.filter(
-    (r) => r.tracking_mode === "RECIPE_LINKED" && r.ingredient_group !== "BEVERAGE"
+    (r) =>
+      r.tracking_mode === "RECIPE_LINKED" &&
+      r.ingredient_group !== "Beverages" &&
+      r.ingredient_group !== "Supply"
   );
-  const periodicIngredients = rawStock.filter((r) => r.tracking_mode === "PERIODIC_COUNT");
+
+  // Recipe-linked supply items (e.g. bamboo sticks, foil paper) shown alongside
+  // periodic items in the Packaging & Supplies section.
+  const supplyRawIngredients = rawStock.filter(
+    (r) => r.tracking_mode === "RECIPE_LINKED" && r.ingredient_group === "Supply"
+  );
 
   const rawValue = (r: RawStock) =>
     Number(r.quantity_available) > 0 && r.cost_per_base_unit
@@ -85,6 +97,7 @@ export default function StockSummaryScreen() {
     closing.stock_counts.reduce((s, sc) => s + (Number(sc.remains_value) || 0), 0) +
     rawStock.reduce((s, r) => s + rawValue(r), 0);
   const totalRemainsPcs = closing.stock_counts.reduce((s, sc) => s + sc.remains_pieces, 0);
+  const totalPeriodicPcs = periodicLevels.reduce((s, p) => s + Number(p.current_qty), 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -100,7 +113,7 @@ export default function StockSummaryScreen() {
             Total remaining stock value
           </p>
           <p className="font-mono text-[10px] text-ink-soft/60 mt-0.5">
-            {totalRemainsPcs} pcs across all products
+            {totalRemainsPcs} pcs prepared · {totalPeriodicPcs} supplies
           </p>
         </div>
         <span className="font-mono text-lg font-bold text-gold-deep">
@@ -184,12 +197,19 @@ export default function StockSummaryScreen() {
         );
       })()}
 
-      {/* Raw ingredients (recipe-linked) */}
-      {recipeIngredients.length > 0 && (
-        <Section title="Raw ingredients" subtitle="System-tracked balance after today's prep">
-          {recipeIngredients
-            .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
-            .map((r) => (
+      {/* Raw ingredients (recipe-linked) — grouped by derived product category */}
+      {recipeIngredients.length > 0 && INGREDIENT_GROUPS.map(({ key, icon }) => {
+        const group = recipeIngredients
+          .filter((r) => r.ingredient_group === key)
+          .sort(
+            (a, b) =>
+              a.primary_product.localeCompare(b.primary_product) ||
+              a.ingredient_display_name.localeCompare(b.ingredient_display_name)
+          );
+        if (group.length === 0) return null;
+        return (
+          <Section key={key} title={`${icon} ${key}`} subtitle="System-tracked balance after today's prep">
+            {group.map((r) => (
               <StockRow
                 key={r.id}
                 name={r.ingredient_display_name}
@@ -200,25 +220,39 @@ export default function StockSummaryScreen() {
                 piecesPerPack={r.pieces_per_pack ? Number(r.pieces_per_pack) : null}
               />
             ))}
-        </Section>
-      )}
+          </Section>
+        );
+      })}
 
-      {/* Packaging & supplies (periodic count) */}
-      {periodicIngredients.length > 0 && (
-        <Section title="Packaging & supplies" subtitle="Last reported count">
-          {periodicIngredients
-            .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
-            .map((r) => (
-              <StockRow
-                key={r.id}
-                name={r.ingredient_display_name}
-                qty={Number(r.quantity_available)}
-                unit={r.base_unit}
-                value={rawValue(r) > 0 ? rawValue(r) : undefined}
-                dim={Number(r.quantity_available) <= 0}
-                piecesPerPack={r.pieces_per_pack ? Number(r.pieces_per_pack) : null}
-              />
-            ))}
+      {/* Packaging & supplies — flat section, never grouped under product categories */}
+      {(periodicLevels.length > 0 || supplyRawIngredients.length > 0) && (
+        <Section title="📦 Packaging & Supplies" subtitle="Supplies & tracked packaging">
+          {[
+            ...supplyRawIngredients
+              .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
+              .map((r) => (
+                <StockRow
+                  key={`raw-${r.id}`}
+                  name={r.ingredient_display_name}
+                  qty={Number(r.quantity_available)}
+                  unit={r.base_unit}
+                  dim={Number(r.quantity_available) <= 0}
+                  piecesPerPack={r.pieces_per_pack ? Number(r.pieces_per_pack) : null}
+                />
+              )),
+            ...[...periodicLevels]
+              .sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name))
+              .map((r) => (
+                <StockRow
+                  key={`per-${r.ingredient}`}
+                  name={r.ingredient_name}
+                  qty={Number(r.current_qty)}
+                  unit={r.base_unit}
+                  dim={Number(r.current_qty) <= 0}
+                  piecesPerPack={r.pieces_per_pack ? Number(r.pieces_per_pack) : null}
+                />
+              )),
+          ]}
         </Section>
       )}
 

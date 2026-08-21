@@ -1376,12 +1376,17 @@ def day_overview(request):
         .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
         if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
     ]
+    from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
+    _category_map = build_ingredient_category_map()
+    _product_map = build_ingredient_product_map()
     raw_stock = [
         {
             "ingredient": _display_name(rs.ingredient),
             "base_unit": rs.ingredient.base_unit,
             "quantity_available": str(rs.quantity_available),
             "cost_per_base_unit": str(rs.ingredient.cost_per_base_unit or Decimal("0")),
+            "ingredient_group": resolve_ingredient_group(rs.ingredient, _category_map),
+            "primary_product": _product_map.get(rs.ingredient_id, ""),
         }
         for rs in sorted(_raw_qs, key=lambda r: _display_name(r.ingredient).lower())
     ]
@@ -1418,6 +1423,11 @@ def day_overview(request):
                     "amount": str(p.amount),
                 }
                 for p in closing.payments.select_related("account")
+            ],
+            "stock_counts_wastage": [
+                {"product_name": sc.product.name, "wastage_pieces": sc.wastage_pieces}
+                for sc in closing.stock_counts.select_related("product")
+                if sc.wastage_pieces and sc.wastage_pieces > 0
             ],
         }
 

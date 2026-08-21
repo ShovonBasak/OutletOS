@@ -219,6 +219,7 @@ export interface DayStartStockRow {
   ingredient_name: string;
   ingredient_display_name: string;
   ingredient_group: IngredientGroup;
+  primary_product: string;
   base_unit: string;
   pieces_per_pack: string | null;
   system_carried_qty: number;
@@ -323,7 +324,20 @@ export interface PrepLog {
   pieces_prepared: number;
 }
 
-export type IngredientGroup = "BEVERAGE" | "CHICKEN_PIECE" | "SNACK" | "BURGER_WRAP" | "SUPPLY" | "OTHER";
+export type IngredientGroup = string; // now a product category string e.g. "Fried Chicken"
+
+// Canonical order for grouping ingredients by the product category they belong to.
+export const INGREDIENT_GROUPS: { key: string; icon: string }[] = [
+  { key: "Fried Chicken", icon: "🍗" },
+  { key: "Snacks",        icon: "🍡" },
+  { key: "Light Snacks",  icon: "🍢" },
+  { key: "Meals",         icon: "🍔" },
+  { key: "Rice & Sides",  icon: "🍚" },
+  { key: "Beverages",     icon: "🥤" },
+  { key: "Add-on",        icon: "➕" },
+  { key: "Combo",         icon: "📦" },
+  { key: "Other",         icon: "🗂"  },
+];
 
 export interface RawStock {
   id: number;
@@ -331,6 +345,7 @@ export interface RawStock {
   ingredient_name: string;
   ingredient_display_name: string;
   ingredient_group: IngredientGroup;
+  primary_product: string;
   base_unit: string;
   tracking_mode: TrackingMode;
   quantity_available: string;
@@ -366,10 +381,11 @@ export interface DisplayStockSlim {
 export interface PackagingLevel {
   ingredient: number;
   ingredient_name: string;
+  ingredient_group: string;
   base_unit: string;
   pieces_per_pack: string | null;
   current_qty: string;
-  source: "counted" | "stock_in_derived";
+  source: "counted" | "counted_plus_stock_in" | "stock_in_derived";
   last_checked_at: string | null;
 }
 
@@ -819,6 +835,8 @@ export interface DayOverviewRawStock {
   base_unit: string;
   quantity_available: string;
   cost_per_base_unit: string;
+  ingredient_group: IngredientGroup;
+  primary_product: string;
 }
 
 export interface DayOverviewClosing {
@@ -832,6 +850,7 @@ export interface DayOverviewClosing {
   has_flag: boolean;
   flagged_products: { product_name: string; derived_walkin_sold: number }[];
   payments: { account_name: string; is_primary_cash: boolean; amount: string }[];
+  stock_counts_wastage: { product_name: string; wastage_pieces: number }[];
 }
 
 export interface DayOverview {

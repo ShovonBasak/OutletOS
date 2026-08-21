@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { pushPermissionState, subscribeToPush } from "@/lib/push";
 import { bdt, bdtD, shortDate, today, timeOf } from "@/lib/format";
 import type { DayOverview, DayOverviewStockIn } from "@/lib/types";
+import { INGREDIENT_GROUPS } from "@/lib/types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -194,10 +195,6 @@ export default function OwnerHome() {
     .filter((c) => Number(c.discrepancy_qty) > 0)
     .reduce((s, c) => s + Number(c.shrinkage_cost), 0);
 
-  const totalWastage = (data?.prep_logs ?? []).reduce(
-    (s, p) => s + (p.wastage_pieces ?? 0),
-    0
-  );
   const totalPiecesPrepared = (data?.prep_logs ?? []).reduce(
     (s, p) => s + p.pieces_prepared,
     0
@@ -369,7 +366,7 @@ export default function OwnerHome() {
                 </p>
               ) : (
                 <div className="flex flex-col gap-0 -mx-1">
-                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-1 pb-1">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 px-1 pb-1">
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Ingredient</span>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">System</span>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Confirmed</span>
@@ -382,7 +379,7 @@ export default function OwnerHome() {
                     return (
                       <div
                         key={i}
-                        className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-3 rounded px-1 py-1.5 ${
+                        className={`grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3 rounded px-1 py-1.5 ${
                           isShortfall ? "bg-chili/5" : isSurplus ? "bg-gold/5" : ""
                         }`}
                       >
@@ -493,7 +490,7 @@ export default function OwnerHome() {
                   ? "bg-chrome/10 text-chrome border border-chrome/20"
                   : "bg-ink-soft/10 text-ink-soft"
               }
-              defaultOpen={data.prep_logs.length > 0}
+              defaultOpen={false}
             >
               {data.prep_logs.length === 0 ? (
                 <p className="font-mono text-[11px] text-ink-soft italic">
@@ -501,20 +498,19 @@ export default function OwnerHome() {
                 </p>
               ) : (
                 <div className="flex flex-col gap-0">
-                  <div className="grid grid-cols-[1fr_2.5rem_3rem_3rem_6.5rem] pb-1">
+                  <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3rem_6.5rem] pb-1">
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Src</span>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Pcs</span>
-                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Wst</span>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
                   </div>
                   {data.prep_logs.map((p, i) => (
                     <div
                       key={i}
-                      className="grid grid-cols-[1fr_2.5rem_3rem_3rem_6.5rem] border-t border-dashed border-[#e8dfc8] py-1.5"
+                      className="grid grid-cols-[minmax(0,1fr)_2.5rem_3rem_6.5rem] border-t border-dashed border-[#e8dfc8] py-1.5"
                     >
-                      <div>
-                        <p className="font-mono text-[11px] text-ink">{p.product_name}</p>
+                      <div className="min-w-0">
+                        <p className="font-mono text-[11px] text-ink truncate">{p.product_name}</p>
                         <p className="font-mono text-[9px] text-ink-soft/60">{timeOf(p.timestamp)}</p>
                       </div>
                       <span
@@ -527,13 +523,6 @@ export default function OwnerHome() {
                       <span className="mt-0.5 self-start font-mono text-[11px] font-semibold text-ink text-right">
                         {p.pieces_prepared}
                       </span>
-                      <span
-                        className={`mt-0.5 self-start font-mono text-[11px] text-right ${
-                          (p.wastage_pieces ?? 0) > 0 ? "text-chili font-semibold" : "text-ink-soft"
-                        }`}
-                      >
-                        {(p.wastage_pieces ?? 0) > 0 ? p.wastage_pieces : "—"}
-                      </span>
                       <span className="mt-0.5 self-start font-mono text-[11px] text-ink-soft text-right">
                         {Number(p.selling_price) > 0
                           ? bdtD(p.pieces_prepared * Number(p.selling_price))
@@ -541,72 +530,106 @@ export default function OwnerHome() {
                       </span>
                     </div>
                   ))}
-                  <div className="mt-2 flex items-center justify-between border-t border-dashed border-[#d8cdb0] pt-2">
-                    {totalWastage > 0 ? (
-                      <span className="font-mono text-[11px] text-chili font-semibold">
-                        Wastage: {totalWastage} pcs
-                      </span>
-                    ) : (
-                      <span />
-                    )}
-                    {totalPrepValue > 0 && (
+                  {totalPrepValue > 0 && (
+                    <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2">
                       <span className="font-mono text-[11px] text-ink font-semibold">
                         Total: {bdtD(totalPrepValue)}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
             </Section>
 
-            {/* Current display stock — prepared products only */}
+            {/* Prepared for sale — aggregated from prep logs, meaningful for any date */}
             {(() => {
-              const prepStock = data.display_stock.filter(s => s.requires_preparation && s.pieces_available > 0);
-              const prepStockTotal = prepStock.reduce((sum, s) => sum + s.pieces_available * Number(s.selling_price), 0);
+              type ProdSummary = {
+                product_name: string;
+                selling_price: string;
+                fresh: number;
+                carried_forward: number;
+                wastage: number;
+              };
+              const byProduct = data.prep_logs.reduce<Record<string, ProdSummary>>((acc, p) => {
+                if (!acc[p.product_name]) {
+                  acc[p.product_name] = {
+                    product_name: p.product_name,
+                    selling_price: p.selling_price,
+                    fresh: 0,
+                    carried_forward: 0,
+                    wastage: 0,
+                  };
+                }
+                if (p.source === "FRESH") acc[p.product_name].fresh += p.pieces_prepared;
+                else acc[p.product_name].carried_forward += p.pieces_prepared;
+                acc[p.product_name].wastage += p.wastage_pieces ?? 0;
+                return acc;
+              }, {});
+              // Closing stock-count wastage (end-of-day) — merge into the same per-product rows
+              for (const w of data.closing?.stock_counts_wastage ?? []) {
+                if (byProduct[w.product_name]) {
+                  byProduct[w.product_name].wastage += w.wastage_pieces;
+                }
+              }
+              const rows = Object.values(byProduct);
+              const grandTotal = rows.reduce(
+                (s, r) => s + (r.fresh + r.carried_forward) * Number(r.selling_price),
+                0
+              );
               return (
                 <Section
-                  title="Current display stock"
+                  title="Prepared for sale"
                   badge={
-                    prepStock.length === 0
+                    rows.length === 0
                       ? "Nothing prepared"
-                      : `${prepStock.length} product${prepStock.length !== 1 ? "s" : ""}`
+                      : `${rows.length} product${rows.length !== 1 ? "s" : ""}`
                   }
-                  badgeColor={prepStock.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
+                  badgeColor={rows.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
                 >
-                  {prepStock.length === 0 ? (
-                    <p className="font-mono text-[11px] text-ink-soft italic">No prepared products available.</p>
+                  {rows.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">No preparation entries for this day.</p>
                   ) : (
                     <div className="flex flex-col gap-0 -mx-1">
-                      <div className="grid grid-cols-[1fr_3rem_6.5rem] px-1 pb-1">
+                      <div className="grid grid-cols-[minmax(0,1fr)_3rem_2.5rem_2.5rem_6rem] px-1 pb-1">
                         <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
-                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Pcs</span>
-                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Fr</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">CF</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Wst</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Sell value</span>
                       </div>
-                      {prepStock.map((s, i) => (
-                        <div
-                          key={i}
-                          className="grid grid-cols-[1fr_3rem_6.5rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
-                        >
-                          <div>
-                            <p className="font-mono text-[11px] text-ink">{s.product_name}</p>
-                            {Number(s.selling_price) > 0 && (
-                              <p className="font-mono text-[9px] text-ink-soft/60">{bdtD(s.selling_price)} / pc</p>
-                            )}
+                      {rows.map((r, i) => {
+                        const total = r.fresh + r.carried_forward;
+                        const sellValue = total * Number(r.selling_price);
+                        return (
+                          <div
+                            key={i}
+                            className="grid grid-cols-[minmax(0,1fr)_3rem_2.5rem_2.5rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-mono text-[11px] text-ink truncate">{r.product_name}</p>
+                              {Number(r.selling_price) > 0 && (
+                                <p className="font-mono text-[9px] text-ink-soft/60">{bdtD(r.selling_price)} / pc</p>
+                              )}
+                            </div>
+                            <span className="self-center font-mono text-[11px] font-semibold text-chrome text-right">
+                              {r.fresh > 0 ? r.fresh : "—"}
+                            </span>
+                            <span className="self-center font-mono text-[11px] text-gold-deep text-right">
+                              {r.carried_forward > 0 ? r.carried_forward : "—"}
+                            </span>
+                            <span className={`self-center font-mono text-[11px] text-right ${r.wastage > 0 ? "text-chili font-semibold" : "text-ink-soft"}`}>
+                              {r.wastage > 0 ? r.wastage : "—"}
+                            </span>
+                            <span className="self-center font-mono text-[11px] text-ink-soft text-right">
+                              {sellValue > 0 ? bdtD(sellValue) : "—"}
+                            </span>
                           </div>
-                          <span className={`self-center font-mono text-[13px] font-bold text-right ${s.pieces_available < 5 ? "text-chili" : "text-leaf-deep"}`}>
-                            {s.pieces_available}
-                          </span>
-                          <span className="self-center font-mono text-[11px] text-ink-soft text-right">
-                            {Number(s.selling_price) > 0
-                              ? bdtD(s.pieces_available * Number(s.selling_price))
-                              : "—"}
-                          </span>
-                        </div>
-                      ))}
-                      {prepStockTotal > 0 && (
+                        );
+                      })}
+                      {grandTotal > 0 && (
                         <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
                           <span className="font-mono text-[11px] font-semibold text-ink">
-                            Total: {bdtD(prepStockTotal)}
+                            Total: {bdtD(grandTotal)}
                           </span>
                         </div>
                       )}
@@ -631,7 +654,7 @@ export default function OwnerHome() {
               const otherReadyTotal = otherReady.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
               const rawTotal = rawStock.reduce((sum, rs) => sum + Number(rs.quantity_available) * Number(rs.cost_per_base_unit), 0);
 
-              const COL4 = "grid grid-cols-[1fr_3rem_6rem_6.5rem]";
+              const COL4 = "grid grid-cols-[minmax(0,1fr)_3rem_6rem_6.5rem]";
 
               return (
                 <Section
@@ -694,8 +717,8 @@ export default function OwnerHome() {
                             const cost = Number(s.purchase_price ?? 0);
                             return (
                               <div key={`ors-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
-                                <div>
-                                  <p className="font-mono text-[11px] text-ink">{s.product_name}</p>
+                                <div className="min-w-0">
+                                  <p className="font-mono text-[11px] text-ink truncate">{s.product_name}</p>
                                   <p className="font-mono text-[9px] text-ink-soft/60">{s.product_category}</p>
                                 </div>
                                 <span className={`self-center font-mono text-[11px] font-semibold text-right ${s.pieces_available < 5 ? "text-chili" : "text-ink"}`}>{s.pieces_available}</span>
@@ -705,22 +728,39 @@ export default function OwnerHome() {
                             );
                           })}
 
-                          {rawStock.map((rs, i) => {
-                            const qty = Number(rs.quantity_available);
-                            const cost = Number(rs.cost_per_base_unit);
-                            return (
-                              <div key={`raw-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
-                                <div>
-                                  <p className="font-mono text-[11px] text-ink truncate">{rs.ingredient}</p>
-                                  <p className="font-mono text-[9px] text-ink-soft/60">{rs.base_unit}</p>
-                                </div>
-                                <span className={`self-center font-mono text-[11px] font-semibold text-right ${qty < 5 ? "text-chili" : "text-ink"}`}>
-                                  {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                          {[...INGREDIENT_GROUPS, { key: "Supply", icon: "📦" }].flatMap(({ key, icon }) => {
+                            const group = rawStock
+                              .filter((rs) => rs.ingredient_group === key)
+                              .sort(
+                                (a, b) =>
+                                  a.primary_product.localeCompare(b.primary_product) ||
+                                  a.ingredient.localeCompare(b.ingredient)
+                              );
+                            if (group.length === 0) return [];
+                            return [
+                              <div key={`grp-${key}`} className="col-span-4 px-1 pt-2 pb-0.5">
+                                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">
+                                  {icon} {key}
                                 </span>
-                                <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
-                                <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 ? bdtD(qty * cost) : "—"}</span>
-                              </div>
-                            );
+                              </div>,
+                              ...group.map((rs, i) => {
+                                const qty = Number(rs.quantity_available);
+                                const cost = Number(rs.cost_per_base_unit);
+                                return (
+                                  <div key={`raw-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                                    <div className="min-w-0">
+                                      <p className="font-mono text-[11px] text-ink truncate">{rs.ingredient}</p>
+                                      <p className="font-mono text-[9px] text-ink-soft/60">{rs.base_unit}</p>
+                                    </div>
+                                    <span className={`self-center font-mono text-[11px] font-semibold text-right ${qty < 5 ? "text-chili" : "text-ink"}`}>
+                                      {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                                    </span>
+                                    <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                                    <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 ? bdtD(qty * cost) : "—"}</span>
+                                  </div>
+                                );
+                              }),
+                            ];
                           })}
 
                           {(otherReadyTotal + rawTotal) > 0 && (

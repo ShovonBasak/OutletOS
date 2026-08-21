@@ -9,22 +9,14 @@ import {
 } from "@/lib/operatingDay";
 import { useOperatingDay } from "@/lib/staffDay";
 import { packBreakdown } from "@/lib/format";
-import type { DayStartStockRow, DiscrepancyReason, IngredientGroup } from "@/lib/types";
+import type { DayStartStockRow, DiscrepancyReason } from "@/lib/types";
+import { INGREDIENT_GROUPS } from "@/lib/types";
 
 const REASONS: { value: DiscrepancyReason; label: string }[] = [
   { value: "SPOILED", label: "Spoiled" },
   { value: "MISCOUNTED_YESTERDAY", label: "Miscounted yesterday" },
   { value: "SURPLUS_FOUND", label: "Surplus found" },
   { value: "OTHER", label: "Other" },
-];
-
-const GROUPS: { key: IngredientGroup; label: string; icon: string }[] = [
-  { key: "CHICKEN_PIECE", label: "Chicken — Main",    icon: "🍗" },
-  { key: "SNACK",         label: "Snacks & Balls",    icon: "🍡" },
-  { key: "BURGER_WRAP",   label: "Burgers & Wraps",   icon: "🍔" },
-  { key: "BEVERAGE",      label: "Beverages",          icon: "🥤" },
-  { key: "SUPPLY",        label: "Supplies",           icon: "📦" },
-  { key: "OTHER",         label: "Other",              icon: "🗂" },
 ];
 
 export default function DayStartStock() {
@@ -98,108 +90,124 @@ export default function DayStartStock() {
         )}
       </div>
 
-      {GROUPS.map(({ key, label, icon }) => {
+      {[...INGREDIENT_GROUPS, { key: "Supply", icon: "📦" }].map(({ key, icon }) => {
         const groupRows = rows
           .map((row, i) => ({ row, i }))
-          .filter(({ row }) => row.ingredient_group === key);
+          .filter(({ row }) => row.ingredient_group === key)
+          .sort(
+            (a, b) =>
+              a.row.primary_product.localeCompare(b.row.primary_product) ||
+              a.row.ingredient_display_name.localeCompare(b.row.ingredient_display_name)
+          );
         if (groupRows.length === 0) return null;
 
+        const flaggedInGroup = groupRows.filter(({ row }) =>
+          Number(row.system_carried_qty) !== Number(row.confirmed_qty)
+        ).length;
+
         return (
-          <div key={key} className="flex flex-col gap-2">
+          <div key={key} className="rounded border border-[#d8cdb0] bg-paper overflow-hidden">
             {/* Group header */}
-            <div className="flex items-center gap-1.5 border-b border-dotted border-[#d8cdb0] pb-1">
-              <span className="text-sm">{icon}</span>
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-wide text-ink-soft">
-                {label}
-              </p>
-              <span className="font-mono text-[10px] text-ink-soft/50">
-                · {groupRows.length} item{groupRows.length > 1 ? "s" : ""}
-              </span>
+            <div className="flex items-center justify-between px-3 py-2 bg-[#f5f0e8] border-b border-dashed border-[#d8cdb0]">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">{icon}</span>
+                <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-soft/60">
+                  {key}
+                </p>
+                <span className="font-mono text-[9px] text-ink-soft/40">
+                  · {groupRows.length}
+                </span>
+              </div>
+              {flaggedInGroup > 0 && (
+                <span className="font-mono text-[9px] text-chili">
+                  {flaggedInGroup} mismatch{flaggedInGroup > 1 ? "es" : ""}
+                </span>
+              )}
             </div>
 
-            {groupRows.map(({ row, i }) => {
-              const diff = Number(row.system_carried_qty) - Number(row.confirmed_qty);
-              const flagged = diff !== 0;
-              const systemPacks = packBreakdown(row.system_carried_qty, row.pieces_per_pack, row.base_unit);
-              const countedPacks = packBreakdown(row.confirmed_qty, row.pieces_per_pack, row.base_unit);
+            {/* Items */}
+            <div className="divide-y divide-dashed divide-[#e8dfc8]">
+              {groupRows.map(({ row, i }) => {
+                const diff = Number(row.system_carried_qty) - Number(row.confirmed_qty);
+                const flagged = diff !== 0;
+                const systemPacks = packBreakdown(row.system_carried_qty, row.pieces_per_pack, row.base_unit);
+                const countedPacks = packBreakdown(row.confirmed_qty, row.pieces_per_pack, row.base_unit);
 
-              return (
-                <div
-                  key={row.ingredient}
-                  className={`rounded border px-3 py-2.5 ${
-                    flagged ? "border-chili/50 bg-chili/10" : "border-leaf/40 bg-leaf/10"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="font-display text-sm font-bold">
-                        {row.ingredient_display_name}
-                      </span>
-                      {row.ingredient_display_name !== row.ingredient_name && (
-                        <p className="font-mono text-[9px] text-ink-soft/50 leading-tight mt-0.5">
-                          {row.ingredient_name}
+                return (
+                  <div
+                    key={row.ingredient}
+                    className={`px-3 py-2.5 ${flagged ? "bg-chili/5" : ""}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-display text-sm font-bold">
+                          {row.ingredient_display_name}
+                        </span>
+                        {row.ingredient_display_name !== row.ingredient_name && (
+                          <p className="font-mono text-[9px] text-ink-soft/50 leading-tight mt-0.5 truncate">
+                            {row.ingredient_name}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-mono text-[10px] text-ink-soft">
+                          system {Number(row.system_carried_qty)} {row.base_unit}
+                        </p>
+                        {systemPacks && (
+                          <p className="font-mono text-[10px] text-ink-soft/60">= {systemPacks}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-1.5 flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="field-label">Counted</span>
+                        <input
+                          type="number"
+                          className="field-input w-24"
+                          value={row.confirmed_qty}
+                          onChange={(e) => setConfirmed(i, Number(e.target.value))}
+                        />
+                        <span className="font-mono text-[11px] text-ink-soft">{row.base_unit}</span>
+                        {flagged && (
+                          <span className="font-mono text-[10px] text-chili">
+                            Δ {diff > 0 ? "−" : "+"}{Math.abs(diff)}
+                          </span>
+                        )}
+                      </div>
+                      {countedPacks && (
+                        <p className="font-mono text-[10px] text-ink-soft/60 pl-[3.75rem]">
+                          = {countedPacks}
                         </p>
                       )}
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-mono text-[10px] text-ink-soft">
-                        system {Number(row.system_carried_qty)} {row.base_unit}
-                      </p>
-                      {systemPacks && (
-                        <p className="font-mono text-[10px] text-ink-soft/60">= {systemPacks}</p>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="mt-1.5 flex flex-col gap-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="field-label">Counted</span>
-                      <input
-                        type="number"
-                        className="field-input w-24"
-                        value={row.confirmed_qty}
-                        onChange={(e) => setConfirmed(i, Number(e.target.value))}
-                      />
-                      <span className="font-mono text-[11px] text-ink-soft">{row.base_unit}</span>
-                      {flagged && (
-                        <span className="font-mono text-[10px] text-chili">
-                          Δ {diff > 0 ? "−" : "+"}
-                          {Math.abs(diff)}
-                        </span>
-                      )}
-                    </div>
-                    {countedPacks && (
-                      <p className="font-mono text-[10px] text-ink-soft/60 pl-[3.75rem]">
-                        = {countedPacks}
-                      </p>
+                    {flagged && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        <select
+                          className="field-input"
+                          value={row.discrepancy_reason}
+                          onChange={(e) => setReason(i, e.target.value as DiscrepancyReason)}
+                        >
+                          <option value="">Pick a reason…</option>
+                          {REASONS.map((r) => (
+                            <option key={r.value} value={r.value}>{r.label}</option>
+                          ))}
+                        </select>
+                        {row.discrepancy_reason === "OTHER" && (
+                          <input
+                            className="field-input"
+                            placeholder="Note (required for Other)"
+                            value={row.note}
+                            onChange={(e) => setNote(i, e.target.value)}
+                          />
+                        )}
+                      </div>
                     )}
                   </div>
-
-                  {flagged && (
-                    <div className="mt-2 flex flex-col gap-1">
-                      <select
-                        className="field-input"
-                        value={row.discrepancy_reason}
-                        onChange={(e) => setReason(i, e.target.value as DiscrepancyReason)}
-                      >
-                        <option value="">Pick a reason…</option>
-                        {REASONS.map((r) => (
-                          <option key={r.value} value={r.value}>{r.label}</option>
-                        ))}
-                      </select>
-                      {row.discrepancy_reason === "OTHER" && (
-                        <input
-                          className="field-input"
-                          placeholder="Note (required for Other)"
-                          value={row.note}
-                          onChange={(e) => setNote(i, e.target.value)}
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         );
       })}
