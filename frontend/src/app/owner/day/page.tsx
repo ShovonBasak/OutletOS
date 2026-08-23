@@ -861,7 +861,7 @@ export default function OwnerHome() {
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-baseline justify-between mb-0.5">
                           <p className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">
-                            Remains at close
+                            Unsold prep at close
                           </p>
                           <span className="font-mono text-[11px] font-bold text-gold-deep">
                             {bdt(data.closing!.total_remains_value)}

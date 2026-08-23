@@ -1444,7 +1444,7 @@ def day_overview(request):
                         ),
                     }
                     for sc in closing.stock_counts.select_related("product")
-                    if sc.remains_pieces > 0 and not sc.product.requires_preparation
+                    if sc.remains_pieces > 0 and sc.product.requires_preparation
                 ],
                 key=lambda x: (x["product_category"], x["product_name"]),
             ),
@@ -1452,7 +1452,7 @@ def day_overview(request):
                 sum(
                     (_price(sc) * sc.remains_pieces
                      for sc in closing.stock_counts.select_related("product")
-                     if sc.remains_pieces > 0 and not sc.product.requires_preparation),
+                     if sc.remains_pieces > 0 and sc.product.requires_preparation),
                     Decimal("0"),
                 ).quantize(Decimal("0.01"))
             ),
