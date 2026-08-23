@@ -853,6 +853,43 @@ export default function OwnerHome() {
                     </div>
                   )}
 
+                  {/* Remains at close */}
+                  {data.closing.stock_counts_remains.length > 0 && (() => {
+                    const remains = data.closing!.stock_counts_remains;
+                    const categories = [...new Set(remains.map(r => r.product_category))];
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-baseline justify-between mb-0.5">
+                          <p className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">
+                            Remains at close
+                          </p>
+                          <span className="font-mono text-[11px] font-bold text-gold-deep">
+                            {bdt(data.closing!.total_remains_value)}
+                          </span>
+                        </div>
+                        {categories.map(cat => (
+                          <div key={cat}>
+                            <p className="font-mono text-[9px] text-ink-soft/40 uppercase tracking-wider pt-1 pb-0.5">
+                              {cat}
+                            </p>
+                            {remains.filter(r => r.product_category === cat).map((r, i) => (
+                              <div key={i} className="flex items-baseline justify-between">
+                                <span className="font-mono text-[11px] text-ink truncate mr-2">
+                                  {r.product_name}
+                                </span>
+                                <span className="font-mono text-[11px] shrink-0 text-ink-soft">
+                                  {r.remains_pieces} pcs
+                                  <span className="text-ink-soft/40 mx-1">·</span>
+                                  <span className="text-gold-deep font-semibold">{bdt(r.remains_value)}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   {/* Flags */}
                   {data.closing.has_flag && (
                     <div className="rounded border border-chili/30 bg-chili/5 px-3 py-2">

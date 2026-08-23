@@ -419,6 +419,27 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 )
 
         _initialize_direct_stock(record.outlet)
+
+        # Refresh available_pieces in any open closing for today so it reflects
+        # the newly approved stock-in (DisplayStock was just updated above).
+        from closing.models import DailyClosing, DailyClosingStockCount
+        open_closing = (
+            DailyClosing.objects
+            .filter(outlet=record.outlet, closing_date=record.stock_in_date)
+            .exclude(status="LOCKED")
+            .first()
+        )
+        if open_closing:
+            for sc in open_closing.stock_counts.select_related("product").filter(
+                product__requires_preparation=False
+            ):
+                ds = DisplayStock.objects.filter(
+                    outlet=record.outlet, product=sc.product
+                ).first()
+                if ds:
+                    sc.available_pieces = ds.pieces_available
+                    sc.save(update_fields=["available_pieces"])
+
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])

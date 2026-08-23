@@ -851,6 +851,14 @@ export interface DayOverviewClosing {
   flagged_products: { product_name: string; derived_walkin_sold: number }[];
   payments: { account_name: string; is_primary_cash: boolean; amount: string }[];
   stock_counts_wastage: { product_name: string; wastage_pieces: number }[];
+  stock_counts_remains: {
+    product_name: string;
+    product_category: string;
+    remains_pieces: number;
+    unit_price: string;
+    remains_value: string;
+  }[];
+  total_remains_value: string;
 }
 
 export interface DayOverview {

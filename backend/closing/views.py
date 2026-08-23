@@ -214,13 +214,27 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             obj.remains_pieces = row.get("remains_pieces", obj.remains_pieces)
             obj.save()
             # For direct-sale products (beverages), sync RawStock to remains.
+            # We also add any stock-in approved today so that re-submitting the
+            # count after a mid-day delivery doesn't erase that delivery from
+            # RawStock (tomorrow's system_carried_qty depends on it).
             if not product.requires_preparation:
                 remains = Decimal(row.get("remains_pieces", 0))
+                from stock.models import StockInItem, StockInStatus
                 for recipe in product.recipes.select_related("ingredient"):
+                    today_stock_in = sum(
+                        (item.base_unit_quantity()
+                         for item in StockInItem.objects.filter(
+                             stock_in_record__outlet=closing.outlet,
+                             stock_in_record__stock_in_date=closing.closing_date,
+                             stock_in_record__status=StockInStatus.APPROVED,
+                             ingredient=recipe.ingredient,
+                         )),
+                        Decimal("0"),
+                    )
                     RawStock.set_to(
                         closing.outlet,
                         recipe.ingredient,
-                        remains * recipe.quantity_per_unit,
+                        remains * recipe.quantity_per_unit + today_stock_in,
                     )
         recompute_closing(closing)
         return self._fresh_response(closing)

@@ -1400,6 +1400,9 @@ def day_overview(request):
     )
     if closing:
         flagged_counts = [sc for sc in closing.stock_counts.all() if sc.flag]
+        def _price(sc):
+            row = sc.product.active_price()
+            return row.price if row else Decimal("0")
         closing_data = {
             "id": closing.id,
             "status": closing.status,
@@ -1429,6 +1432,30 @@ def day_overview(request):
                 for sc in closing.stock_counts.select_related("product")
                 if sc.wastage_pieces and sc.wastage_pieces > 0
             ],
+            "stock_counts_remains": sorted(
+                [
+                    {
+                        "product_name": sc.product.name,
+                        "product_category": sc.product.category,
+                        "remains_pieces": sc.remains_pieces,
+                        "unit_price": str(_price(sc)),
+                        "remains_value": str(
+                            (_price(sc) * sc.remains_pieces).quantize(Decimal("0.01"))
+                        ),
+                    }
+                    for sc in closing.stock_counts.select_related("product")
+                    if sc.remains_pieces > 0 and not sc.product.requires_preparation
+                ],
+                key=lambda x: (x["product_category"], x["product_name"]),
+            ),
+            "total_remains_value": str(
+                sum(
+                    (_price(sc) * sc.remains_pieces
+                     for sc in closing.stock_counts.select_related("product")
+                     if sc.remains_pieces > 0 and not sc.product.requires_preparation),
+                    Decimal("0"),
+                ).quantize(Decimal("0.01"))
+            ),
         }
 
     # ── Today's P&L ───────────────────────────────────────────────────────
