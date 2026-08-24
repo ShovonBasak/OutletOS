@@ -214,12 +214,18 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             obj.remains_pieces = row.get("remains_pieces", obj.remains_pieces)
             obj.save()
             # For direct-sale products (beverages), sync RawStock to remains.
-            # We also add any stock-in approved today so that re-submitting the
-            # count after a mid-day delivery doesn't erase that delivery from
-            # RawStock (tomorrow's system_carried_qty depends on it).
+            # If the count was taken BEFORE the delivery arrived, the delivery is
+            # not yet in remains, so we add today's stock-in to get the true physical
+            # balance. If the count was taken AFTER delivery (remains > day_start),
+            # the delivery is already included in remains — don't add it again.
             if not product.requires_preparation:
                 remains = Decimal(row.get("remains_pieces", 0))
-                from stock.models import StockInItem, StockInStatus
+                from stock.models import (
+                    StockInItem, StockInStatus, OperatingDay, DayStartStockCheck,
+                )
+                op_day = OperatingDay.objects.filter(
+                    outlet=closing.outlet, date=closing.closing_date
+                ).first()
                 for recipe in product.recipes.select_related("ingredient"):
                     today_stock_in = sum(
                         (item.base_unit_quantity()
@@ -231,11 +237,20 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
                          )),
                         Decimal("0"),
                     )
-                    RawStock.set_to(
-                        closing.outlet,
-                        recipe.ingredient,
-                        remains * recipe.quantity_per_unit + today_stock_in,
-                    )
+                    qty_per = recipe.quantity_per_unit or Decimal("1")
+                    raw_qty = remains * qty_per
+                    if today_stock_in > 0 and op_day:
+                        day_start_check = DayStartStockCheck.objects.filter(
+                            operating_day=op_day, ingredient=recipe.ingredient
+                        ).first()
+                        day_start_pieces = (
+                            int(day_start_check.confirmed_qty / qty_per)
+                            if day_start_check else 0
+                        )
+                        # Only add stock_in if count was before delivery arrived
+                        if int(remains) <= day_start_pieces:
+                            raw_qty += today_stock_in
+                    RawStock.set_to(closing.outlet, recipe.ingredient, raw_qty)
         recompute_closing(closing)
         return self._fresh_response(closing)
 
