@@ -136,22 +136,25 @@ class Command(BaseCommand):
                 # Heuristic: if remains > day_start, count was taken AFTER delivery arrived.
                 count_was_after_delivery = sc.remains_pieces > pieces_day_start
 
+                # In both cases available = day_start + stock_in (total that passed through).
+                correct_available = pieces_day_start + pieces_stock_in_total
+
+                # For "count before delivery": remains doesn't yet include the delivery,
+                # so correct it to the true end-of-day balance.
                 if count_was_after_delivery:
-                    # available should be day_start + stock_in
-                    correct_available = pieces_day_start + pieces_stock_in_total
-                    fix_rawstock = False  # RawStock = remains is already correct
+                    correct_remains = sc.remains_pieces  # delivery already in staff count
                 else:
-                    # available should be day_start only (delivery wasn't there yet)
-                    correct_available = pieces_day_start
-                    fix_rawstock = True  # RawStock needs to include the delivery
+                    correct_remains = sc.remains_pieces + pieces_stock_in_total
 
-                if sc.available_pieces == correct_available and not fix_rawstock:
-                    continue  # nothing to do
-
-                # Also skip if the only thing "wrong" is the rawstock for a "before" case
-                # but available is already correct — still run to fix rawstock.
                 old_walkin = sc.available_pieces - sc.wastage_pieces - sc.remains_pieces - sc.app_channel_sold
-                new_walkin = correct_available - sc.wastage_pieces - sc.remains_pieces - sc.app_channel_sold
+                new_walkin = correct_available - sc.wastage_pieces - correct_remains - sc.app_channel_sold
+
+                nothing_changed = (
+                    sc.available_pieces == correct_available
+                    and sc.remains_pieces == correct_remains
+                )
+                if nothing_changed:
+                    continue
 
                 self.stdout.write(
                     f"\n  {closing.closing_date} [{closing.status}]  {product.name}"
@@ -162,41 +165,45 @@ class Command(BaseCommand):
                         f"    available_pieces: {sc.available_pieces} → {correct_available}"
                         f"  (day_start={pieces_day_start}, stock_in={pieces_stock_in_total})"
                     )
+                if sc.remains_pieces != correct_remains:
                     self.stdout.write(
-                        f"    derived_walkin:   {old_walkin} → {new_walkin}"
+                        f"    remains_pieces:   {sc.remains_pieces} → {correct_remains}"
                     )
+                self.stdout.write(
+                    f"    derived_walkin:   {old_walkin} → {new_walkin}"
+                )
 
-                if fix_rawstock:
-                    for recipe, iid, ing_stock_in, qty_per, _, _ in recipe_data:
-                        correct_raw = Decimal(sc.remains_pieces) * qty_per + ing_stock_in
-                        rs_now = RawStock.objects.filter(
-                            outlet=closing.outlet, ingredient=recipe.ingredient
-                        ).first()
-                        raw_now = rs_now.quantity_available if rs_now else Decimal("0")
+                # RawStock = correct_remains in base units (true end-of-day physical balance).
+                for recipe, iid, ing_stock_in, qty_per, _, _ in recipe_data:
+                    correct_raw = Decimal(correct_remains) * qty_per
+                    rs_now = RawStock.objects.filter(
+                        outlet=closing.outlet, ingredient=recipe.ingredient
+                    ).first()
+                    raw_now = rs_now.quantity_available if rs_now else Decimal("0")
+                    if raw_now != correct_raw:
                         self.stdout.write(
                             f"    RawStock({recipe.ingredient.name}): {raw_now} → {correct_raw}"
                         )
 
                 if not dry_run:
                     with transaction.atomic():
-                        if sc.available_pieces != correct_available:
-                            sc.available_pieces = correct_available
-                            sc.flag = new_walkin < 0
-                            sc.save(update_fields=["available_pieces", "flag"])
+                        sc.available_pieces = correct_available
+                        sc.remains_pieces = correct_remains
+                        sc.flag = new_walkin < 0
+                        sc.save(update_fields=["available_pieces", "remains_pieces", "flag"])
 
-                        if fix_rawstock:
-                            for recipe, iid, ing_stock_in, qty_per, _, _ in recipe_data:
-                                correct_raw = Decimal(sc.remains_pieces) * qty_per + ing_stock_in
-                                RawStock.set_to(closing.outlet, recipe.ingredient, correct_raw)
-                                ds = DisplayStock.objects.filter(
-                                    outlet=closing.outlet, product=product
-                                ).first()
-                                if ds:
-                                    ds.pieces_available = int(correct_raw / qty_per)
-                                    ds.save(update_fields=["pieces_available"])
+                        for recipe, iid, ing_stock_in, qty_per, _, _ in recipe_data:
+                            correct_raw = Decimal(correct_remains) * qty_per
+                            RawStock.set_to(closing.outlet, recipe.ingredient, correct_raw)
+                            ds = DisplayStock.objects.filter(
+                                outlet=closing.outlet, product=product
+                            ).first()
+                            if ds:
+                                ds.pieces_available = int(correct_raw / qty_per)
+                                ds.save(update_fields=["pieces_available"])
 
-                        # Rebuild SYSTEM_DERIVED walk-in sales line if available changed.
-                        if sc.available_pieces != correct_available and walk_in:
+                        # Rebuild SYSTEM_DERIVED walk-in sales line.
+                        if walk_in:
                             old_line = DailyClosingSalesLine.objects.filter(
                                 daily_closing=closing,
                                 product=product,
