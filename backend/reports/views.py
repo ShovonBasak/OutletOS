@@ -1268,17 +1268,21 @@ def day_overview(request):
         alias = next((a for a in ingredient.aliases.all() if a.is_active), None)
         return alias.alias_text if alias else ingredient.name
 
+    from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
+    _category_map = build_ingredient_category_map()
+
     day_start_checks = []
     if op_day:
         checks = list(
             DayStartStockCheck.objects.filter(operating_day=op_day)
             .select_related("ingredient")
-            .prefetch_related("ingredient__aliases")
+            .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
         )
         for chk in sorted(checks, key=lambda c: _display_name(c.ingredient).lower()):
             disc = chk.discrepancy_qty
             cpu = chk.ingredient.cost_per_base_unit or Decimal("0")
             shrinkage_cost = (max(disc, Decimal("0")) * cpu).quantize(Decimal("0.01"))
+            active_pack = chk.ingredient.active_pack()
             day_start_checks.append({
                 "ingredient": _display_name(chk.ingredient),
                 "base_unit": chk.ingredient.base_unit,
@@ -1288,6 +1292,8 @@ def day_overview(request):
                 "discrepancy_reason": chk.discrepancy_reason,
                 "note": chk.note,
                 "shrinkage_cost": str(shrinkage_cost),
+                "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
+                "ingredient_group": resolve_ingredient_group(chk.ingredient, _category_map),
             })
 
     # ── Stock-in records for this date ────────────────────────────────────
@@ -1337,6 +1343,7 @@ def day_overview(request):
     )
     non_prep_ids = [s.product_id for s in _display_qs if not s.product.requires_preparation]
     _recipe_cost: dict = {}
+    _non_prep_pack: dict = {}  # product_id → pieces_per_pack (Decimal)
     for r in (
         Recipe.objects.filter(product_id__in=non_prep_ids)
         .select_related("ingredient")
@@ -1344,6 +1351,10 @@ def day_overview(request):
     ):
         cost = (r.ingredient.cost_per_base_unit or Decimal("0")) * r.quantity_per_unit
         _recipe_cost[r.product_id] = _recipe_cost.get(r.product_id, Decimal("0")) + cost
+        if r.product_id not in _non_prep_pack:
+            active_pack = r.ingredient.active_pack()
+            if active_pack:
+                _non_prep_pack[r.product_id] = active_pack.pieces_per_pack
 
     display_stock = []
     for s in _display_qs:
@@ -1352,6 +1363,7 @@ def day_overview(request):
         price_obj = s.product.active_price(as_of=date)
         selling_price = price_obj.price if price_obj else Decimal("0")
         purchase_price = _recipe_cost.get(s.product_id, Decimal("0")) if not s.product.requires_preparation else None
+        ppp = _non_prep_pack.get(s.product_id) if not s.product.requires_preparation else None
         display_stock.append({
             "product_name": s.product.name,
             "product_category": s.product.category,
@@ -1359,6 +1371,7 @@ def day_overview(request):
             "requires_preparation": s.product.requires_preparation,
             "selling_price": str(selling_price),
             "purchase_price": str(purchase_price) if purchase_price is not None else None,
+            "pieces_per_pack": str(ppp) if ppp is not None else None,
         })
 
     # ── Raw ingredient stock (RECIPE_LINKED, qty > 0) ─────────────────────
@@ -1376,20 +1389,19 @@ def day_overview(request):
         .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
         if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
     ]
-    from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
-    _category_map = build_ingredient_category_map()
     _product_map = build_ingredient_product_map()
-    raw_stock = [
-        {
+    raw_stock = []
+    for rs in sorted(_raw_qs, key=lambda r: _display_name(r.ingredient).lower()):
+        active_pack = rs.ingredient.active_pack()
+        raw_stock.append({
             "ingredient": _display_name(rs.ingredient),
             "base_unit": rs.ingredient.base_unit,
             "quantity_available": str(rs.quantity_available),
             "cost_per_base_unit": str(rs.ingredient.cost_per_base_unit or Decimal("0")),
             "ingredient_group": resolve_ingredient_group(rs.ingredient, _category_map),
             "primary_product": _product_map.get(rs.ingredient_id, ""),
-        }
-        for rs in sorted(_raw_qs, key=lambda r: _display_name(r.ingredient).lower())
-    ]
+            "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
+        })
 
     # ── Closing snapshot ──────────────────────────────────────────────────
     closing_data = None
@@ -1455,6 +1467,24 @@ def day_overview(request):
                      if sc.remains_pieces > 0 and sc.product.requires_preparation),
                     Decimal("0"),
                 ).quantize(Decimal("0.01"))
+            ),
+            "sales_by_product": sorted(
+                [
+                    {
+                        "product_name": sc.product.name,
+                        "product_category": sc.product.category,
+                        "walkin_sold": max(sc.derived_walkin_sold, 0),
+                        "online_sold": sc.app_channel_sold,
+                        "total_sold": max(sc.derived_walkin_sold, 0) + sc.app_channel_sold,
+                        "selling_price": str(_price(sc)),
+                        "revenue": str(
+                            (_price(sc) * (max(sc.derived_walkin_sold, 0) + sc.app_channel_sold)).quantize(Decimal("0.01"))
+                        ),
+                    }
+                    for sc in closing.stock_counts.select_related("product")
+                    if max(sc.derived_walkin_sold, 0) + sc.app_channel_sold > 0
+                ],
+                key=lambda x: (x["product_category"], x["product_name"]),
             ),
         }
 

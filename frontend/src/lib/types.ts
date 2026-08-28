@@ -797,6 +797,8 @@ export interface DayOverviewStockCheck {
   discrepancy_reason: string;
   note: string;
   shrinkage_cost: string;
+  pieces_per_pack: string | null;
+  ingredient_group: IngredientGroup;
 }
 
 export interface DayOverviewStockIn {
@@ -828,6 +830,7 @@ export interface DayOverviewDisplayStock {
   requires_preparation: boolean;
   selling_price: string;
   purchase_price: string | null;
+  pieces_per_pack: string | null;
 }
 
 export interface DayOverviewRawStock {
@@ -837,6 +840,17 @@ export interface DayOverviewRawStock {
   cost_per_base_unit: string;
   ingredient_group: IngredientGroup;
   primary_product: string;
+  pieces_per_pack: string | null;
+}
+
+export interface DayOverviewSalesProduct {
+  product_name: string;
+  product_category: string;
+  walkin_sold: number;
+  online_sold: number;
+  total_sold: number;
+  selling_price: string;
+  revenue: string;
 }
 
 export interface DayOverviewClosing {
@@ -859,6 +873,7 @@ export interface DayOverviewClosing {
     remains_value: string;
   }[];
   total_remains_value: string;
+  sales_by_product: DayOverviewSalesProduct[];
 }
 
 export interface DayOverview {
