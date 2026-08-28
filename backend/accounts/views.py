@@ -7,8 +7,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import PushSubscription, User
-from .permissions import IsAdmin
+from .models import PushSubscription, Role, User
+from .permissions import IsAdmin, IsOwnerOrAdmin
 from .serializers import RoleTokenObtainPairSerializer, UserSerializer
 
 
@@ -20,6 +20,58 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdmin]
+
+
+class TeamUserViewSet(viewsets.ModelViewSet):
+    """User management for OWNER and ADMIN roles.
+    OWNER can only see and manage STAFF users; cannot change roles or delete."""
+
+    serializer_class = UserSerializer
+    permission_classes = [IsOwnerOrAdmin]
+
+    def get_queryset(self):
+        if self.request.user.is_admin:
+            return User.objects.all().order_by("name")
+        return User.objects.filter(role=Role.STAFF).order_by("name")
+
+    def perform_create(self, serializer):
+        if not self.request.user.is_admin:
+            serializer.save(role=Role.STAFF)
+        else:
+            serializer.save()
+
+    def perform_update(self, serializer):
+        instance = self.get_object()
+        if not self.request.user.is_admin:
+            serializer.save(role=instance.role)
+        else:
+            serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"error": "Users cannot be deleted. Use toggle-active to deactivate."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="toggle-active")
+    def toggle_active(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = not user.is_active
+        user.save()
+        return Response(UserSerializer(user).data)
+
+    @action(detail=True, methods=["post"], url_path="reset-password")
+    def reset_password(self, request, pk=None):
+        user = self.get_object()
+        password = request.data.get("password", "").strip()
+        if len(password) < 8:
+            return Response(
+                {"error": "Password must be at least 8 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(password)
+        user.save()
+        return Response({"detail": "Password reset successfully."})
 
 
 class MeView(APIView):

@@ -41,12 +41,19 @@ export const OWNER_NAV: NavGroup[] = [
     ],
   },
   {
+    group: "Analyst",
+    items: [
+      { href: "/owner/analyst", label: "Order planner" },
+    ],
+  },
+  {
     group: "Manage",
     items: [
       { href: "/owner/sell-corrections", label: "Sell corrections", adminOnly: true },
       { href: "/owner/accounts",         label: "Accounts" },
       { href: "/owner/expenses",         label: "Expenses" },
       { href: "/owner/other-income",     label: "Other income" },
+      { href: "/owner/team",             label: "Team & outlets" },
     ],
   },
   {
@@ -65,7 +72,6 @@ export const OWNER_NAV: NavGroup[] = [
     adminOnly: true,
     items: [
       { href: "/owner/products", label: "Products & recipes" },
-      { href: "/owner/team",     label: "Team & outlets" },
     ],
   },
   // Setup group — Admin only
@@ -144,7 +150,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
     tab: "/owner/more",
     prefixes: [
       "/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts",
-      "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team",
+      "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/analyst",
       "/owner/settings", "/owner/setup",
       "/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history",
       "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging",

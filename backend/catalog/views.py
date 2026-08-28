@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounts.permissions import IsAdminOrReadOnly
+from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
 from .models import (
     ComboComponent,
     Ingredient,
@@ -38,7 +38,7 @@ from .serializers import (
 class OutletViewSet(viewsets.ModelViewSet):
     queryset = Outlet.objects.all()
     serializer_class = OutletSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsOwnerOrAdminOrReadOnly]
 
 
 class ProductViewSet(viewsets.ModelViewSet):

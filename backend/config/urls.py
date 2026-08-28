@@ -10,7 +10,7 @@ def health(_request):
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.views import UserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView, PushSubscriptionViewSet
+from accounts.views import UserViewSet, TeamUserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView, PushSubscriptionViewSet
 from catalog.views import (
     OutletViewSet,
     ProductViewSet,
@@ -38,6 +38,7 @@ from sales.views import (
     ChannelMenuMapViewSet,
     price_resolve,
 )
+from analyst.views import whatsapp_webhook, order_suggestion_api
 from closing.views import DailyClosingViewSet, ChannelSettlementViewSet
 from costs.views import CostCategoryViewSet, ExpenseViewSet
 from finance.views import (
@@ -71,6 +72,7 @@ from reports.views import (
 
 router = DefaultRouter()
 router.register("users", UserViewSet)
+router.register("team-users", TeamUserViewSet, basename="team-users")
 router.register("push-subscriptions", PushSubscriptionViewSet, basename="push-subscriptions")
 router.register("outlets", OutletViewSet)
 router.register("products", ProductViewSet)
@@ -130,6 +132,8 @@ urlpatterns = [
     path("api/reports/purchase-summary/", purchase_summary, name="purchase_summary"),
     path("api/reports/shrinkage-detail/", shrinkage_detail, name="shrinkage_detail"),
     path("api/reports/day-overview/", day_overview, name="day_overview"),
+    path("api/analyst/whatsapp/", whatsapp_webhook, name="analyst_whatsapp"),
+    path("api/analyst/order-suggestion/", order_suggestion_api, name="analyst_order_suggestion"),
     path("api/", include(router.urls)),
 ]
 

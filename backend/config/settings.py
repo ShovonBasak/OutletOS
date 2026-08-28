@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "income",
     "finance",
     "reports",
+    "analyst",
 ]
 
 MIDDLEWARE = [
@@ -165,6 +166,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
 VAPID_CLAIM_EMAIL = os.getenv("VAPID_CLAIM_EMAIL", "admin@example.com")
+
+# ---------------------------------------------------------------------------
+# WhatsApp Business Cloud API (Meta)
+# WHATSAPP_VERIFY_TOKEN  — any string you choose; paste into Meta webhook config
+# WHATSAPP_APP_SECRET    — App Secret from Meta App Dashboard (for signature check)
+# WHATSAPP_ACCESS_TOKEN  — System User permanent token with whatsapp_business_messaging
+# WHATSAPP_PHONE_NUMBER_ID — Phone Number ID from WhatsApp > API Setup in Meta Dashboard
+# ---------------------------------------------------------------------------
+WHATSAPP_VERIFY_TOKEN   = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+WHATSAPP_APP_SECRET     = os.getenv("WHATSAPP_APP_SECRET", "")
+WHATSAPP_ACCESS_TOKEN   = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
