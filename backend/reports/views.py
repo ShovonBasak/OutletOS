@@ -9,8 +9,9 @@ Packaging (periodic-count supplies) is reported as its own line as well.
 from collections import defaultdict
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Prefetch, Q, Sum
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -24,10 +25,11 @@ from closing.models import (
     DailyClosingSalesLine,
     DailyClosingStockCount,
     LineSource,
+    PaymentEntry,
 )
 from costs.models import CostType, Expense
 from income.models import OtherIncome
-from sales.models import SalesChannel
+from sales.models import SalesChannel, SettlementType
 from sales.pricing import resolve_price
 from stock.models import (
     DayStartStockCheck,
@@ -80,7 +82,13 @@ def _clamped_range(request):
 def _build_pack_history():
     """Load all PackDefinitions into memory as {ingredient_id: [(from, to, cpu), ...]}
     sorted descending by effective_from. One query; used by all cost functions so
-    COGS uses the price that was active on the date of sale/wastage/shrinkage."""
+    COGS uses the price that was active on the date of sale/wastage/shrinkage.
+    Cached for 30 minutes — busted automatically when pack prices change."""
+    _CACHE_KEY = "reports:pack_history"
+    cached = cache.get(_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     from catalog.models import PackDefinition
     rows = PackDefinition.objects.values(
         "ingredient_id", "effective_from", "effective_to",
@@ -96,7 +104,32 @@ def _build_pack_history():
         history.setdefault(r["ingredient_id"], []).append(
             (r["effective_from"], r["effective_to"], cpu)
         )
+    cache.set(_CACHE_KEY, history, timeout=1800)
     return history
+
+
+def _bulk_active_prices(product_ids, as_of):
+    """Return {product_id: Decimal price} for the active ProductPrice on `as_of`.
+    Single query covering all products — eliminates N+1 from calling active_price()
+    per product in loops."""
+    from catalog.models import ProductPrice
+    if not product_ids:
+        return {}
+    rows = (
+        ProductPrice.objects.filter(
+            product_id__in=product_ids,
+            effective_from__lte=as_of,
+        )
+        .filter(Q(effective_to__isnull=True) | Q(effective_to__gte=as_of))
+        .order_by("product_id", "-effective_from")
+        .values("product_id", "price")
+    )
+    result: dict = {}
+    for row in rows:
+        pid = row["product_id"]
+        if pid not in result:  # first row per product = highest effective_from
+            result[pid] = Decimal(str(row["price"]))
+    return result
 
 
 def _cost_at_date(ingredient_id, on_date, pack_history):
@@ -135,9 +168,13 @@ def _product_unit_cost(product, cache, on_date=None, pack_history=None):
 
 def _cogs(outlet, start, end, cost_cache, pack_history=None):
     """Σ over every unit actually SOLD: recipe cost at the price on the sale date."""
-    lines = DailyClosingSalesLine.objects.filter(
-        daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
-    ).select_related("product", "daily_closing")
+    lines = (
+        DailyClosingSalesLine.objects.filter(
+            daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
+        )
+        .select_related("product", "daily_closing")
+        .prefetch_related("product__recipes__ingredient", "product__components__component_product__recipes__ingredient")
+    )
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
     total = Decimal("0")
@@ -151,9 +188,13 @@ def _wastage_cost(outlet, start, end, cost_cache, pack_history=None):
     """Prepared product that never became a sale: closing wastage + carry-forward
     leftover that wasn't moved the next morning."""
     total = Decimal("0")
-    counts = DailyClosingStockCount.objects.filter(
-        daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
-    ).select_related("product", "daily_closing")
+    counts = (
+        DailyClosingStockCount.objects.filter(
+            daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
+        )
+        .select_related("product", "daily_closing")
+        .prefetch_related("product__recipes__ingredient")
+    )
     if outlet:
         counts = counts.filter(daily_closing__outlet_id=outlet)
     for c in counts:
@@ -161,10 +202,14 @@ def _wastage_cost(outlet, start, end, cost_cache, pack_history=None):
             waste_date = c.daily_closing.closing_date
             total += _product_unit_cost(c.product, cost_cache, on_date=waste_date, pack_history=pack_history) * c.wastage_pieces
 
-    carried = PreparationLog.objects.filter(
-        source=PrepSource.CARRIED_FORWARD,
-        timestamp__date__gte=start, timestamp__date__lte=end,
-    ).select_related("product")
+    carried = (
+        PreparationLog.objects.filter(
+            source=PrepSource.CARRIED_FORWARD,
+            timestamp__date__gte=start, timestamp__date__lte=end,
+        )
+        .select_related("product")
+        .prefetch_related("product__recipes__ingredient")
+    )
     if outlet:
         carried = carried.filter(outlet_id=outlet)
     for log in carried:
@@ -1240,9 +1285,14 @@ def rebuild_rawstock_api(request):
 def day_overview(request):
     """Owner's consolidated day view: operating-day status, stock-in, prep log,
     display stock, day-start discrepancies, closing snapshot, and today's P&L.
-    ?outlet=1&date=YYYY-MM-DD (date defaults to today)."""
+    ?outlet=1&date=YYYY-MM-DD (date defaults to today).
+
+    Performance: all product prices loaded in one bulk query; closing stock_counts
+    materialised once from the prefetch cache; catalog lookups are in-process cached."""
     import datetime
     from django.db.models import Count
+    from catalog.models import Recipe
+    from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
 
     outlet = request.query_params.get("outlet", "1")
     date_str = request.query_params.get("date")
@@ -1250,6 +1300,18 @@ def day_overview(request):
         date = datetime.date.fromisoformat(date_str) if date_str else timezone.localdate()
     except ValueError:
         date = timezone.localdate()
+
+    # ── Catalog lookups (in-process cached) ───────────────────────────────
+    _category_map = build_ingredient_category_map()
+    _product_map = build_ingredient_product_map()
+
+    def _display_name(ingredient):
+        cache_ = getattr(ingredient, "_prefetched_objects_cache", {})
+        if "aliases" in cache_:
+            alias = next((a for a in ingredient.aliases.all() if a.is_active), None)
+        else:
+            alias = ingredient.aliases.filter(is_active=True).first()
+        return alias.alias_text if alias else ingredient.name
 
     # ── Operating day ──────────────────────────────────────────────────────
     op_day = OperatingDay.objects.filter(outlet_id=outlet, date=date).first()
@@ -1263,43 +1325,118 @@ def day_overview(request):
             "carry_forward_confirmed_at": op_day.carry_forward_confirmed_at.isoformat() if op_day.carry_forward_confirmed_at else None,
         }
 
-    # ── Day-start stock checks ─────────────────────────────────────────────
-    def _display_name(ingredient):
-        alias = next((a for a in ingredient.aliases.all() if a.is_active), None)
-        return alias.alias_text if alias else ingredient.name
+    # ── Load all querysets up-front ────────────────────────────────────────
 
-    from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
-    _category_map = build_ingredient_category_map()
-
-    day_start_checks = []
+    # Day-start stock checks
+    day_start_checks_raw = []
     if op_day:
-        checks = list(
+        day_start_checks_raw = list(
             DayStartStockCheck.objects.filter(operating_day=op_day)
             .select_related("ingredient")
             .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
         )
-        for chk in sorted(checks, key=lambda c: _display_name(c.ingredient).lower()):
-            disc = chk.discrepancy_qty
-            cpu = chk.ingredient.cost_per_base_unit or Decimal("0")
-            shrinkage_cost = (max(disc, Decimal("0")) * cpu).quantize(Decimal("0.01"))
-            active_pack = chk.ingredient.active_pack()
-            day_start_checks.append({
-                "ingredient": _display_name(chk.ingredient),
-                "base_unit": chk.ingredient.base_unit,
-                "system_qty": str(chk.system_carried_qty),
-                "confirmed_qty": str(chk.confirmed_qty),
-                "discrepancy_qty": str(disc),
-                "discrepancy_reason": chk.discrepancy_reason,
-                "note": chk.note,
-                "shrinkage_cost": str(shrinkage_cost),
-                "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
-                "ingredient_group": resolve_ingredient_group(chk.ingredient, _category_map),
-            })
 
-    # ── Stock-in records for this date ────────────────────────────────────
-    stock_ins_qs = StockInRecord.objects.filter(
-        outlet_id=outlet, stock_in_date=date
-    ).annotate(item_count=Count("items")).select_related("submitted_by").order_by("-id")
+    # Stock-in records
+    stock_ins_raw = list(
+        StockInRecord.objects.filter(outlet_id=outlet, stock_in_date=date)
+        .annotate(item_count=Count("items"))
+        .select_related("submitted_by")
+        .order_by("-id")
+    )
+
+    # Prep logs
+    prep_logs_raw = list(
+        PreparationLog.objects.filter(outlet_id=outlet, op_date=date)
+        .select_related("product")
+        .order_by("timestamp")
+    )
+
+    # Display stock + non-prep recipe cost + pack info
+    _display_qs = list(
+        DisplayStock.objects.filter(outlet_id=outlet)
+        .select_related("product")
+        .order_by("product__category", "product__name")
+    )
+    non_prep_ids = [s.product_id for s in _display_qs if not s.product.requires_preparation]
+    _recipe_cost: dict = {}
+    _non_prep_pack: dict = {}
+    ready_ingredient_ids: set = set()  # avoids a second Recipe query below
+    for r in (
+        Recipe.objects.filter(product_id__in=non_prep_ids)
+        .select_related("ingredient")
+        .prefetch_related("ingredient__pack_definitions")
+    ):
+        cost = (r.ingredient.cost_per_base_unit or Decimal("0")) * r.quantity_per_unit
+        _recipe_cost[r.product_id] = _recipe_cost.get(r.product_id, Decimal("0")) + cost
+        ready_ingredient_ids.add(r.ingredient_id)
+        if r.product_id not in _non_prep_pack:
+            active_pack = r.ingredient.active_pack()
+            if active_pack:
+                _non_prep_pack[r.product_id] = active_pack.pieces_per_pack
+
+    # Raw ingredient stock
+    raw_stock_raw = list(
+        rs for rs in (
+            RawStock.objects.filter(outlet_id=outlet, ingredient__tracking_mode="RECIPE_LINKED")
+            .select_related("ingredient")
+            .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
+        )
+        if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
+    )
+
+    # Closing — prefetch stock_counts+product and payments+account in one shot
+    closing = (
+        DailyClosing.objects.filter(outlet_id=outlet, closing_date=date)
+        .prefetch_related(
+            "stock_counts__product",
+            Prefetch(
+                "sales_lines",
+                queryset=DailyClosingSalesLine.objects.select_related("channel"),
+            ),
+            "channel_discounts",
+            Prefetch(
+                "payments",
+                queryset=PaymentEntry.objects.select_related("account"),
+            ),
+        )
+        .first()
+    )
+
+    # ── Bulk-load active prices (one query covers all sections) ────────────
+    all_product_ids: set = set()
+    for p in prep_logs_raw:
+        all_product_ids.add(p.product_id)
+    for s in _display_qs:
+        if s.pieces_available > 0:
+            all_product_ids.add(s.product_id)
+    if closing:
+        for sc in closing.stock_counts.all():  # uses prefetch cache — no extra query
+            all_product_ids.add(sc.product_id)
+    price_map = _bulk_active_prices(all_product_ids, date)
+
+    # ── Serialise sections ─────────────────────────────────────────────────
+
+    # Day-start stock checks
+    day_start_checks = []
+    for chk in sorted(day_start_checks_raw, key=lambda c: _display_name(c.ingredient).lower()):
+        disc = chk.discrepancy_qty
+        cpu = chk.ingredient.cost_per_base_unit or Decimal("0")
+        shrinkage_cost = (max(disc, Decimal("0")) * cpu).quantize(Decimal("0.01"))
+        active_pack = chk.ingredient.active_pack()
+        day_start_checks.append({
+            "ingredient": _display_name(chk.ingredient),
+            "base_unit": chk.ingredient.base_unit,
+            "system_qty": str(chk.system_carried_qty),
+            "confirmed_qty": str(chk.confirmed_qty),
+            "discrepancy_qty": str(disc),
+            "discrepancy_reason": chk.discrepancy_reason,
+            "note": chk.note,
+            "shrinkage_cost": str(shrinkage_cost),
+            "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
+            "ingredient_group": resolve_ingredient_group(chk.ingredient, _category_map),
+        })
+
+    # Stock-in records
     stock_ins = [
         {
             "id": r.id,
@@ -1309,18 +1446,12 @@ def day_overview(request):
             "notes": r.notes,
             "invoice_number": r.invoice_number,
         }
-        for r in stock_ins_qs
+        for r in stock_ins_raw
     ]
 
-    # ── Prep logs for this date ───────────────────────────────────────────
-    prep_logs_qs = PreparationLog.objects.filter(
-        outlet_id=outlet, op_date=date
-    ).select_related("product").order_by("timestamp")
-    prep_logs = []
-    for p in prep_logs_qs:
-        price_obj = p.product.active_price(as_of=date)
-        selling_price = price_obj.price if price_obj else Decimal("0")
-        prep_logs.append({
+    # Prep logs — price from bulk map, no per-row query
+    prep_logs = [
+        {
             "id": p.id,
             "product_name": p.product.name,
             "product_category": p.product.category,
@@ -1330,38 +1461,16 @@ def day_overview(request):
             "pieces_prepared": p.pieces_prepared,
             "wastage_pieces": p.wastage_pieces,
             "timestamp": p.timestamp.isoformat(),
-            "selling_price": str(selling_price),
-        })
+            "selling_price": str(price_map.get(p.product_id, Decimal("0"))),
+        }
+        for p in prep_logs_raw
+    ]
 
-    # ── Current display stock (prepared + ready-to-sell) ─────────────────
-    from catalog.models import Recipe
-    # Pre-fetch purchase cost per non-prep product (sum of recipe lines × ingredient cost).
-    _display_qs = list(
-        DisplayStock.objects.filter(outlet_id=outlet)
-        .select_related("product")
-        .order_by("product__category", "product__name")
-    )
-    non_prep_ids = [s.product_id for s in _display_qs if not s.product.requires_preparation]
-    _recipe_cost: dict = {}
-    _non_prep_pack: dict = {}  # product_id → pieces_per_pack (Decimal)
-    for r in (
-        Recipe.objects.filter(product_id__in=non_prep_ids)
-        .select_related("ingredient")
-        .prefetch_related("ingredient__pack_definitions")
-    ):
-        cost = (r.ingredient.cost_per_base_unit or Decimal("0")) * r.quantity_per_unit
-        _recipe_cost[r.product_id] = _recipe_cost.get(r.product_id, Decimal("0")) + cost
-        if r.product_id not in _non_prep_pack:
-            active_pack = r.ingredient.active_pack()
-            if active_pack:
-                _non_prep_pack[r.product_id] = active_pack.pieces_per_pack
-
+    # Display stock — price from bulk map
     display_stock = []
     for s in _display_qs:
         if s.pieces_available <= 0:
             continue
-        price_obj = s.product.active_price(as_of=date)
-        selling_price = price_obj.price if price_obj else Decimal("0")
         purchase_price = _recipe_cost.get(s.product_id, Decimal("0")) if not s.product.requires_preparation else None
         ppp = _non_prep_pack.get(s.product_id) if not s.product.requires_preparation else None
         display_stock.append({
@@ -1369,29 +1478,14 @@ def day_overview(request):
             "product_category": s.product.category,
             "pieces_available": s.pieces_available,
             "requires_preparation": s.product.requires_preparation,
-            "selling_price": str(selling_price),
+            "selling_price": str(price_map.get(s.product_id, Decimal("0"))),
             "purchase_price": str(purchase_price) if purchase_price is not None else None,
             "pieces_per_pack": str(ppp) if ppp is not None else None,
         })
 
-    # ── Raw ingredient stock (RECIPE_LINKED, qty > 0) ─────────────────────
-    # Exclude ingredients that back non-preparation (beverage/ready) products —
-    # those already appear in the "ready to sell" section via DisplayStock.
-    ready_ingredient_ids = set(
-        Recipe.objects.filter(product__requires_preparation=False)
-        .values_list("ingredient_id", flat=True)
-    )
-    _raw_qs = [
-        rs for rs in RawStock.objects.filter(
-            outlet_id=outlet, ingredient__tracking_mode="RECIPE_LINKED"
-        )
-        .select_related("ingredient")
-        .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
-        if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
-    ]
-    _product_map = build_ingredient_product_map()
+    # Raw stock
     raw_stock = []
-    for rs in sorted(_raw_qs, key=lambda r: _display_name(r.ingredient).lower()):
+    for rs in sorted(raw_stock_raw, key=lambda r: _display_name(r.ingredient).lower()):
         active_pack = rs.ingredient.active_pack()
         raw_stock.append({
             "ingredient": _display_name(rs.ingredient),
@@ -1403,33 +1497,46 @@ def day_overview(request):
             "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
         })
 
-    # ── Closing snapshot ──────────────────────────────────────────────────
+    # ── Closing snapshot — materialise stock_counts once, compute from memory ──
     closing_data = None
-    closing = (
-        DailyClosing.objects.filter(outlet_id=outlet, closing_date=date)
-        .prefetch_related("stock_counts", "sales_lines__channel", "channel_discounts", "payments")
-        .first()
-    )
     if closing:
-        flagged_counts = [sc for sc in closing.stock_counts.all() if sc.flag]
+        stock_counts_list = list(closing.stock_counts.all())   # prefetch cache hit
+        sales_lines_list = list(closing.sales_lines.all())     # prefetch cache hit
+        payments_list = list(closing.payments.all())           # prefetch cache hit
+
+        # Financial rollups computed from prefetched data (avoids model-property re-queries)
+        total_sale = sum((l.net_amount for l in sales_lines_list), Decimal("0"))
+        online_payments = sum(
+            (l.net_amount for l in sales_lines_list
+             if l.channel.settlement_type == SettlementType.DIRECT_TO_ACCOUNT),
+            Decimal("0"),
+        )
+        total_offline_sales = total_sale - online_payments
+        typed_non_cash = sum(
+            (p.amount for p in payments_list if not p.account.is_primary_cash),
+            Decimal("0"),
+        )
+        computed_cash = total_offline_sales - typed_non_cash
+        has_flag = any(sc.flag for sc in stock_counts_list)
+
         def _price(sc):
-            row = sc.product.active_price()
-            return row.price if row else Decimal("0")
+            return price_map.get(sc.product_id, Decimal("0"))
+
         closing_data = {
             "id": closing.id,
             "status": closing.status,
-            "total_sale": str(closing.total_sale),
-            "channel_day_net_revenue": str(closing.channel_day_net_revenue),
-            "online_payments": str(closing.online_payments),
-            "total_offline_sales": str(closing.total_offline_sales),
-            "computed_cash": str(closing.computed_cash),
-            "has_flag": closing.has_flag,
+            "total_sale": str(total_sale),
+            "channel_day_net_revenue": str(total_sale),
+            "online_payments": str(online_payments),
+            "total_offline_sales": str(total_offline_sales),
+            "computed_cash": str(computed_cash),
+            "has_flag": has_flag,
             "flagged_products": [
                 {
-                    "product_name": fc.product_name,
-                    "derived_walkin_sold": fc.derived_walkin_sold,
+                    "product_name": sc.product.name,
+                    "derived_walkin_sold": sc.derived_walkin_sold,
                 }
-                for fc in flagged_counts
+                for sc in stock_counts_list if sc.flag
             ],
             "payments": [
                 {
@@ -1437,11 +1544,11 @@ def day_overview(request):
                     "is_primary_cash": p.account.is_primary_cash,
                     "amount": str(p.amount),
                 }
-                for p in closing.payments.select_related("account")
+                for p in payments_list
             ],
             "stock_counts_wastage": [
                 {"product_name": sc.product.name, "wastage_pieces": sc.wastage_pieces}
-                for sc in closing.stock_counts.select_related("product")
+                for sc in stock_counts_list
                 if sc.wastage_pieces and sc.wastage_pieces > 0
             ],
             "stock_counts_remains": sorted(
@@ -1455,7 +1562,7 @@ def day_overview(request):
                             (_price(sc) * sc.remains_pieces).quantize(Decimal("0.01"))
                         ),
                     }
-                    for sc in closing.stock_counts.select_related("product")
+                    for sc in stock_counts_list
                     if sc.remains_pieces > 0 and sc.product.requires_preparation
                 ],
                 key=lambda x: (x["product_category"], x["product_name"]),
@@ -1463,7 +1570,7 @@ def day_overview(request):
             "total_remains_value": str(
                 sum(
                     (_price(sc) * sc.remains_pieces
-                     for sc in closing.stock_counts.select_related("product")
+                     for sc in stock_counts_list
                      if sc.remains_pieces > 0 and sc.product.requires_preparation),
                     Decimal("0"),
                 ).quantize(Decimal("0.01"))
@@ -1481,7 +1588,7 @@ def day_overview(request):
                             (_price(sc) * (max(sc.derived_walkin_sold, 0) + sc.app_channel_sold)).quantize(Decimal("0.01"))
                         ),
                     }
-                    for sc in closing.stock_counts.select_related("product")
+                    for sc in stock_counts_list
                     if max(sc.derived_walkin_sold, 0) + sc.app_channel_sold > 0
                 ],
                 key=lambda x: (x["product_category"], x["product_name"]),
