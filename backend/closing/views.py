@@ -205,12 +205,17 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         for row in request.data.get("items", []):
             product = Product.objects.get(pk=row["product"])
             ds = DisplayStock.objects.filter(outlet=closing.outlet, product=product).first()
-            obj, _ = DailyClosingStockCount.objects.get_or_create(
+            obj, created = DailyClosingStockCount.objects.get_or_create(
                 daily_closing=closing, product=product
             )
             obj.wastage_pieces = row.get("wastage_pieces", obj.wastage_pieces)
             obj.remains_pieces = row.get("remains_pieces", obj.remains_pieces)
-            obj.available_pieces = ds.pieces_available if ds else 0
+            # Only read available_pieces from DisplayStock on first create. On re-saves,
+            # DisplayStock for non-prep products has been set to `remains` by
+            # _initialize_direct_stock (called during stock-in approval), so re-reading
+            # it would collapse derived_walkin_sold to 0 for products not in that approval.
+            if created:
+                obj.available_pieces = ds.pieces_available if ds else 0
 
             # For direct-sale products (beverages/ready items), correct available_pieces
             # and remains_pieces to reflect the full day including any mid-day stock-in,

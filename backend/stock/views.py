@@ -420,9 +420,13 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
         _initialize_direct_stock(record.outlet)
 
-        # Refresh available_pieces in any open closing for today so it reflects
-        # the newly approved stock-in (DisplayStock was just updated above).
+        # Refresh open closing for today: new stock goes to *remains*, not to sold.
+        # Only update products whose ingredients are in THIS approval — after
+        # stock_count runs, RawStock = remains * qty_per, so _initialize_direct_stock
+        # sets DS = remains for unrelated products. Touching those counts would
+        # overwrite available_pieces with remains and collapse derived_walkin_sold to 0.
         from closing.models import DailyClosing, DailyClosingStockCount
+        from closing.services import recompute_closing as _recompute_closing
         open_closing = (
             DailyClosing.objects
             .filter(outlet=record.outlet, closing_date=record.stock_in_date)
@@ -430,15 +434,38 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             .first()
         )
         if open_closing:
+            approved_ingredient_ids = {
+                item.ingredient_id
+                for item in record.items.select_related("ingredient")
+                if item.ingredient_id
+                and item.ingredient.tracking_mode
+                not in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT)
+            }
+            closing_updated = False
             for sc in open_closing.stock_counts.select_related("product").filter(
                 product__requires_preparation=False
             ):
+                recipe_ingredient_ids = set(
+                    sc.product.recipes.values_list("ingredient_id", flat=True)
+                )
+                if not (recipe_ingredient_ids & approved_ingredient_ids):
+                    continue  # this product not in the current stock-in — leave it alone
                 ds = DisplayStock.objects.filter(
                     outlet=record.outlet, product=sc.product
                 ).first()
-                if ds:
-                    sc.available_pieces = ds.pieces_available
-                    sc.save(update_fields=["available_pieces"])
+                if not ds:
+                    continue
+                # ds.pieces_available = old_remains + new_stock_in_pieces (just set by
+                # _initialize_direct_stock). Add that delta to both counters so that
+                # derived_walkin_sold = available − wastage − remains − app_sold is unchanged.
+                new_pieces = ds.pieces_available - sc.remains_pieces
+                if new_pieces > 0:
+                    sc.available_pieces += new_pieces
+                    sc.remains_pieces = ds.pieces_available
+                    sc.save(update_fields=["available_pieces", "remains_pieces"])
+                    closing_updated = True
+            if closing_updated:
+                _recompute_closing(open_closing)
 
         return Response(self.get_serializer(record).data)
 
