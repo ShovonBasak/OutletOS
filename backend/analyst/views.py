@@ -29,6 +29,7 @@ from rest_framework.response import Response
 from accounts.permissions import IsOwnerOrAdmin
 from .context import build_system_prompt
 from .models import AnalystConversation
+from .tools import TOOL_SCHEMAS, execute_tool
 from .ordering import (
     DELIVERY_WEEKDAYS,
     compute_order_suggestion,
@@ -38,8 +39,9 @@ from .whatsapp import send_message, verify_signature
 
 logger = logging.getLogger(__name__)
 
-MAX_HISTORY = 20        # messages (= 10 turns)
+MAX_HISTORY = 20        # user/assistant turns stored (tool intermediaries not saved)
 HISTORY_TTL_HOURS = 8   # reset conversation after this many idle hours
+MAX_TOOL_ROUNDS = 6     # max tool-call cycles per message before forcing a response
 
 # ── Order-intent detection ────────────────────────────────────────────────────
 
@@ -124,17 +126,50 @@ def _find_owner(from_phone: str):
     ).first()
 
 
-def _call_claude(system: str, messages: list) -> str:
+def _call_claude(system: str, messages: list, outlet_id=None) -> str:
+    """Run Claude with tool use. Executes tool calls in a loop until end_turn."""
     from catalog.ai_extraction import LLMUnavailable, _client
     try:
         client = _client()
-        resp = client.messages.create(
-            model=getattr(settings, "CLAUDE_MODEL", "claude-sonnet-4-6"),
-            max_tokens=1024,
-            system=system,
-            messages=messages,
-        )
-        return resp.content[0].text
+        working = list(messages)  # copy — tool intermediaries stay out of saved history
+        resp = None
+
+        for _ in range(MAX_TOOL_ROUNDS):
+            resp = client.messages.create(
+                model=getattr(settings, "CLAUDE_MODEL", "claude-sonnet-4-6"),
+                max_tokens=1024,
+                system=system,
+                messages=working,
+                tools=TOOL_SCHEMAS,
+            )
+
+            if resp.stop_reason == "end_turn":
+                parts = [b.text for b in resp.content if hasattr(b, "text") and b.text]
+                return " ".join(parts) if parts else "No response."
+
+            if resp.stop_reason == "tool_use":
+                working.append({"role": "assistant", "content": resp.content})
+                results = []
+                for block in resp.content:
+                    if block.type == "tool_use":
+                        logger.info("analyst tool call: %s %s", block.name, block.input)
+                        result = execute_tool(block.name, block.input, outlet_id)
+                        results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                        })
+                working.append({"role": "user", "content": results})
+            else:
+                break  # max_tokens or unexpected stop reason
+
+        # Exhausted rounds — extract whatever text is available
+        if resp and resp.content:
+            parts = [b.text for b in resp.content if hasattr(b, "text") and b.text]
+            if parts:
+                return " ".join(parts)
+        return "Analysis took too long. Please ask a more specific question."
+
     except LLMUnavailable as exc:
         return f"AI analyst temporarily unavailable: {exc}"
     except Exception as exc:
@@ -181,7 +216,7 @@ def _process_message(from_phone: str, text: str, user) -> None:
         history = list(conv.messages)
         history.append({"role": "user", "content": text})
 
-        reply = _call_claude(system_prompt, history[-MAX_HISTORY:])
+        reply = _call_claude(system_prompt, history[-MAX_HISTORY:], outlet_id)
 
         history.append({"role": "assistant", "content": reply})
         conv.messages = history[-MAX_HISTORY:]
