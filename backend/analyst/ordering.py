@@ -1,14 +1,20 @@
 """Ingredient order quantity engine.
 
-For a given delivery_date:
-  coverage = delivery_date → day before the next scheduled delivery
-  projected_usage = historical weighted average for each coverage day
-                    × week-of-month multiplier
-  required = projected_usage × SAFETY_BUFFER
-  to_order = max(0, required − current_raw_stock)
-  packs    = ⌈to_order ÷ pieces_per_pack⌉
+For a given delivery_date (ordered on order_date, typically today):
 
-Delivery schedule: Sunday (JS weekday 6), Tuesday (1), Thursday (3).
+  pre_delivery  = [order_date+1 … delivery_date]
+                  Stock already on hand covers these days; estimate consumption
+                  and deduct it to get effective_stock at the moment of delivery.
+
+  post_delivery = [delivery_date+1 … next_scheduled_delivery]
+                  What the incoming order must cover (full days).
+
+  required          = projected_post_delivery_usage × SAFETY_BUFFER
+  effective_stock   = max(0, current_raw_stock − pre_delivery_estimated_use)
+  to_order          = max(0, required − effective_stock)
+  packs             = ⌈to_order ÷ pieces_per_pack⌉
+
+Delivery schedule: Sunday (Python weekday 6), Tuesday (1), Thursday (3).
 """
 from __future__ import annotations
 
@@ -44,10 +50,33 @@ def next_delivery_after(d: date) -> date:
     return nxt
 
 
-def _coverage_period(delivery_date: date) -> list[date]:
+def _pre_delivery_period(order_date: date, delivery_date: date) -> list[date]:
+    """Days from tomorrow through delivery_date.
+
+    These days will consume existing stock before the delivery arrives.
+    Example: order Friday → delivery Sunday → pre = [Sat, Sun].
+    """
+    result: list[date] = []
+    d = order_date + timedelta(days=1)
+    while d <= delivery_date:
+        result.append(d)
+        d += timedelta(days=1)
+    return result
+
+
+def _post_delivery_period(delivery_date: date) -> list[date]:
+    """Days from the day after delivery through the next scheduled delivery (inclusive).
+
+    These are the days the ordered stock must cover.
+    Example: delivery Sunday → next delivery Tuesday → post = [Mon, Tue].
+    """
     next_del = next_delivery_after(delivery_date)
-    n = (next_del - delivery_date).days
-    return [delivery_date + timedelta(days=i) for i in range(n)]
+    result: list[date] = []
+    d = delivery_date + timedelta(days=1)
+    while d <= next_del:
+        result.append(d)
+        d += timedelta(days=1)
+    return result
 
 
 def _week_of_month(d: date) -> int:
@@ -84,11 +113,9 @@ def _ingredient_usage_by_day(outlet_id) -> dict[date, dict[int, Decimal]]:
         qty = Decimal(str(line.quantity_sold))
         product = line.product
 
-        # Single product: direct recipe deductions
         for r in product.recipes.all():
             by_day[d][r.ingredient_id] += qty * r.quantity_per_unit
 
-        # Combo: each component's recipe
         for comp in product.components.all():
             comp_qty = qty * Decimal(str(comp.quantity_per_combo))
             for r in comp.component_product.recipes.all():
@@ -129,8 +156,7 @@ def _overall_day_averages(
 def _week_of_month_multipliers(
     by_day: dict[date, dict[int, Decimal]]
 ) -> dict[int, Decimal]:
-    """week_num(1–5) → multiplier vs overall average daily revenue.
-    Used to scale projections up/down for start/end of month behaviour."""
+    """week_num(1–5) → multiplier vs overall average daily usage."""
     week_totals: dict[int, list[Decimal]] = defaultdict(list)
     for d, usage in by_day.items():
         week_totals[_week_of_month(d)].append(sum(usage.values()))
@@ -152,21 +178,20 @@ def _week_of_month_multipliers(
 # ── Projection ────────────────────────────────────────────────────────────────
 
 def _project_usage(
-    coverage: list[date],
+    days: list[date],
     weekday_avgs: dict[int, dict[int, Decimal]],
     fallback_avgs: dict[int, Decimal],
     week_multipliers: dict[int, Decimal],
 ) -> dict[int, Decimal]:
+    """Total projected ingredient consumption across the given list of days."""
     projected: dict[int, Decimal] = defaultdict(Decimal)
-    for d in coverage:
+    for d in days:
         wd = d.weekday()
         wk = _week_of_month(d)
         multiplier = Decimal(str(week_multipliers.get(wk, 1)))
         wd_data = weekday_avgs.get(wd, {})
 
-        all_ing_ids = set(fallback_avgs)
-
-        for ing_id in all_ing_ids:
+        for ing_id in set(fallback_avgs):
             daily = wd_data.get(ing_id) or fallback_avgs.get(ing_id)
             if daily:
                 projected[ing_id] += daily * multiplier
@@ -179,18 +204,30 @@ def _project_usage(
 def _format_whatsapp(
     suggestions: list[dict],
     delivery_date: date,
-    coverage: list[date],
+    pre_delivery: list[date],
+    post_delivery: list[date],
 ) -> str:
-    n_days = len(coverage)
-    last_day = coverage[-1] if coverage else delivery_date
+    n_pre = len(pre_delivery)
+    n_post = len(post_delivery)
+    first_cover = post_delivery[0] if post_delivery else delivery_date + timedelta(days=1)
+    last_cover = post_delivery[-1] if post_delivery else first_cover
 
     lines = [
         "📦 *ORDER SUGGESTION*",
         f"Delivery: {delivery_date.strftime('%A, %d %b %Y')}",
-        f"Covers: {delivery_date.strftime('%d %b')} – {last_day.strftime('%d %b')} ({n_days} day{'s' if n_days > 1 else ''})",
-        "",
-        "*Ingredients to order:*",
+        f"Covers: {first_cover.strftime('%d %b')} – {last_cover.strftime('%d %b')} ({n_post} day{'s' if n_post > 1 else ''})",
     ]
+
+    if n_pre > 0:
+        pre_first = pre_delivery[0]
+        pre_last = pre_delivery[-1]
+        lines.append(
+            f"_({n_pre} day{'s' if n_pre > 1 else ''} of stock "
+            f"[{pre_first.strftime('%d %b')}–{pre_last.strftime('%d %b')}] "
+            f"estimated to be used before delivery)_"
+        )
+
+    lines.extend(["", "*Ingredients to order:*"])
 
     total_cost = 0.0
     for s in suggestions:
@@ -218,14 +255,22 @@ def _format_whatsapp(
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def compute_order_suggestion(delivery_date: date, outlet_id=None) -> dict:
+def compute_order_suggestion(
+    delivery_date: date,
+    outlet_id=None,
+    order_date: date | None = None,
+) -> dict:
     from catalog.models import Ingredient
     from stock.models import RawStock
 
-    today = date.today()
-    coverage = _coverage_period(delivery_date)
+    if order_date is None:
+        order_date = date.today()
+
+    pre_delivery = _pre_delivery_period(order_date, delivery_date)
+    post_delivery = _post_delivery_period(delivery_date)
     next_del = next_delivery_after(delivery_date)
-    n_days = len(coverage)
+    n_pre = len(pre_delivery)
+    n_post = len(post_delivery)
 
     # Historical usage
     by_day = _ingredient_usage_by_day(outlet_id)
@@ -242,33 +287,43 @@ def compute_order_suggestion(delivery_date: date, outlet_id=None) -> dict:
     else:
         confidence = "Low"
 
-    projected = _project_usage(coverage, weekday_avgs, fallback_avgs, week_multipliers)
+    # Project usage for both windows
+    projected_pre = _project_usage(pre_delivery, weekday_avgs, fallback_avgs, week_multipliers)
+    projected_post = _project_usage(post_delivery, weekday_avgs, fallback_avgs, week_multipliers)
 
     # Current raw stock
-    raw_qs = RawStock.objects.filter(date=today).select_related("ingredient")
+    raw_qs = RawStock.objects.select_related("ingredient")
     if outlet_id:
         raw_qs = raw_qs.filter(outlet_id=outlet_id)
     current_stock: dict[int, Decimal] = {r.ingredient_id: r.quantity_available for r in raw_qs}
 
-    # Ingredient metadata
+    # All active RECIPE_LINKED ingredients used in at least one product that
+    # requires preparation — excludes beverages and other direct-stock items.
     ingredients = {
         i.id: i
         for i in Ingredient.objects.filter(
-            id__in=set(projected), is_active=True, tracking_mode="RECIPE_LINKED"
-        ).prefetch_related("pack_definitions")
+            is_active=True,
+            tracking_mode="RECIPE_LINKED",
+            recipes__product__requires_preparation=True,
+        ).distinct().prefetch_related("pack_definitions")
     }
 
-    suggestions: list[dict] = []
+    rows: list[dict] = []
     total_cost = Decimal(0)
 
-    for ing_id, proj in sorted(projected.items(), key=lambda x: -x[1]):
-        ing = ingredients.get(ing_id)
-        if not ing:
+    for ing_id, ing in ingredients.items():
+        on_hand = current_stock.get(ing_id, Decimal(0))
+        proj_post = projected_post.get(ing_id, Decimal(0))
+
+        # Skip ingredients with no stock and no projected usage — nothing to show.
+        if on_hand == 0 and proj_post == 0:
             continue
 
-        on_hand = current_stock.get(ing_id, Decimal(0))
-        required = (proj * SAFETY_BUFFER).quantize(Decimal("0.1"))
-        to_order_raw = max(Decimal(0), required - on_hand)
+        pre_use = projected_pre.get(ing_id, Decimal(0))
+        effective_stock = max(Decimal(0), on_hand - pre_use)
+
+        required = (proj_post * SAFETY_BUFFER).quantize(Decimal("0.1"))
+        to_order_raw = max(Decimal(0), required - effective_stock)
 
         active_pack = ing.pack_definitions.filter(effective_to__isnull=True).first()
         ppp = active_pack.pieces_per_pack if active_pack else None
@@ -283,38 +338,53 @@ def compute_order_suggestion(delivery_date: date, outlet_id=None) -> dict:
             pieces_ordered = to_order_raw
             est_cost = None
 
-        # Skip if genuinely no order needed
-        if (packs is not None and packs == 0) or (packs is None and to_order_raw <= 0):
-            continue
+        needs_order = bool(
+            (packs is not None and packs > 0) or (packs is None and to_order_raw > 0)
+        )
 
-        if est_cost:
+        if needs_order and est_cost:
             total_cost += est_cost
 
-        suggestions.append({
+        rows.append({
             "ingredient_id": ing_id,
             "ingredient_name": ing.name,
             "base_unit": ing.base_unit,
             "stock_on_hand": float(on_hand),
-            "projected_usage": float(proj.quantize(Decimal("0.1"))),
+            "pre_delivery_estimated_use": float(pre_use.quantize(Decimal("0.1"))),
+            "effective_stock_at_delivery": float(effective_stock.quantize(Decimal("0.1"))),
+            "projected_usage": float(proj_post.quantize(Decimal("0.1"))),
             "required_with_buffer": float(required),
             "to_order_raw": float(to_order_raw.quantize(Decimal("0.1"))),
-            "packs_to_order": packs,
+            "packs_to_order": packs if needs_order else 0,
             "pieces_per_pack": float(ppp) if ppp else None,
-            "pieces_to_order": float(pieces_ordered.quantize(Decimal("0.1"))),
+            "pieces_to_order": float(pieces_ordered.quantize(Decimal("0.1"))) if needs_order else 0,
             "cost_per_pack": float(cpp) if cpp else None,
-            "estimated_cost": float(est_cost.quantize(Decimal("0.01"))) if est_cost else None,
+            "estimated_cost": float(est_cost.quantize(Decimal("0.01"))) if (needs_order and est_cost) else None,
+            "needs_order": needs_order,
         })
 
-    whatsapp_text = _format_whatsapp(suggestions, delivery_date, coverage)
+    # Sort: items needing order first (by projected usage desc), then sufficient stock (by name).
+    suggestions = sorted(rows, key=lambda r: (not r["needs_order"], -r["projected_usage"]))
+
+    whatsapp_text = _format_whatsapp(suggestions, delivery_date, pre_delivery, post_delivery)
+
+    coverage_label = (
+        f"{post_delivery[0].strftime('%a %d %b')} → "
+        f"{post_delivery[-1].strftime('%a %d %b')} ({n_post} day{'s' if n_post > 1 else ''})"
+    ) if post_delivery else ""
+
+    pre_label = (
+        f"{pre_delivery[0].strftime('%a %d %b')} → "
+        f"{pre_delivery[-1].strftime('%a %d %b')} ({n_pre} day{'s' if n_pre > 1 else ''})"
+    ) if pre_delivery else ""
 
     return {
         "delivery_date": delivery_date.isoformat(),
         "next_delivery_date": next_del.isoformat(),
-        "days_to_cover": n_days,
-        "coverage_label": (
-            f"{delivery_date.strftime('%a %d %b')} → "
-            f"{coverage[-1].strftime('%a %d %b')} ({n_days} day{'s' if n_days > 1 else ''})"
-        ),
+        "pre_delivery_days": n_pre,
+        "pre_delivery_label": pre_label,
+        "days_to_cover": n_post,
+        "coverage_label": coverage_label,
         "suggestions": suggestions,
         "total_estimated_cost": float(total_cost.quantize(Decimal("0.01"))),
         "whatsapp_text": whatsapp_text,

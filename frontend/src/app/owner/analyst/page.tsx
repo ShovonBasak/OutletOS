@@ -9,6 +9,8 @@ interface SuggestionRow {
   ingredient_name: string;
   base_unit: string;
   stock_on_hand: number;
+  pre_delivery_estimated_use: number;
+  effective_stock_at_delivery: number;
   projected_usage: number;
   required_with_buffer: number;
   to_order_raw: number;
@@ -17,11 +19,14 @@ interface SuggestionRow {
   pieces_to_order: number;
   cost_per_pack: number | null;
   estimated_cost: number | null;
+  needs_order: boolean;
 }
 
 interface OrderResult {
   delivery_date: string;
   next_delivery_date: string;
+  pre_delivery_days: number;
+  pre_delivery_label: string;
   days_to_cover: number;
   coverage_label: string;
   suggestions: SuggestionRow[];
@@ -51,7 +56,10 @@ function nextDeliveryDates(n = 5): Date[] {
 }
 
 function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function fmtDate(iso: string): string {
@@ -194,16 +202,32 @@ export default function AnalystPage() {
                   {fmtDate(result.delivery_date)}
                 </p>
                 <p className="font-mono text-[10px] text-ink-soft">
-                  Covers {result.coverage_label}
+                  Order covers {result.coverage_label}
                 </p>
               </div>
               <ConfidenceBadge c={result.data_quality.confidence} />
             </div>
 
+            {result.pre_delivery_days > 0 && (
+              <div className="rounded-lg border border-gold/30 bg-gold/8 px-3 py-2">
+                <p className="font-mono text-[10px] text-gold-deep">
+                  {result.pre_delivery_label} — estimated stock use before delivery
+                </p>
+                <p className="font-mono text-[9px] text-ink-soft/60 mt-0.5">
+                  Current stock reduced by projected sales during this window
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-4 flex-wrap">
               <div>
                 <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">Items to order</p>
-                <p className="font-mono text-[15px] font-semibold text-ink">{result.suggestions.length}</p>
+                <p className="font-mono text-[15px] font-semibold text-ink">
+                  {result.suggestions.filter((s) => s.needs_order).length}
+                  <span className="font-mono text-[10px] text-ink-soft/50 font-normal">
+                    /{result.suggestions.length}
+                  </span>
+                </p>
               </div>
               {result.total_estimated_cost > 0 && (
                 <div>
@@ -240,54 +264,65 @@ export default function AnalystPage() {
             </button>
           )}
 
-          {/* Suggestion table */}
-          {result.suggestions.length === 0 ? (
-            <div className="rounded-xl border border-leaf/20 bg-leaf/5 px-4 py-4">
-              <p className="font-mono text-[12px] text-leaf-deep">
-                ✅ Stock levels are sufficient — no order needed for this delivery.
-              </p>
+          {/* Suggestion table — always shown; zero-order rows appear dimmed */}
+          <div className="flex flex-col gap-0 rounded-xl border border-[#d8cdb0] overflow-hidden">
+            {/* Table header */}
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 bg-paper-dim px-3 py-2 border-b border-[#d8cdb0]">
+              <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">Ingredient</p>
+              <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">Effective stock</p>
+              <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">To order</p>
+              <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">Est. cost</p>
             </div>
-          ) : (
-            <div className="flex flex-col gap-0 rounded-xl border border-[#d8cdb0] overflow-hidden">
-              {/* Table header */}
-              <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 bg-paper-dim px-3 py-2 border-b border-[#d8cdb0]">
-                <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">Ingredient</p>
-                <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">In stock</p>
-                <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">To order</p>
-                <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50 text-right">Est. cost</p>
-              </div>
 
-              {/* Rows */}
-              {result.suggestions.map((s, i) => (
-                <div
-                  key={s.ingredient_name}
-                  className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center px-3 py-2.5 ${
-                    i < result.suggestions.length - 1 ? "border-b border-[#e8dfc8]" : ""
-                  }`}
-                >
-                  {/* Name */}
-                  <div className="min-w-0">
-                    <p className="font-mono text-[11px] font-medium text-ink truncate">{s.ingredient_name}</p>
-                    <p className="font-mono text-[9px] text-ink-soft/60">
-                      needs {s.required_with_buffer.toFixed(1)} {s.base_unit} (incl. 15% buffer)
-                    </p>
-                  </div>
-
-                  {/* In stock */}
-                  <p className="font-mono text-[11px] text-ink-soft whitespace-nowrap text-right">
-                    {s.stock_on_hand.toFixed(1)} {s.base_unit}
+            {/* Rows */}
+            {result.suggestions.map((s, i) => (
+              <div
+                key={s.ingredient_name}
+                className={`grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center px-3 py-2.5 ${
+                  i < result.suggestions.length - 1 ? "border-b border-[#e8dfc8]" : ""
+                } ${s.needs_order ? "" : "opacity-50"}`}
+              >
+                {/* Name */}
+                <div className="min-w-0">
+                  <p className={`font-mono text-[11px] font-medium truncate ${s.needs_order ? "text-ink" : "text-ink-soft"}`}>
+                    {s.ingredient_name}
                   </p>
+                  <p className="font-mono text-[9px] text-ink-soft/60">
+                    {s.needs_order
+                      ? `needs ${s.required_with_buffer.toFixed(1)} ${s.base_unit} (incl. 15% buffer)`
+                      : `sufficient — needs ${s.required_with_buffer.toFixed(1)} ${s.base_unit}`}
+                  </p>
+                </div>
 
-                  {/* To order */}
-                  <div className="text-right">
-                    {s.packs_to_order !== null ? (
+                {/* Effective stock at delivery */}
+                <div className="text-right">
+                  {s.pieces_per_pack ? (
+                    <>
+                      <p className="font-mono text-[11px] text-ink-soft whitespace-nowrap">
+                        {Math.floor(s.effective_stock_at_delivery / s.pieces_per_pack)} pk
+                      </p>
+                      <p className="font-mono text-[9px] text-ink-soft/60 whitespace-nowrap">
+                        {s.effective_stock_at_delivery.toFixed(1)} {s.base_unit}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-mono text-[11px] text-ink-soft whitespace-nowrap">
+                      {s.effective_stock_at_delivery.toFixed(1)} {s.base_unit}
+                    </p>
+                  )}
+                </div>
+
+                {/* To order */}
+                <div className="text-right">
+                  {s.needs_order ? (
+                    s.packs_to_order !== null ? (
                       <>
                         <p className="font-mono text-[12px] font-semibold text-ink whitespace-nowrap">
                           {s.packs_to_order} pk
                         </p>
                         {s.pieces_per_pack && (
                           <p className="font-mono text-[9px] text-ink-soft/60 whitespace-nowrap">
-                            {Math.round(s.packs_to_order * s.pieces_per_pack)} {s.base_unit}
+                            {Math.round((s.packs_to_order ?? 0) * s.pieces_per_pack)} {s.base_unit}
                           </p>
                         )}
                       </>
@@ -295,29 +330,31 @@ export default function AnalystPage() {
                       <p className="font-mono text-[12px] font-semibold text-ink whitespace-nowrap">
                         {s.to_order_raw.toFixed(1)} {s.base_unit}
                       </p>
-                    )}
-                  </div>
-
-                  {/* Cost */}
-                  <p className="font-mono text-[11px] text-ink-soft whitespace-nowrap text-right">
-                    {s.estimated_cost !== null ? bdt(s.estimated_cost) : "—"}
-                  </p>
+                    )
+                  ) : (
+                    <p className="font-mono text-[12px] font-semibold text-leaf-deep whitespace-nowrap">0</p>
+                  )}
                 </div>
-              ))}
 
-              {/* Total row */}
-              {result.total_estimated_cost > 0 && (
-                <div className="flex items-center justify-between gap-3 border-t border-[#d8cdb0] bg-paper-dim px-3 py-2.5">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-ink-soft/60">
-                    Total estimate
-                  </p>
-                  <p className="font-mono text-[13px] font-semibold text-ink">
-                    {bdt(result.total_estimated_cost)}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
+                {/* Cost */}
+                <p className="font-mono text-[11px] text-ink-soft whitespace-nowrap text-right">
+                  {s.estimated_cost !== null ? bdt(s.estimated_cost) : "—"}
+                </p>
+              </div>
+            ))}
+
+            {/* Total row */}
+            {result.total_estimated_cost > 0 && (
+              <div className="flex items-center justify-between gap-3 border-t border-[#d8cdb0] bg-paper-dim px-3 py-2.5">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-ink-soft/60">
+                  Total estimate
+                </p>
+                <p className="font-mono text-[13px] font-semibold text-ink">
+                  {bdt(result.total_estimated_cost)}
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* WhatsApp preview */}
           <details className="group">
