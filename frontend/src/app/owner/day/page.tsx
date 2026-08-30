@@ -390,13 +390,13 @@ export default function OwnerHome() {
                         {bdt(data.closing.channel_day_net_revenue)}
                       </span>
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-center text-center">
                       <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Online</span>
                       <span className="font-mono text-[13px] font-semibold text-ink">
                         {bdt(data.closing.online_payments)}
                       </span>
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col items-end text-right">
                       <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Walk-in</span>
                       <span className="font-mono text-[13px] font-semibold text-ink">
                         {bdt(data.closing.total_offline_sales)}
