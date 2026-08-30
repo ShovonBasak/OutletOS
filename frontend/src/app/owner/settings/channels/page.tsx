@@ -80,7 +80,7 @@ export default function SalesChannelsPage() {
                     step="0.01"
                     value={parseFloat((Number(c.commission_rate) * 100).toFixed(4))}
                     onChange={(e) =>
-                      patch(c.id, { commission_rate: String(Number(e.target.value) / 100) })
+                      patch(c.id, { commission_rate: (Number(e.target.value) / 100).toFixed(4) })
                     }
                   />
                 </td>

@@ -876,6 +876,15 @@ export interface DayOverviewClosing {
   sales_by_product: DayOverviewSalesProduct[];
 }
 
+export interface DayOverviewTransaction {
+  id: number;
+  account_name: string;
+  account_type: string;
+  transaction_type: string;
+  amount: string;
+  note: string;
+}
+
 export interface DayOverview {
   date: string;
   operating_day: {
@@ -891,7 +900,15 @@ export interface DayOverview {
   display_stock: DayOverviewDisplayStock[];
   raw_stock: DayOverviewRawStock[];
   closing: DayOverviewClosing | null;
-  pnl: { revenue: string; net_profit: string; cogs: string; gross_profit: string };
+  pnl: {
+    revenue: string;
+    net_profit: string;
+    cogs: string;
+    gross_profit: string;
+    commission_total: string;
+    channel_discount: string;
+  };
+  transactions: DayOverviewTransaction[];
 }
 
 export interface Paginated<T> {

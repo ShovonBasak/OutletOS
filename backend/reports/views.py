@@ -268,9 +268,15 @@ def compute_pnl(start, end, outlet=None):
         expenses = expenses.filter(outlet_id=outlet)
         other_incomes = other_incomes.filter(outlet_id=outlet)
 
-    # Revenue = Σ net_amount (gross already reduced by commission_rate per channel).
-    # DailyChannelDiscount is retained for reconciliation but not deducted from P&L.
-    revenue = sum((l.net_amount for l in lines), Decimal("0"))
+    # Revenue = Σ net_amount (commission already deducted per line) minus DailyChannelDiscount
+    # (platform promotions borne by the channel that reduce actual payout to the shop).
+    channel_discounts = DailyChannelDiscount.objects.filter(
+        daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
+    )
+    if outlet:
+        channel_discounts = channel_discounts.filter(daily_closing__outlet_id=outlet)
+    channel_discount_total = sum((d.discount_amount for d in channel_discounts), Decimal("0"))
+    revenue = sum((l.net_amount for l in lines), Decimal("0")) - channel_discount_total
     cogs = _cogs(outlet, start, end, cost_cache, pack_history)
     gross_profit = revenue - cogs
     wastage = _wastage_cost(outlet, start, end, cost_cache, pack_history)
@@ -306,6 +312,7 @@ def compute_pnl(start, end, outlet=None):
         "variable_costs": by_type[CostType.VARIABLE],
         "adhoc_costs": by_type[CostType.ADHOC],
         "other_income": other_income_total,
+        "channel_discount": channel_discount_total,
         "net_profit": net_profit,
     }
 
@@ -1598,6 +1605,36 @@ def day_overview(request):
     # ── Today's P&L ───────────────────────────────────────────────────────
     pnl = compute_pnl(date, date, outlet)
 
+    # Commission breakdown — derived from prefetched closing data (no extra queries)
+    commission_total = Decimal("0")
+    if closing:
+        commission_total = sum(
+            (l.commission_amount for l in closing.sales_lines.all()),
+            Decimal("0"),
+        )
+
+    # ── Account transactions for the day ──────────────────────────────────
+    from finance.models import AccountTransaction
+    from django.db.models import Q
+    txn_qs = (
+        AccountTransaction.objects
+        .filter(date=date)
+        .filter(Q(account__outlet_id=outlet) | Q(account__outlet__isnull=True))
+        .select_related("account")
+        .order_by("id")
+    )
+    transactions = [
+        {
+            "id": t.id,
+            "account_name": t.account.name,
+            "account_type": t.account.account_type,
+            "transaction_type": t.transaction_type,
+            "amount": str(t.amount),
+            "note": t.note,
+        }
+        for t in txn_qs
+    ]
+
     return Response({
         "date": str(date),
         "operating_day": op_day_data,
@@ -1612,5 +1649,8 @@ def day_overview(request):
             "net_profit": str(pnl["net_profit"]),
             "cogs": str(pnl["cogs"]),
             "gross_profit": str(pnl["gross_profit"]),
+            "commission_total": str(commission_total.quantize(Decimal("0.01"))),
+            "channel_discount": str(pnl["channel_discount"].quantize(Decimal("0.01"))),
         },
+        "transactions": transactions,
     })
