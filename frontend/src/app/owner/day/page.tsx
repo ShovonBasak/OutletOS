@@ -280,16 +280,6 @@ export default function OwnerHome() {
                 <span className={`font-mono text-[16px] font-bold leading-tight ${Number(data.pnl.revenue) > 0 ? "text-leaf-deep" : "text-ink"}`}>
                   {bdt(data.pnl.revenue)}
                 </span>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Net profit</span>
-                <span className={`font-mono text-[16px] font-bold leading-tight ${
-                  Number(data.pnl.net_profit) > 0 ? "text-leaf-deep"
-                  : Number(data.pnl.net_profit) < 0 ? "text-chili"
-                  : "text-ink"
-                }`}>
-                  {bdt(data.pnl.net_profit)}
-                </span>
                 {(Number(data.pnl.commission_total) > 0 || Number(data.pnl.channel_discount) > 0) && (
                   <span className="font-mono text-[9px] text-ink-soft/60 leading-tight">
                     {[
@@ -299,7 +289,17 @@ export default function OwnerHome() {
                   </span>
                 )}
               </div>
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5 items-center text-center">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Gross profit</span>
+                <span className={`font-mono text-[16px] font-bold leading-tight ${
+                  Number(data.pnl.gross_profit) > 0 ? "text-leaf-deep"
+                  : Number(data.pnl.gross_profit) < 0 ? "text-chili"
+                  : "text-ink"
+                }`}>
+                  {bdt(data.pnl.gross_profit)}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5 items-end text-right">
                 <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">COGS</span>
                 <span className="font-mono text-[15px] font-semibold leading-tight text-ink-soft">
                   {bdt(data.pnl.cogs)}
