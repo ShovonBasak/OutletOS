@@ -493,6 +493,11 @@ export interface ProductPerformanceRow {
   margin_pct: string;
 }
 
+export interface ProductPerformanceResponse {
+  rows: ProductPerformanceRow[];
+  total_count: number;
+}
+
 export interface ChannelBreakdownRow {
   channel_id: number;
   channel_name: string;
@@ -578,6 +583,7 @@ export interface DashboardData {
   pnl: Pnl;
   daily: DashboardDailyRow[];
   top_products: DashboardProductRow[];
+  top_products_total: number;
   channels: DashboardChannelRow[];
 }
 

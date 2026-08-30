@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { bdt } from "@/lib/format";
-import type { DashboardData, Pnl } from "@/lib/types";
+import type { DashboardData, DashboardProductRow, Pnl, ProductPerformanceResponse } from "@/lib/types";
 
 // ── Period helpers ────────────────────────────────────────────────────────────
 
@@ -327,10 +327,15 @@ export default function OwnerDashboard() {
   const [range, setRange]   = useState<{ start: string; end: string }>(periodRange("30d"));
   const [data, setData]     = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [allProducts, setAllProducts] = useState<DashboardProductRow[] | null>(null);
+  const [prodExpanded, setProdExpanded] = useState(false);
+  const [prodExpandLoading, setProdExpandLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setData(null);
+    setAllProducts(null);
+    setProdExpanded(false);
     try {
       const d = await api<DashboardData>(`/reports/dashboard/?outlet=1&start=${range.start}&end=${range.end}`);
       setData(d);
@@ -338,6 +343,27 @@ export default function OwnerDashboard() {
       setLoading(false);
     }
   }, [range]);
+
+  async function expandProducts() {
+    if (allProducts) { setProdExpanded(true); return; }
+    setProdExpandLoading(true);
+    try {
+      const q = `outlet=1&start=${range.start}&end=${range.end}`;
+      const res = await api<ProductPerformanceResponse>(`/reports/product-performance/?${q}`);
+      setAllProducts(res.rows.map(r => ({
+        product_name: r.product_name,
+        category: r.category,
+        units_sold: r.units_sold,
+        revenue: r.net_revenue,
+        cogs: r.cogs,
+        gross_profit: r.gross_profit,
+        margin_pct: r.margin_pct,
+      })));
+      setProdExpanded(true);
+    } finally {
+      setProdExpandLoading(false);
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -474,7 +500,7 @@ export default function OwnerDashboard() {
 
           {/* ── Two-column: Products + P&L ────────────────────────────── */}
           <div className="grid gap-5 md:grid-cols-2">
-            <Card title="Top products by revenue">
+            <Card title="Products by revenue">
               <div className="grid grid-cols-[1fr_5.5rem_5.5rem_3.5rem] gap-x-2 pb-2 border-b border-dashed border-[#e8dfc8]">
                 <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
                 <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
@@ -482,8 +508,28 @@ export default function OwnerDashboard() {
                 <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Margin</span>
               </div>
               <div className="mt-3">
-                <TopProductsChart products={data.top_products} />
+                <TopProductsChart products={prodExpanded && allProducts ? allProducts : data.top_products} />
               </div>
+              {data.top_products_total > data.top_products.length && (
+                <div className="mt-3 border-t border-dashed border-[#e8dfc8] pt-2.5 text-right">
+                  {prodExpanded ? (
+                    <button
+                      className="font-mono text-[10px] text-ink-soft hover:text-ink"
+                      onClick={() => setProdExpanded(false)}
+                    >
+                      ▲ Show less
+                    </button>
+                  ) : (
+                    <button
+                      className="font-mono text-[10px] text-chrome hover:underline disabled:opacity-50"
+                      disabled={prodExpandLoading}
+                      onClick={expandProducts}
+                    >
+                      {prodExpandLoading ? "Loading…" : `▼ Show all ${data.top_products_total} products`}
+                    </button>
+                  )}
+                </div>
+              )}
             </Card>
 
             <Card title="P&L breakdown">

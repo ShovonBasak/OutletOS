@@ -9,6 +9,7 @@ import type {
   DailyTrendRow,
   Pnl,
   ProductPerformanceRow,
+  ProductPerformanceResponse,
   PurchaseSummary,
   ShrinkageDetail,
   StockValueReport,
@@ -66,6 +67,10 @@ export default function ReportsPage() {
 
   const [pnl, setPnl] = useState<Pnl | null>(null);
   const [products, setProducts] = useState<ProductPerformanceRow[]>([]);
+  const [productTotalCount, setProductTotalCount] = useState(0);
+  const [allProducts, setAllProducts] = useState<ProductPerformanceRow[] | null>(null);
+  const [prodExpanded, setProdExpanded] = useState(false);
+  const [prodExpandLoading, setProdExpandLoading] = useState(false);
   const [channels, setChannels] = useState<ChannelBreakdownRow[]>([]);
   const [stock, setStock] = useState<StockValueReport | null>(null);
   const [trend, setTrend] = useState<DailyTrendRow[]>([]);
@@ -80,17 +85,20 @@ export default function ReportsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setShrinkage(null);
+    setAllProducts(null);
+    setProdExpanded(false);
     try {
       const q = `outlet=1&start=${start}&end=${end}`;
       const [p, prod, ch, tr, pur] = await Promise.all([
         api<Pnl>(`/reports/pnl/?${q}`),
-        api<{ rows: ProductPerformanceRow[] }>(`/reports/product-performance/?${q}`),
+        api<ProductPerformanceResponse>(`/reports/product-performance/?${q}&limit=5`),
         api<{ rows: ChannelBreakdownRow[] }>(`/reports/channel-breakdown/?${q}`),
         api<{ rows: DailyTrendRow[] }>(`/reports/daily-trend/?${q}`),
         api<PurchaseSummary>(`/reports/purchase-summary/?${q}`),
       ]);
       setPnl(p);
       setProducts(prod.rows);
+      setProductTotalCount(prod.total_count);
       setChannels(ch.rows);
       setTrend(tr.rows);
       setPurchase(pur);
@@ -102,6 +110,19 @@ export default function ReportsPage() {
       setLoading(false);
     }
   }, [start, end]);
+
+  async function expandProducts() {
+    if (allProducts) { setProdExpanded(true); return; }
+    setProdExpandLoading(true);
+    try {
+      const q = `outlet=1&start=${start}&end=${end}`;
+      const res = await api<ProductPerformanceResponse>(`/reports/product-performance/?${q}`);
+      setAllProducts(res.rows);
+      setProdExpanded(true);
+    } finally {
+      setProdExpandLoading(false);
+    }
+  }
 
   // Stock value is always live — no date range
   useEffect(() => {
@@ -142,7 +163,8 @@ export default function ReportsPage() {
 
   const maxRevenue = Math.max(...trend.map((r) => Number(r.revenue)), 1);
 
-  const visibleProducts = [...products].sort((a, b) => {
+  const displayedProducts = prodExpanded && allProducts ? allProducts : products;
+  const visibleProducts = [...displayedProducts].sort((a, b) => {
     const av = Number(a[sortCol]);
     const bv = Number(b[sortCol]);
     return sortDir === "desc" ? bv - av : av - bv;
@@ -483,7 +505,12 @@ export default function ReportsPage() {
       {products.length > 0 && (
         <section className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <h2 className="sec">Product performance</h2>
+            <h2 className="sec">
+              Products by revenue
+              <span className="ml-2 font-mono text-[10px] font-normal text-ink-soft">
+                {prodExpanded ? `all ${productTotalCount}` : `top ${products.length}${productTotalCount > products.length ? ` of ${productTotalCount}` : ""}`}
+              </span>
+            </h2>
             <Link href="/owner/sales" className="font-mono text-[10px] text-chrome underline-offset-2 hover:underline">
               Full sales report →
             </Link>
@@ -526,9 +553,29 @@ export default function ReportsPage() {
               </tbody>
             </table>
           </div>
-          <p className="font-mono text-[10px] text-ink-soft">
-            Margin ≥30% <span className="text-leaf-deep">green</span> · 15–30% <span className="text-gold-deep">amber</span> · &lt;15% <span className="text-chili">red</span>
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="font-mono text-[10px] text-ink-soft">
+              Margin ≥30% <span className="text-leaf-deep">green</span> · 15–30% <span className="text-gold-deep">amber</span> · &lt;15% <span className="text-chili">red</span>
+            </p>
+            {productTotalCount > products.length && (
+              prodExpanded ? (
+                <button
+                  className="font-mono text-[10px] text-ink-soft hover:text-ink"
+                  onClick={() => setProdExpanded(false)}
+                >
+                  ▲ Show less
+                </button>
+              ) : (
+                <button
+                  className="font-mono text-[10px] text-chrome hover:underline disabled:opacity-50"
+                  disabled={prodExpandLoading}
+                  onClick={expandProducts}
+                >
+                  {prodExpandLoading ? "Loading…" : `▼ Show all ${productTotalCount} products`}
+                </button>
+              )
+            )}
+          </div>
         </section>
       )}
 

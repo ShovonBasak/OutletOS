@@ -416,7 +416,7 @@ def product_performance(request):
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start,
         daily_closing__closing_date__lte=end,
-    ).select_related("product", "product__recipes__ingredient")
+    ).select_related("product").prefetch_related("product__recipes__ingredient")
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
 
@@ -457,7 +457,11 @@ def product_performance(request):
             "margin_pct": margin.quantize(Decimal("0.1")),
         })
 
-    return Response({"start": start, "end": end, "rows": rows, "range_clamped": range_clamped})
+    total_count = len(rows)
+    limit_param = request.query_params.get("limit")
+    if limit_param and limit_param.isdigit():
+        rows = rows[:int(limit_param)]
+    return Response({"start": start, "end": end, "rows": rows, "total_count": total_count, "range_clamped": range_clamped})
 
 
 @api_view(["GET"])
@@ -649,8 +653,9 @@ def dashboard_summary(request):
         for k, v in sorted(by_date.items())
     ]
 
+    all_sorted_products = sorted(by_product.values(), key=lambda x: -x["revenue"])
     top_products = []
-    for p in sorted(by_product.values(), key=lambda x: -x["revenue"])[:10]:
+    for p in all_sorted_products[:5]:
         gp = p["revenue"] - p["cogs"]
         margin = (gp / p["revenue"] * 100) if p["revenue"] else Decimal("0")
         top_products.append({
@@ -673,6 +678,7 @@ def dashboard_summary(request):
         "pnl": compute_pnl(start, end, outlet),
         "daily": daily,
         "top_products": top_products,
+        "top_products_total": len(all_sorted_products),
         "channels": channels,
     })
 
