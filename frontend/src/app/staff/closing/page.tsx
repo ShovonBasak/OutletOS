@@ -157,17 +157,20 @@ function ClosingHub() {
       )}
 
       {(() => {
-        const onlineSell = closing.sales_lines
-          .filter((l) => l.source === "STAFF_ENTRY")
+        const onlineLines = closing.sales_lines.filter((l) => l.source === "STAFF_ENTRY");
+        const onlineSell = onlineLines.reduce((s, l) => s + Number(l.gross_amount), 0);
+        const walkinSell = closing.sales_lines
+          .filter((l) => l.source === "SYSTEM_DERIVED")
           .reduce((s, l) => s + Number(l.gross_amount), 0);
+        const totalGross = onlineSell + walkinSell;
         const nonCashPayments = closing.payments.filter(
           (p) => !p.is_primary_cash && Number(p.amount) > 0
         );
         return (
           <div className="ticket flex flex-col gap-0">
             <div className="ticket-row">
-              <span>Net revenue</span>
-              <span className="qty font-semibold">{bdt(closing.channel_day_net_revenue)}</span>
+              <span>Revenue</span>
+              <span className="qty font-semibold">{bdt(String(totalGross))}</span>
             </div>
 
             {onlineSell > 0 && (

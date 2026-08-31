@@ -78,9 +78,9 @@ export default function SalesSummaryScreen() {
         requiresPreparation: sc.requires_preparation,
         piecesPerPack: sc.pieces_per_pack ? Number(sc.pieces_per_pack) : null,
         walkin: sc.derived_walkin_sold,
-        walkinRevenue: wl ? Number(wl.net_amount) : 0,
+        walkinRevenue: wl ? Number(wl.gross_amount) : 0,
         online: sc.app_channel_sold,
-        onlineRevenue: ol ? Number(ol.net_amount) : 0,
+        onlineRevenue: ol ? Number(ol.gross_amount) : 0,
         wastage: sc.wastage_pieces,
         wastageCost: Number(sc.wastage_cost) || 0,
         remains: sc.remains_pieces,
@@ -97,7 +97,7 @@ export default function SalesSummaryScreen() {
         wastage: 0, wastageCost: 0, remains: 0, remainsValue: 0, flag: false,
       };
       row.walkin += l.quantity_sold;
-      row.walkinRevenue += Number(l.net_amount);
+      row.walkinRevenue += Number(l.gross_amount);
       productMap.set(l.product, row);
     }
     for (const l of onlineLines) {
@@ -107,14 +107,14 @@ export default function SalesSummaryScreen() {
         wastage: 0, wastageCost: 0, remains: 0, remainsValue: 0, flag: false,
       };
       row.online += l.quantity_sold;
-      row.onlineRevenue += Number(l.net_amount);
+      row.onlineRevenue += Number(l.gross_amount);
       productMap.set(l.product, row);
     }
     rows = Array.from(productMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  const totalWalkinRevenue = walkinLines.reduce((s, l) => s + Number(l.net_amount), 0);
-  const totalOnlineRevenue = onlineLines.reduce((s, l) => s + Number(l.net_amount), 0);
+  const totalWalkinRevenue = walkinLines.reduce((s, l) => s + Number(l.gross_amount), 0);
+  const totalOnlineRevenue = onlineLines.reduce((s, l) => s + Number(l.gross_amount), 0);
   const totalWalkinQty = rows.reduce((s, r) => s + Math.max(0, r.walkin), 0);
   const totalOnlineQty = rows.reduce((s, r) => s + r.online, 0);
   const totalWastage = rows.reduce((s, r) => s + r.wastage, 0);
