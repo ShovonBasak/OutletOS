@@ -92,8 +92,16 @@ export default function PnlPage() {
     if (preset !== "custom") load();
   }, [preset, load]);
 
-  const grossMarginPct = pnl && Number(pnl.revenue) > 0
-    ? (Number(pnl.gross_profit) / Number(pnl.revenue) * 100).toFixed(1) + "%"
+  // Gross profit shown after deducting commission, COGS, packaging and all operating costs
+  const displayGrossProfit = pnl
+    ? Number(pnl.gross_profit)
+      - Number(pnl.packaging_cost)
+      - Number(pnl.fixed_costs)
+      - Number(pnl.variable_costs)
+      - Number(pnl.adhoc_costs)
+    : 0;
+  const grossMarginPct = pnl && Number(pnl.gross_revenue) > 0
+    ? (displayGrossProfit / Number(pnl.gross_revenue) * 100).toFixed(1) + "%"
     : null;
 
   const netColor = pnl
@@ -161,16 +169,47 @@ export default function PnlPage() {
         <table className="ledger max-w-[520px]">
           <tbody>
             <tr>
-              <td>Revenue (net of commission &amp; promos)</td>
-              <td>{bdt(pnl.revenue)}</td>
+              <td>Revenue (actual sell value)</td>
+              <td>{bdt(pnl.gross_revenue)}</td>
             </tr>
+            {Number(pnl.commission_total) > 0 && (
+              <tr>
+                <td>Commission (platform fees)</td>
+                <td className="neg">− {bdt(pnl.commission_total)}</td>
+              </tr>
+            )}
+            {Number(pnl.channel_discount) > 0 && (
+              <tr>
+                <td>Platform promotions / discounts</td>
+                <td className="neg">− {bdt(pnl.channel_discount)}</td>
+              </tr>
+            )}
             <tr>
               <td>COGS (recipe cost of units sold)</td>
               <td className="neg">− {bdt(pnl.cogs)}</td>
             </tr>
+            <tr>
+              <td>Packaging &amp; supplies</td>
+              <td className="neg">− {bdt(pnl.packaging_cost)}</td>
+            </tr>
+            <tr className="section">
+              <td colSpan={2}>Costs</td>
+            </tr>
+            <tr>
+              <td>Fixed (rent + salary, daily share)</td>
+              <td className="neg">− {bdt(pnl.fixed_costs)}</td>
+            </tr>
+            <tr>
+              <td>Variable (gas, oil)</td>
+              <td className="neg">− {bdt(pnl.variable_costs)}</td>
+            </tr>
+            <tr>
+              <td>Adhoc (repairs)</td>
+              <td className="neg">− {bdt(pnl.adhoc_costs)}</td>
+            </tr>
             <tr className="subtotal">
               <td>Gross profit{grossMarginPct ? ` (${grossMarginPct})` : ""}</td>
-              <td>{bdt(pnl.gross_profit)}</td>
+              <td>{bdt(displayGrossProfit)}</td>
             </tr>
             <tr className="section">
               <td colSpan={2}>Losses</td>
@@ -237,25 +276,6 @@ export default function PnlPage() {
               </tr>
             )}
 
-            <tr>
-              <td>Packaging &amp; supplies</td>
-              <td className="neg">− {bdt(pnl.packaging_cost)}</td>
-            </tr>
-            <tr className="section">
-              <td colSpan={2}>Costs</td>
-            </tr>
-            <tr>
-              <td>Fixed (rent + salary, daily share)</td>
-              <td className="neg">− {bdt(pnl.fixed_costs)}</td>
-            </tr>
-            <tr>
-              <td>Variable (gas, oil)</td>
-              <td className="neg">− {bdt(pnl.variable_costs)}</td>
-            </tr>
-            <tr>
-              <td>Adhoc (repairs)</td>
-              <td className="neg">− {bdt(pnl.adhoc_costs)}</td>
-            </tr>
             {Number(pnl.other_income) !== 0 && (
               <>
                 <tr className="section">

@@ -183,38 +183,82 @@ function TopProductsChart({ products }: { products: DashboardData["top_products"
 
 // ── P&L waterfall ─────────────────────────────────────────────────────────────
 
-function PnlWaterfall({ pnl }: { pnl: Pnl }) {
-  const revenue = Number(pnl.revenue);
+const WATERFALL_COLORS = {
+  revenue:    { bar: "#3F6B3F", text: "text-leaf-deep",  opacity: 0.75 },
+  deduction:  { bar: "#7A2420", text: "text-chili",       opacity: 0.60 },
+  losses:     { bar: "#C9601C", text: "text-chili",       opacity: 0.65 },
+  costs:      { bar: "#B08030", text: "text-chili",       opacity: 0.60 },
+  income:     { bar: "#3F6B3F", text: "text-leaf-deep",  opacity: 0.55 },
+};
 
-  const rows = [
-    { label: "Revenue",     value: revenue,                  sign: "+" as const },
-    { label: "COGS",        value: Number(pnl.cogs),         sign: "−" as const },
-    { label: "Wastage",     value: Number(pnl.wastage_cost), sign: "−" as const },
-    { label: "Shrinkage",   value: Number(pnl.shrinkage_cost), sign: "−" as const },
-    { label: "Packaging",   value: Number(pnl.packaging_cost), sign: "−" as const },
-    { label: "Fixed costs", value: Number(pnl.fixed_costs),  sign: "−" as const },
-    { label: "Variable",    value: Number(pnl.variable_costs), sign: "−" as const },
-    { label: "Adhoc",       value: Number(pnl.adhoc_costs),  sign: "−" as const },
-    { label: "Other income",value: Number(pnl.other_income), sign: "+" as const },
-  ].filter(r => r.value > 0);
+type WfCategory = keyof typeof WATERFALL_COLORS;
+
+type WfRow =
+  | { kind: "section"; label: string }
+  | { kind: "row"; label: string; value: number; sign: "+" | "−"; cat: WfCategory };
+
+function PnlWaterfall({ pnl }: { pnl: Pnl }) {
+  const revenue = Number(pnl.gross_revenue);
+
+  const entries: WfRow[] = [
+    { kind: "row", label: "Revenue",     value: revenue,                      sign: "+", cat: "revenue" },
+    { kind: "row", label: "Commission",  value: Number(pnl.commission_total), sign: "−", cat: "deduction" },
+    { kind: "row", label: "COGS",        value: Number(pnl.cogs),             sign: "−", cat: "deduction" },
+    { kind: "section", label: "Losses" },
+    { kind: "row", label: "Wastage",     value: Number(pnl.wastage_cost),     sign: "−", cat: "losses" },
+    { kind: "row", label: "Shrinkage",   value: Number(pnl.shrinkage_cost),   sign: "−", cat: "losses" },
+    { kind: "section", label: "Costs" },
+    { kind: "row", label: "Packaging",   value: Number(pnl.packaging_cost),   sign: "−", cat: "costs" },
+    { kind: "row", label: "Fixed costs", value: Number(pnl.fixed_costs),      sign: "−", cat: "costs" },
+    { kind: "row", label: "Variable",    value: Number(pnl.variable_costs),   sign: "−", cat: "costs" },
+    { kind: "row", label: "Adhoc",       value: Number(pnl.adhoc_costs),      sign: "−", cat: "costs" },
+    { kind: "section", label: "Other income" },
+    { kind: "row", label: "Other income",value: Number(pnl.other_income),     sign: "+", cat: "income" },
+  ];
+
+  // Remove section headers whose rows are all zero, and filter zero-value rows
+  const filtered: WfRow[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.kind === "section") {
+      let j = i + 1;
+      let sectionHasData = false;
+      while (j < entries.length && entries[j].kind !== "section") {
+        const next = entries[j];
+        if (next.kind === "row" && next.value > 0) sectionHasData = true;
+        j++;
+      }
+      if (sectionHasData) filtered.push(e);
+    } else {
+      if (e.value > 0) filtered.push(e);
+    }
+  }
 
   const net = Number(pnl.net_profit);
   const ref = revenue || 1;
 
   return (
-    <div className="flex flex-col gap-2">
-      {rows.map((r, i) => {
-        const w = Math.min((r.value / ref) * 100, 100);
-        const isPos = r.sign === "+";
-        const barColor = r.label === "Revenue" ? "#3F6B3F" : isPos ? "#3F6B3F" : "#9B2E2B";
+    <div className="flex flex-col gap-1.5">
+      {filtered.map((e, i) => {
+        if (e.kind === "section") {
+          return (
+            <div key={i} className="grid grid-cols-[6.5rem_1fr_6rem] items-center gap-2 pt-1">
+              <span className="font-mono text-[8px] uppercase tracking-widest text-ink-soft/50 text-right">{e.label}</span>
+              <div className="h-px bg-[#e8dfc8]" />
+              <span />
+            </div>
+          );
+        }
+        const { bar, text, opacity } = WATERFALL_COLORS[e.cat];
+        const w = Math.min((e.value / ref) * 100, 100);
         return (
           <div key={i} className="grid grid-cols-[6.5rem_1fr_6rem] items-center gap-2">
-            <span className="font-mono text-[10px] text-ink-soft text-right">{r.label}</span>
-            <div className="h-[18px] bg-paper-dim rounded overflow-hidden">
-              <div className="h-full rounded" style={{ width: `${w}%`, backgroundColor: barColor, opacity: r.label === "Revenue" ? 0.7 : 0.55 }} />
+            <span className="font-mono text-[10px] text-ink-soft text-right">{e.label}</span>
+            <div className="h-[16px] bg-paper-dim rounded overflow-hidden">
+              <div className="h-full rounded" style={{ width: `${w}%`, backgroundColor: bar, opacity }} />
             </div>
-            <span className={`font-mono text-[11px] font-semibold text-right ${isPos ? "text-leaf-deep" : "text-chili"}`}>
-              {r.sign} {bdt(r.value)}
+            <span className={`font-mono text-[11px] font-semibold text-right ${text}`}>
+              {e.sign} {bdt(e.value)}
             </span>
           </div>
         );
@@ -354,7 +398,7 @@ export default function OwnerDashboard() {
         product_name: r.product_name,
         category: r.category,
         units_sold: r.units_sold,
-        revenue: r.net_revenue,
+        revenue: r.gross_revenue,
         cogs: r.cogs,
         gross_profit: r.gross_profit,
         margin_pct: r.margin_pct,
@@ -378,13 +422,13 @@ export default function OwnerDashboard() {
     }
   }
 
-  const revenue    = data ? Number(data.pnl.revenue)    : 0;
-  const netProfit  = data ? Number(data.pnl.net_profit) : 0;
-  const cogs       = data ? Number(data.pnl.cogs)       : 0;
-  const grossProfit = revenue - cogs;
+  const revenue     = data ? Number(data.pnl.gross_revenue) : 0;
+  const netProfit   = data ? Number(data.pnl.net_profit)    : 0;
+  const cogs        = data ? Number(data.pnl.cogs)          : 0;
+  const grossProfit = data ? Number(data.pnl.gross_profit)  : 0;
   const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-  const totalUnits = data?.daily.reduce((s, d) => s + d.units_sold, 0) ?? 0;
-  const activeDays = data?.daily.length ?? 0;
+  const totalUnits  = data?.daily.reduce((s, d) => s + d.units_sold, 0) ?? 0;
+  const activeDays  = data?.daily.length ?? 0;
   const totalRevenue = data?.channels.reduce((s, c) => s + Number(c.revenue), 0) ?? 0;
 
   return (
@@ -536,13 +580,32 @@ export default function OwnerDashboard() {
               <PnlWaterfall pnl={data.pnl} />
               <div className="mt-4 grid grid-cols-3 gap-2 border-t border-dashed border-[#d8cdb0] pt-4">
                 {[
-                  { label: "Wastage", value: bdt(data.pnl.wastage_cost), color: "text-chili" },
-                  { label: "Shrinkage", value: bdt(data.pnl.shrinkage_cost), color: "text-chili" },
-                  { label: "Other income", value: bdt(data.pnl.other_income), color: "text-leaf-deep" },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="flex flex-col">
+                  {
+                    label: "Losses",
+                    value: bdt(Number(data.pnl.wastage_cost) + Number(data.pnl.shrinkage_cost)),
+                    sub: "wastage + shrinkage",
+                    accent: "#C9601C",
+                    textColor: "#C9601C",
+                  },
+                  {
+                    label: "Costs",
+                    value: bdt(Number(data.pnl.fixed_costs) + Number(data.pnl.variable_costs) + Number(data.pnl.adhoc_costs)),
+                    sub: "fixed + variable + adhoc",
+                    accent: "#B08030",
+                    textColor: "#B08030",
+                  },
+                  {
+                    label: "Other income",
+                    value: bdt(data.pnl.other_income),
+                    sub: "oil, recyclables…",
+                    accent: "#3F6B3F",
+                    textColor: "#3F6B3F",
+                  },
+                ].map(({ label, value, sub, accent, textColor }) => (
+                  <div key={label} className="flex flex-col gap-0.5 pl-2" style={{ borderLeft: `3px solid ${accent}` }}>
                     <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">{label}</span>
-                    <span className={`font-mono text-[12px] font-semibold ${color}`}>{value}</span>
+                    <span className="font-mono text-[12px] font-semibold" style={{ color: textColor }}>{value}</span>
+                    <span className="font-mono text-[9px] text-ink-soft/50">{sub}</span>
                   </div>
                 ))}
               </div>

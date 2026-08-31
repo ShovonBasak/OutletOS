@@ -147,8 +147,16 @@ export default function ReportsPage() {
   const onlineRev = onlineChs.reduce((s, c) => s + Number(c.gross_revenue), 0);
   const totalRev = walkInRev + onlineRev;
 
-  const grossMargin = pnl && Number(pnl.gross_revenue) > 0
-    ? Number(pnl.gross_profit) / Number(pnl.gross_revenue) * 100
+  // Gross profit shown after deducting commission, COGS, packaging and all operating costs
+  const displayGrossProfit = pnl
+    ? Number(pnl.gross_profit)
+      - Number(pnl.packaging_cost)
+      - Number(pnl.fixed_costs)
+      - Number(pnl.variable_costs)
+      - Number(pnl.adhoc_costs)
+    : null;
+  const grossMargin = displayGrossProfit !== null && Number(pnl?.gross_revenue) > 0
+    ? displayGrossProfit / Number(pnl!.gross_revenue) * 100
     : null;
   const cogsRatio = pnl && Number(pnl.gross_revenue) > 0
     ? Number(pnl.cogs) / Number(pnl.gross_revenue) * 100
@@ -353,9 +361,14 @@ export default function ReportsPage() {
                 <tr><td>Platform promotions / discounts</td><td className="neg">− {bdt(pnl.channel_discount)}</td></tr>
               )}
               <tr><td>Cost of goods sold</td><td className="neg">− {bdt(pnl.cogs)}</td></tr>
+              <tr><td>Packaging &amp; supplies</td><td className="neg">− {bdt(pnl.packaging_cost)}</td></tr>
+              <tr className="section"><td colSpan={2}>Costs</td></tr>
+              <tr><td>Fixed (rent, salary)</td><td className="neg">− {bdt(pnl.fixed_costs)}</td></tr>
+              <tr><td>Variable (gas, oil)</td><td className="neg">− {bdt(pnl.variable_costs)}</td></tr>
+              <tr><td>Adhoc (repairs, misc)</td><td className="neg">− {bdt(pnl.adhoc_costs)}</td></tr>
               <tr className="subtotal">
                 <td>Gross profit{grossMargin !== null ? ` (${pct(grossMargin)})` : ""}</td>
-                <td>{bdt(pnl.gross_profit)}</td>
+                <td>{bdt(displayGrossProfit ?? 0)}</td>
               </tr>
               <tr className="section"><td colSpan={2}>Losses</td></tr>
               <tr><td>Wastage (prepared, not sold)</td><td className="neg">− {bdt(pnl.wastage_cost)}</td></tr>
@@ -414,10 +427,6 @@ export default function ReportsPage() {
                   </td>
                 </tr>
               )}
-              <tr className="section"><td colSpan={2}>Operating costs</td></tr>
-              <tr><td>Fixed (rent, salary)</td><td className="neg">− {bdt(pnl.fixed_costs)}</td></tr>
-              <tr><td>Variable (gas, oil)</td><td className="neg">− {bdt(pnl.variable_costs)}</td></tr>
-              <tr><td>Adhoc (repairs, misc)</td><td className="neg">− {bdt(pnl.adhoc_costs)}</td></tr>
               {Number(pnl.other_income) > 0 && (
                 <>
                   <tr className="section"><td colSpan={2}>Other income</td></tr>

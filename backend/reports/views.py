@@ -637,16 +637,17 @@ def dashboard_summary(request):
         pid = line.product_id
         prod = by_product.setdefault(pid, {
             "product_name": line.product.name, "category": line.product.category,
-            "units_sold": 0, "revenue": Decimal("0"), "cogs": Decimal("0"),
+            "units_sold": 0, "gross_revenue": Decimal("0"), "net_revenue": Decimal("0"), "cogs": Decimal("0"),
         })
         prod["units_sold"] += line.quantity_sold
-        prod["revenue"] += line.net_amount
+        prod["gross_revenue"] += line.gross_amount
+        prod["net_revenue"] += line.net_amount
         prod["cogs"] += line_cogs
 
         ch_name = line.channel.name if line.channel else "Walk-in"
-        ch = by_channel.setdefault(ch_name, {"channel": ch_name, "units_sold": 0, "revenue": Decimal("0"), "gross_revenue": Decimal("0")})
+        ch = by_channel.setdefault(ch_name, {"channel": ch_name, "units_sold": 0, "net_revenue": Decimal("0"), "gross_revenue": Decimal("0")})
         ch["units_sold"] += line.quantity_sold
-        ch["revenue"] += line.net_amount
+        ch["net_revenue"] += line.net_amount
         ch["gross_revenue"] += line.gross_amount
 
     q, q1 = Decimal("0.01"), Decimal("0.1")
@@ -657,24 +658,24 @@ def dashboard_summary(request):
         for k, v in sorted(by_date.items())
     ]
 
-    all_sorted_products = sorted(by_product.values(), key=lambda x: -x["revenue"])
+    all_sorted_products = sorted(by_product.values(), key=lambda x: -x["gross_revenue"])
     top_products = []
-    for p in all_sorted_products[:5]:
-        gp = p["revenue"] - p["cogs"]
-        margin = (gp / p["revenue"] * 100) if p["revenue"] else Decimal("0")
+    for p in all_sorted_products[:7]:
+        gp = p["net_revenue"] - p["cogs"]
+        margin = (gp / p["net_revenue"] * 100) if p["net_revenue"] else Decimal("0")
         top_products.append({
             "product_name": p["product_name"], "category": p["category"],
             "units_sold": p["units_sold"],
-            "revenue": str(p["revenue"].quantize(q)), "cogs": str(p["cogs"].quantize(q)),
+            "revenue": str(p["gross_revenue"].quantize(q)), "cogs": str(p["cogs"].quantize(q)),
             "gross_profit": str(gp.quantize(q)), "margin_pct": str(margin.quantize(q1)),
         })
 
     channels = []
-    for ch, v in sorted(by_channel.items(), key=lambda x: -x[1]["revenue"]):
+    for ch, v in sorted(by_channel.items(), key=lambda x: -x[1]["gross_revenue"]):
         channels.append({
             "channel": ch, "units_sold": v["units_sold"],
-            "revenue": str(v["revenue"].quantize(q)),
-            "commission": str((v["gross_revenue"] - v["revenue"]).quantize(q)),
+            "revenue": str(v["gross_revenue"].quantize(q)),
+            "commission": str((v["gross_revenue"] - v["net_revenue"]).quantize(q)),
         })
 
     return Response({
