@@ -277,14 +277,14 @@ export default function OwnerHome() {
             <div className="mt-3 grid grid-cols-3 gap-x-3 border-t border-dashed border-[#d8cdb0] pt-3">
               <div className="flex flex-col gap-0.5">
                 <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Revenue</span>
-                <span className={`font-mono text-[16px] font-bold leading-tight ${Number(data.pnl.revenue) > 0 ? "text-leaf-deep" : "text-ink"}`}>
-                  {bdt(data.pnl.revenue)}
+                <span className={`font-mono text-[16px] font-bold leading-tight ${Number(data.pnl.gross_revenue) > 0 ? "text-leaf-deep" : "text-ink"}`}>
+                  {bdt(data.pnl.gross_revenue)}
                 </span>
                 {(Number(data.pnl.commission_total) > 0 || Number(data.pnl.channel_discount) > 0) && (
                   <span className="font-mono text-[9px] text-ink-soft/60 leading-tight">
                     {[
-                      Number(data.pnl.commission_total) > 0 && `cmm ${bdt(data.pnl.commission_total)}`,
-                      Number(data.pnl.channel_discount) > 0 && `disc ${bdt(data.pnl.channel_discount)}`,
+                      Number(data.pnl.commission_total) > 0 && `cmm −${bdt(data.pnl.commission_total)}`,
+                      Number(data.pnl.channel_discount) > 0 && `disc −${bdt(data.pnl.channel_discount)}`,
                     ].filter(Boolean).join(" · ")}
                   </span>
                 )}

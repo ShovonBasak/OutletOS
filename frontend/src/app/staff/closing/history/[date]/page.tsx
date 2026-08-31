@@ -67,8 +67,8 @@ export default function ClosingDetail() {
     (byChannel[l.channel_name] ??= []).push(l);
   }
 
-  const onlineTotal = onlineLines.reduce((s, l) => s + Number(l.net_amount), 0);
-  const walkinTotal = walkinLines.reduce((s, l) => s + Number(l.net_amount), 0);
+  const onlineTotal = onlineLines.reduce((s, l) => s + Number(l.gross_amount), 0);
+  const walkinTotal = walkinLines.reduce((s, l) => s + Number(l.gross_amount), 0);
 
   const preparedRows = closing.stock_counts
     .filter((sc) => sc.requires_preparation && sc.available_pieces > 0)
@@ -116,7 +116,7 @@ export default function ClosingDetail() {
           <Row key={d.id} label={`${d.channel_name} discount`} value={`− ${bdt(d.discount_amount)}`} valueClass="text-chili" />
         ))}
         <Divider />
-        <Row label="Net revenue" value={bdt(closing.channel_day_net_revenue)} bold />
+        <Row label="Total sales" value={bdt(onlineTotal + walkinTotal)} bold />
         <Divider />
         {cashEntry && <Row label={cashEntry.account_name} value={bdt(cashEntry.amount)} />}
         {otherPayments.map((p) => (
@@ -128,7 +128,7 @@ export default function ClosingDetail() {
       {Object.keys(byChannel).length > 0 && (
         <Section title="Online sales">
           {Object.entries(byChannel).map(([channelName, lines], ci) => {
-            const subtotal = lines.reduce((s, l) => s + Number(l.net_amount), 0);
+            const subtotal = lines.reduce((s, l) => s + Number(l.gross_amount), 0);
             return (
               <div key={channelName}>
                 {ci > 0 && <Divider />}
@@ -138,7 +138,7 @@ export default function ClosingDetail() {
                 {lines.map((l) => (
                   <div key={l.id} className="ticket-row font-mono text-[11px]">
                     <span>{l.product_name} <span className="text-ink-soft">× {l.quantity_sold} @ {bdt(l.unit_price)}</span></span>
-                    <span className="num">{bdt(l.net_amount)}</span>
+                    <span className="num">{bdt(l.gross_amount)}</span>
                   </div>
                 ))}
                 <div className="ticket-row mt-0.5 font-mono text-[11px] font-semibold">
@@ -163,7 +163,7 @@ export default function ClosingDetail() {
           {walkinLines.map((l) => (
             <div key={l.id} className="ticket-row font-mono text-[11px]">
               <span>{l.product_name} <span className="text-ink-soft">× {l.quantity_sold} @ {bdt(l.unit_price)}</span></span>
-              <span className="num">{bdt(l.net_amount)}</span>
+              <span className="num">{bdt(l.gross_amount)}</span>
             </div>
           ))}
           <Divider />

@@ -54,7 +54,7 @@ function pct(val: number) { return `${val.toFixed(1)}%`; }
 function num(val: string | number) { return Number(val).toLocaleString("en-BD"); }
 
 type SortDir = "asc" | "desc";
-type ProdCol = "units_sold" | "net_revenue" | "cogs" | "gross_profit" | "margin_pct";
+type ProdCol = "units_sold" | "gross_revenue" | "cogs" | "gross_profit" | "margin_pct";
 
 export default function ReportsPage() {
   const [preset, setPreset] = useState<Preset>("this_month");
@@ -77,7 +77,7 @@ export default function ReportsPage() {
   const [purchase, setPurchase] = useState<PurchaseSummary | null>(null);
   const [shrinkage, setShrinkage] = useState<ShrinkageDetail | null>(null);
 
-  const [sortCol, setSortCol] = useState<ProdCol>("net_revenue");
+  const [sortCol, setSortCol] = useState<ProdCol>("gross_revenue");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const { start, end } = rangeFor(preset, customStart, customEnd);
@@ -140,18 +140,18 @@ export default function ReportsPage() {
 
   const ind = (col: ProdCol) => sortCol === col ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
-  // Derive walk-in vs online revenue
+  // Derive walk-in vs online revenue using gross (actual sell value)
   const walkInCh = channels.find((c) => c.channel_name.toLowerCase().includes("walk"));
   const onlineChs = channels.filter((c) => !c.channel_name.toLowerCase().includes("walk"));
-  const walkInRev = walkInCh ? Number(walkInCh.net_revenue) : 0;
-  const onlineRev = onlineChs.reduce((s, c) => s + Number(c.net_revenue), 0);
+  const walkInRev = walkInCh ? Number(walkInCh.gross_revenue) : 0;
+  const onlineRev = onlineChs.reduce((s, c) => s + Number(c.gross_revenue), 0);
   const totalRev = walkInRev + onlineRev;
 
-  const grossMargin = pnl && Number(pnl.revenue) > 0
-    ? Number(pnl.gross_profit) / Number(pnl.revenue) * 100
+  const grossMargin = pnl && Number(pnl.gross_revenue) > 0
+    ? Number(pnl.gross_profit) / Number(pnl.gross_revenue) * 100
     : null;
-  const cogsRatio = pnl && Number(pnl.revenue) > 0
-    ? Number(pnl.cogs) / Number(pnl.revenue) * 100
+  const cogsRatio = pnl && Number(pnl.gross_revenue) > 0
+    ? Number(pnl.cogs) / Number(pnl.gross_revenue) * 100
     : null;
   const netProfit = pnl ? Number(pnl.net_profit) : null;
   const isProfit = netProfit !== null && netProfit >= 0;
@@ -246,8 +246,8 @@ export default function ReportsPage() {
           <div className="grid grid-cols-3 gap-2">
             <KpiCard
               label="Total revenue"
-              value={bdt(pnl.revenue)}
-              sub="net of commission"
+              value={bdt(pnl.gross_revenue)}
+              sub={Number(pnl.commission_total) > 0 ? `cmm −${bdt(pnl.commission_total)}` : undefined}
             />
             <KpiCard
               label="Walk-in"
@@ -345,7 +345,13 @@ export default function ReportsPage() {
           <h2 className="sec">Profit & Loss</h2>
           <table className="ledger max-w-[520px]">
             <tbody>
-              <tr><td>Revenue (net of commission &amp; promos)</td><td>{bdt(pnl.revenue)}</td></tr>
+              <tr><td>Revenue (actual sell value)</td><td>{bdt(pnl.gross_revenue)}</td></tr>
+              {Number(pnl.commission_total) > 0 && (
+                <tr><td>Commission (platform fees)</td><td className="neg">− {bdt(pnl.commission_total)}</td></tr>
+              )}
+              {Number(pnl.channel_discount) > 0 && (
+                <tr><td>Platform promotions / discounts</td><td className="neg">− {bdt(pnl.channel_discount)}</td></tr>
+              )}
               <tr><td>Cost of goods sold</td><td className="neg">− {bdt(pnl.cogs)}</td></tr>
               <tr className="subtotal">
                 <td>Gross profit{grossMargin !== null ? ` (${pct(grossMargin)})` : ""}</td>
@@ -489,7 +495,7 @@ export default function ReportsPage() {
                     </td>
                     <td className="text-right font-mono font-semibold">{bdt(c.net_revenue)}</td>
                     <td className="text-right font-mono text-ink-soft">
-                      {totalRev > 0 ? pct(Number(c.net_revenue) / totalRev * 100) : "—"}
+                      {totalRev > 0 ? pct(Number(c.gross_revenue) / totalRev * 100) : "—"}
                     </td>
                   </tr>
                 ))}
@@ -522,7 +528,7 @@ export default function ReportsPage() {
                   <th>Product</th>
                   <th>Cat.</th>
                   <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("units_sold")}>Units{ind("units_sold")}</th>
-                  <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("net_revenue")}>Net rev{ind("net_revenue")}</th>
+                  <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("gross_revenue")}>Revenue{ind("gross_revenue")}</th>
                   <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("cogs")}>COGS{ind("cogs")}</th>
                   <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("gross_profit")}>Gross profit{ind("gross_profit")}</th>
                   <th className="cursor-pointer select-none text-right" onClick={() => toggleSort("margin_pct")}>Margin{ind("margin_pct")}</th>
@@ -541,7 +547,7 @@ export default function ReportsPage() {
                       <td className="font-medium">{p.product_name}</td>
                       <td className="font-mono text-[10px] text-ink-soft">{p.category}</td>
                       <td className="text-right font-mono">{num(p.units_sold)}</td>
-                      <td className="text-right font-mono">{bdt(p.net_revenue)}</td>
+                      <td className="text-right font-mono">{bdt(p.gross_revenue)}</td>
                       <td className="text-right font-mono text-ink-soft">{bdt(p.cogs)}</td>
                       <td className="text-right font-mono">{bdt(p.gross_profit)}</td>
                       <td className={`text-right font-mono font-semibold ${mColor}`}>

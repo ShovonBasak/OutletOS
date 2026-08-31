@@ -533,6 +533,9 @@ export interface DailyTrendRow {
 export interface Pnl {
   start: string;
   end: string;
+  gross_revenue: string;
+  commission_total: string;
+  channel_discount: string;
   revenue: string;
   cogs: string;
   gross_profit: string;
@@ -907,12 +910,13 @@ export interface DayOverview {
   raw_stock: DayOverviewRawStock[];
   closing: DayOverviewClosing | null;
   pnl: {
+    gross_revenue: string;
+    commission_total: string;
+    channel_discount: string;
     revenue: string;
     net_profit: string;
     cogs: string;
     gross_profit: string;
-    commission_total: string;
-    channel_discount: string;
   };
   transactions: DayOverviewTransaction[];
 }

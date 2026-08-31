@@ -268,15 +268,17 @@ def compute_pnl(start, end, outlet=None):
         expenses = expenses.filter(outlet_id=outlet)
         other_incomes = other_incomes.filter(outlet_id=outlet)
 
-    # Revenue = Σ net_amount (commission already deducted per line) minus DailyChannelDiscount
-    # (platform promotions borne by the channel that reduce actual payout to the shop).
     channel_discounts = DailyChannelDiscount.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
     )
     if outlet:
         channel_discounts = channel_discounts.filter(daily_closing__outlet_id=outlet)
     channel_discount_total = sum((d.discount_amount for d in channel_discounts), Decimal("0"))
-    revenue = sum((l.net_amount for l in lines), Decimal("0")) - channel_discount_total
+    # Materialize once; gross_revenue is the face-value sold, commission is the platform cut.
+    lines_list = list(lines)
+    gross_revenue_total = sum((l.gross_amount for l in lines_list), Decimal("0"))
+    commission_total = sum((l.commission_amount for l in lines_list), Decimal("0"))
+    revenue = gross_revenue_total - commission_total - channel_discount_total
     cogs = _cogs(outlet, start, end, cost_cache, pack_history)
     gross_profit = revenue - cogs
     wastage = _wastage_cost(outlet, start, end, cost_cache, pack_history)
@@ -302,6 +304,9 @@ def compute_pnl(start, end, outlet=None):
 
     return {
         "start": start, "end": end,
+        "gross_revenue": gross_revenue_total,
+        "commission_total": commission_total,
+        "channel_discount": channel_discount_total,
         "revenue": revenue,
         "cogs": cogs,
         "gross_profit": gross_profit,
@@ -312,7 +317,6 @@ def compute_pnl(start, end, outlet=None):
         "variable_costs": by_type[CostType.VARIABLE],
         "adhoc_costs": by_type[CostType.ADHOC],
         "other_income": other_income_total,
-        "channel_discount": channel_discount_total,
         "net_profit": net_profit,
     }
 
@@ -1517,10 +1521,10 @@ def day_overview(request):
         sales_lines_list = list(closing.sales_lines.all())     # prefetch cache hit
         payments_list = list(closing.payments.all())           # prefetch cache hit
 
-        # Financial rollups computed from prefetched data (avoids model-property re-queries)
-        total_sale = sum((l.net_amount for l in sales_lines_list), Decimal("0"))
+        # Operational rollups use gross_amount (face-value sold) — commission is a P&L cost only
+        total_sale = sum((l.gross_amount for l in sales_lines_list), Decimal("0"))
         online_payments = sum(
-            (l.net_amount for l in sales_lines_list
+            (l.gross_amount for l in sales_lines_list
              if l.channel.settlement_type == SettlementType.DIRECT_TO_ACCOUNT),
             Decimal("0"),
         )
@@ -1611,14 +1615,6 @@ def day_overview(request):
     # ── Today's P&L ───────────────────────────────────────────────────────
     pnl = compute_pnl(date, date, outlet)
 
-    # Commission breakdown — derived from prefetched closing data (no extra queries)
-    commission_total = Decimal("0")
-    if closing:
-        commission_total = sum(
-            (l.commission_amount for l in closing.sales_lines.all()),
-            Decimal("0"),
-        )
-
     # ── Account transactions for the day ──────────────────────────────────
     from finance.models import AccountTransaction
     from django.db.models import Q
@@ -1651,12 +1647,13 @@ def day_overview(request):
         "raw_stock": raw_stock,
         "closing": closing_data,
         "pnl": {
-            "revenue": str(pnl["revenue"]),
-            "net_profit": str(pnl["net_profit"]),
-            "cogs": str(pnl["cogs"]),
-            "gross_profit": str(pnl["gross_profit"]),
-            "commission_total": str(commission_total.quantize(Decimal("0.01"))),
+            "gross_revenue": str(pnl["gross_revenue"].quantize(Decimal("0.01"))),
+            "commission_total": str(pnl["commission_total"].quantize(Decimal("0.01"))),
             "channel_discount": str(pnl["channel_discount"].quantize(Decimal("0.01"))),
+            "revenue": str(pnl["revenue"].quantize(Decimal("0.01"))),
+            "net_profit": str(pnl["net_profit"].quantize(Decimal("0.01"))),
+            "cogs": str(pnl["cogs"].quantize(Decimal("0.01"))),
+            "gross_profit": str(pnl["gross_profit"].quantize(Decimal("0.01"))),
         },
         "transactions": transactions,
     })
