@@ -381,6 +381,7 @@ export interface DisplayStockSlim {
 export interface PackagingLevel {
   ingredient: number;
   ingredient_name: string;
+  ingredient_display_name: string;
   ingredient_group: string;
   base_unit: string;
   pieces_per_pack: string | null;

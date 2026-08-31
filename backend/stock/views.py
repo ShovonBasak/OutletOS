@@ -1294,7 +1294,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
         )
         ingredients = Ingredient.objects.filter(
             tracking_mode=TrackingMode.PERIODIC_COUNT, is_active=True
-        )
+        ).prefetch_related("aliases")
         # Latest check per ingredient (Python dedup — SQLite-safe, no DISTINCT ON).
         checks_qs = (
             PeriodicStockCheck.objects
@@ -1324,9 +1324,11 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
                 current_qty = str(total)
                 source = "stock_in_derived"
                 last_at = None
+            alias = ing.aliases.filter(is_active=True).first()
             result.append({
                 "ingredient": ing.id,
                 "ingredient_name": ing.name,
+                "ingredient_display_name": alias.alias_text if alias else ing.name,
                 "ingredient_group": resolve_ingredient_group(ing, category_map),
                 "base_unit": ing.base_unit,
                 "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,

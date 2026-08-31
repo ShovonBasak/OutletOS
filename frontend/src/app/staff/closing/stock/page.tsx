@@ -241,11 +241,11 @@ export default function StockSummaryScreen() {
                 />
               )),
             ...[...periodicLevels]
-              .sort((a, b) => a.ingredient_name.localeCompare(b.ingredient_name))
+              .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
               .map((r) => (
                 <StockRow
                   key={`per-${r.ingredient}`}
-                  name={r.ingredient_name}
+                  name={r.ingredient_display_name}
                   qty={Number(r.current_qty)}
                   unit={r.base_unit}
                   dim={Number(r.current_qty) <= 0}
