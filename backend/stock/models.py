@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 
 from catalog.models import Ingredient, Outlet, PackDefinition, Product
@@ -343,3 +344,21 @@ class PeriodicStockCheck(models.Model):
 
     def __str__(self):
         return f"{self.ingredient}: {self.counted_qty} left"
+
+
+# ---------------------------------------------------------------------------
+# Fryer oil change log
+# ---------------------------------------------------------------------------
+class FryerOilChange(models.Model):
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name="fryer_oil_changes")
+    pan_number = models.PositiveSmallIntegerField(choices=[(1, "Pan 1"), (2, "Pan 2")])
+    changed_at = models.DateField()
+    logged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="fryer_oil_changes")
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-changed_at", "-created_at"]
+
+    def __str__(self):
+        return f"Pan {self.pan_number} oil change — {self.changed_at}"

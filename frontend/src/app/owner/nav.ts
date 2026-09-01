@@ -38,6 +38,7 @@ export const OWNER_NAV: NavGroup[] = [
       { href: "/owner/settlements",      label: "Settlements" },
       { href: "/owner/pnl",              label: "Profit & loss" },
       { href: "/owner/packaging",        label: "Packaging report" },
+      { href: "/owner/fryer-oil",        label: "Fryer oil changes" },
     ],
   },
   {
@@ -154,6 +155,7 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
       "/owner/settings", "/owner/setup",
       "/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history",
       "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging",
+      "/owner/fryer-oil",
     ],
   },
   // Analytics tab matches /owner exactly — caught by the fallback below for anything not above.

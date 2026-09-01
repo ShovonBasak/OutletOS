@@ -16,6 +16,7 @@ from .extraction import ExtractedLine
 from .models import (
     DayStartStockCheck,
     DisplayStock,
+    FryerOilChange,
     LineSource,
     OperatingDay,
     OperatingDayStatus,
@@ -33,6 +34,7 @@ from .serializers import (
     DayStartStockCheckSerializer,
     DisplayStockPrepSerializer,
     DisplayStockSerializer,
+    FryerOilChangeSerializer,
     OperatingDaySerializer,
     OperatingDaySlimSerializer,
     PeriodicStockCheckSerializer,
@@ -1439,3 +1441,21 @@ class StaffHomeSummaryView(_HomeSummaryBase):
             "stock_in": stock_in_data,
             "closing": closing_data,
         })
+
+
+class FryerOilChangeViewSet(viewsets.ModelViewSet):
+    serializer_class = FryerOilChangeSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        qs = FryerOilChange.objects.select_related("logged_by")
+        outlet = self.request.query_params.get("outlet")
+        if outlet:
+            qs = qs.filter(outlet_id=outlet)
+        pan = self.request.query_params.get("pan")
+        if pan:
+            qs = qs.filter(pan_number=pan)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(logged_by=self.request.user)

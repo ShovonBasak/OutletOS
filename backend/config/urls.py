@@ -29,6 +29,7 @@ from stock.views import (
     DisplayStockViewSet,
     OperatingDayViewSet,
     PeriodicStockCheckViewSet,
+    FryerOilChangeViewSet,
     StaffHomeSummaryView,
 )
 from sales.views import (
@@ -89,6 +90,7 @@ router.register("preparation-logs", PreparationLogViewSet)
 router.register("display-stock", DisplayStockViewSet)
 router.register("operating-days", OperatingDayViewSet)
 router.register("periodic-stock-checks", PeriodicStockCheckViewSet)
+router.register("fryer-oil-changes", FryerOilChangeViewSet, basename="fryer-oil-changes")
 router.register("sales-channels", SalesChannelViewSet)
 router.register("channel-promotions", ChannelPromotionViewSet)
 router.register("order-level-offers", OrderLevelOfferViewSet)

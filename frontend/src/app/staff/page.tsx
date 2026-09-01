@@ -287,6 +287,10 @@ export default function StaffHome() {
           <span className="n">≡</span>
           <span className="l">Closing history</span>
         </Link>
+        <Link href="/staff/fryer-oil" className="tile">
+          <span className="n">🛢</span>
+          <span className="l">Log oil change</span>
+        </Link>
         {(status === "IN_PROGRESS" || status === "CLOSED") && (
           <>
             <Link href="/staff/closing/stock" className="tile">

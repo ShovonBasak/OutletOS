@@ -3,6 +3,7 @@ from rest_framework import serializers
 from .models import (
     DayStartStockCheck,
     DisplayStock,
+    FryerOilChange,
     OperatingDay,
     PeriodicStockCheck,
     PrepSource,
@@ -315,3 +316,12 @@ class PeriodicStockCheckSerializer(serializers.ModelSerializer):
             "checked_at", "checked_by", "stock_in_since_last_check",
             "consumed_since_last_check",
         ]
+
+
+class FryerOilChangeSerializer(serializers.ModelSerializer):
+    logged_by_name = serializers.CharField(source="logged_by.name", read_only=True)
+
+    class Meta:
+        model = FryerOilChange
+        fields = ["id", "outlet", "pan_number", "changed_at", "logged_by", "logged_by_name", "notes", "created_at"]
+        read_only_fields = ["logged_by", "created_at"]
