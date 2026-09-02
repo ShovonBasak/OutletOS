@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
+import { UserMenu } from "@/components/UserMenu";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { getTodayOperatingDay, invalidateDayCache } from "@/lib/operatingDay";
@@ -20,7 +21,7 @@ const TABS = [
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const { loading } = useRequireRole("STAFF");
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const pathname = usePathname();
   const outlet = user?.outlet ?? 1;
   const [day, setDay] = useState<OperatingDay | null>(null);
@@ -88,12 +89,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
       <div className="flex min-h-screen w-full flex-col bg-paper">
         <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper">
           <Brand name={user?.outlet_name} />
-          <button
-            onClick={logout}
-            className="rounded-full border border-white/20 px-2.5 py-1 font-mono text-[10px] text-white/70"
-          >
-            STAFF · exit
-          </button>
+          <UserMenu />
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 pb-24">{children}</main>

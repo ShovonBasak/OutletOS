@@ -7,10 +7,19 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     outlet_name = serializers.CharField(source="outlet.name", read_only=True, default=None)
+    avatar_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "name", "role", "outlet", "outlet_name", "phone", "is_active", "password"]
+        fields = ["id", "name", "role", "outlet", "outlet_name", "phone", "is_active", "password", "avatar_url"]
+
+    def get_avatar_url(self, obj):
+        if not obj.avatar:
+            return None
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(obj.avatar.url)
+        return obj.avatar.url
 
     def create(self, validated_data):
         password = validated_data.pop("password", None) or None
@@ -42,5 +51,6 @@ class RoleTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data = super().validate(attrs)
-        data["user"] = UserSerializer(self.user).data
+        request = self.context.get("request")
+        data["user"] = UserSerializer(self.user, context={"request": request}).data
         return data

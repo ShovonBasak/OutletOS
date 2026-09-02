@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Brand } from "@/components/Brand";
+import { UserMenu } from "@/components/UserMenu";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import {
   navFor,
@@ -45,16 +46,13 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     setOpen((prev) => (prev.has(group) ? new Set() : new Set([group])));
 
   const activeMobileTab = mobileTabFor(pathname);
-  const roleLabel = isAdmin ? "ADMIN" : "OWNER";
 
   return (
     <div className="flex min-h-screen flex-col bg-paper-dim md:items-center md:py-8">
       {/* Mobile top bar */}
       <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper md:hidden">
         <Brand />
-        <button onClick={logout} className="rounded-full border border-white/20 px-2.5 py-1 font-mono text-[10px] text-white/70">
-          {roleLabel} · exit
-        </button>
+        <UserMenu />
       </header>
 
       {/* Desktop shell card */}

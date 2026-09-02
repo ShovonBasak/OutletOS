@@ -1,5 +1,5 @@
 from django.conf import settings
-from rest_framework import status, viewsets
+from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -76,9 +76,27 @@ class TeamUserViewSet(viewsets.ModelViewSet):
 
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user, context={"request": request}).data)
+
+    def patch(self, request):
+        user = request.user
+        name = (request.data.get("name") or "").strip()
+        avatar = request.FILES.get("avatar")
+
+        if name:
+            user.name = name
+        if avatar:
+            if user.avatar:
+                user.avatar.delete(save=False)
+            user.avatar = avatar
+
+        if name or avatar:
+            user.save()
+
+        return Response(UserSerializer(user, context={"request": request}).data)
 
 
 class ChangePasswordView(APIView):

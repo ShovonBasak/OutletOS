@@ -8,6 +8,7 @@ export interface User {
   outlet_name: string | null;
   phone: string;
   is_active: boolean;
+  avatar_url: string | null;
 }
 
 export interface Outlet {
