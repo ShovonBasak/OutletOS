@@ -14,6 +14,8 @@ interface Transaction {
   date: string;
   source_type: string;
   note: string;
+  category_name: string | null;
+  transfer_to_account: string | null;
 }
 
 interface HistoryResponse {
@@ -280,6 +282,16 @@ export default function CashHistoryPage() {
                     <p className="font-mono text-xs font-semibold text-ink">
                       {TYPE_LABELS[t.transaction_type] ?? t.transaction_type_display}
                     </p>
+                    {t.category_name && (
+                      <span className="inline-block rounded-full bg-ink-soft/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wide text-ink-soft mt-0.5">
+                        {t.category_name}
+                      </span>
+                    )}
+                    {t.transfer_to_account && (
+                      <p className="font-mono text-[10px] text-ink-soft mt-0.5">
+                        → {t.transfer_to_account}
+                      </p>
+                    )}
                     {t.note && (
                       <p className="truncate font-mono text-[10px] text-ink-soft">{t.note}</p>
                     )}

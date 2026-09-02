@@ -313,6 +313,25 @@ class StaffCashHistoryView(APIView):
         paginator = Paginator(qs, page_size)
         page_obj = paginator.get_page(page)
 
+        from costs.models import Expense
+        expense_ids = [
+            t.source_id for t in page_obj.object_list
+            if t.source_type == "EXPENSE" and t.source_id
+        ]
+        expense_cats: dict[int, str] = {}
+        if expense_ids:
+            for exp in Expense.objects.filter(id__in=expense_ids).select_related("category"):
+                expense_cats[exp.id] = exp.category.name
+
+        transfer_ids = [
+            t.source_id for t in page_obj.object_list
+            if t.transaction_type == "TRANSFER_OUT" and t.source_type == "ACCOUNT_TRANSFER" and t.source_id
+        ]
+        transfer_destinations: dict[int, str] = {}
+        if transfer_ids:
+            for tr in AccountTransfer.objects.filter(id__in=transfer_ids).select_related("to_account"):
+                transfer_destinations[tr.id] = tr.to_account.name
+
         type_display = dict(TransactionType.choices)
         results = [
             {
@@ -323,6 +342,8 @@ class StaffCashHistoryView(APIView):
                 "date": str(t.date),
                 "source_type": t.source_type,
                 "note": t.note,
+                "category_name": expense_cats.get(t.source_id) if t.source_type == "EXPENSE" else None,
+                "transfer_to_account": transfer_destinations.get(t.source_id) if t.transaction_type == "TRANSFER_OUT" else None,
             }
             for t in page_obj.object_list
         ]
