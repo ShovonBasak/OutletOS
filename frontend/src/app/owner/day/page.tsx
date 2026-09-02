@@ -104,6 +104,13 @@ function Section({
       {open && (
         <div className="border-t border-dashed border-[#d8cdb0] px-4 pb-4 pt-3">
           {children}
+          <button
+            onClick={() => setOpen(false)}
+            className="mt-4 flex w-full items-center justify-center gap-1.5 border-t border-dashed border-[#d8cdb0] pt-3 font-mono text-[10px] text-ink-soft/50 hover:text-ink-soft active:text-ink transition-colors"
+          >
+            <span>▲</span>
+            <span>Collapse</span>
+          </button>
         </div>
       )}
     </div>
@@ -135,6 +142,7 @@ export default function OwnerHome() {
   const [periodicLevels, setPeriodicLevels] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [showZeroQty, setShowZeroQty] = useState(false);
   const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "busy">(
     "default"
   );
@@ -637,10 +645,18 @@ export default function OwnerHome() {
 
             {/* Day end / Current stock */}
             {(() => {
-              const allDisplay = data.display_stock.filter(s => !s.requires_preparation);
-              const rawStock = data.raw_stock ?? [];
-              const supplyItems = periodicLevels;
+              const allDisplayAll = data.display_stock.filter(s => !s.requires_preparation);
+              const rawStockAll = data.raw_stock ?? [];
+              const supplyItemsAll = periodicLevels;
+
+              // Apply zero-qty filter
+              const allDisplay = showZeroQty ? allDisplayAll : allDisplayAll.filter(s => s.pieces_available > 0);
+              const rawStock   = showZeroQty ? rawStockAll  : rawStockAll.filter(rs => Number(rs.quantity_available) > 0);
+              const supplyItems = showZeroQty ? supplyItemsAll : supplyItemsAll.filter(s => Number(s.current_qty) > 0);
+
               const totalItems = allDisplay.length + rawStock.length + supplyItems.length;
+              const totalAll   = allDisplayAll.length + rawStockAll.length + supplyItemsAll.length;
+              const zeroCount  = totalAll - totalItems;
 
               const displayTotal = allDisplay.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
               const rawTotal = rawStock.reduce((sum, rs) => sum + Number(rs.quantity_available) * Number(rs.cost_per_base_unit), 0);
@@ -674,6 +690,23 @@ export default function OwnerHome() {
                   badgeColor="bg-ink-soft/10 text-ink-soft"
                   defaultOpen={false}
                 >
+                  {/* Zero-qty toggle */}
+                  <div className="flex items-center justify-between mb-3 -mt-1">
+                    <span className="font-mono text-[10px] text-ink-soft/60">
+                      {showZeroQty ? "Showing all items" : `${zeroCount} empty item${zeroCount !== 1 ? "s" : ""} hidden`}
+                    </span>
+                    <button
+                      onClick={() => setShowZeroQty(v => !v)}
+                      className="flex items-center gap-1.5"
+                      aria-label="Toggle zero quantity items"
+                    >
+                      <span className="font-mono text-[10px] text-ink-soft">Show empty</span>
+                      <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${showZeroQty ? "bg-chrome" : "bg-ink-soft/20"}`}>
+                        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${showZeroQty ? "translate-x-3.5" : "translate-x-0.5"}`} />
+                      </span>
+                    </button>
+                  </div>
+
                   {totalItems === 0 ? (
                     <p className="font-mono text-[11px] text-ink-soft italic">No stock data available.</p>
                   ) : (

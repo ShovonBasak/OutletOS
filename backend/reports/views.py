@@ -420,11 +420,15 @@ def product_performance(request):
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start,
         daily_closing__closing_date__lte=end,
-    ).select_related("product").prefetch_related("product__recipes__ingredient")
+    ).select_related("product", "daily_closing").prefetch_related(
+        "product__recipes__ingredient",
+        "product__components__component_product__recipes__ingredient",
+    )
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
 
     cost_cache = {}
+    pack_history = _build_pack_history()
     per_product = {}
     for line in lines:
         pid = line.product_id
@@ -442,7 +446,11 @@ def product_performance(request):
         p["units_sold"] += line.quantity_sold
         p["gross_revenue"] += line.gross_amount
         p["net_revenue"] += line.net_amount
-        unit_cost = _product_unit_cost(line.product, cost_cache)
+        unit_cost = _product_unit_cost(
+            line.product, cost_cache,
+            on_date=line.daily_closing.closing_date,
+            pack_history=pack_history,
+        )
         p["cogs"] += unit_cost * line.quantity_sold
 
     rows = []
