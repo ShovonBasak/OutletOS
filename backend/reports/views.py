@@ -1399,7 +1399,7 @@ def day_overview(request):
             .select_related("ingredient")
             .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
         )
-        if rs.quantity_available > 0 and rs.ingredient_id not in ready_ingredient_ids
+        if rs.ingredient_id not in ready_ingredient_ids
     )
 
     # Closing — prefetch stock_counts+product and payments+account in one shot
@@ -1484,36 +1484,146 @@ def day_overview(request):
         for p in prep_logs_raw
     ]
 
-    # Display stock — price from bulk map
-    display_stock = []
-    for s in _display_qs:
-        if s.pieces_available <= 0:
-            continue
-        purchase_price = _recipe_cost.get(s.product_id, Decimal("0")) if not s.product.requires_preparation else None
-        ppp = _non_prep_pack.get(s.product_id) if not s.product.requires_preparation else None
-        display_stock.append({
-            "product_name": s.product.name,
-            "product_category": s.product.category,
-            "pieces_available": s.pieces_available,
-            "requires_preparation": s.product.requires_preparation,
-            "selling_price": str(price_map.get(s.product_id, Decimal("0"))),
-            "purchase_price": str(purchase_price) if purchase_price is not None else None,
-            "pieces_per_pack": str(ppp) if ppp is not None else None,
-        })
+    day_is_closed = op_day is not None and op_day.status == "CLOSED"
 
-    # Raw stock
-    raw_stock = []
-    for rs in sorted(raw_stock_raw, key=lambda r: _display_name(r.ingredient).lower()):
-        active_pack = rs.ingredient.active_pack()
-        raw_stock.append({
-            "ingredient": _display_name(rs.ingredient),
-            "base_unit": rs.ingredient.base_unit,
-            "quantity_available": str(rs.quantity_available),
-            "cost_per_base_unit": str(rs.ingredient.cost_per_base_unit or Decimal("0")),
-            "ingredient_group": resolve_ingredient_group(rs.ingredient, _category_map),
-            "primary_product": _product_map.get(rs.ingredient_id, ""),
-            "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
-        })
+    if day_is_closed and closing:
+        # ── Historical display stock: closing stock count remains ──────────────
+        stock_counts_for_display = list(closing.stock_counts.all())  # prefetch hit
+
+        # Build purchase-price + pack maps for non-prep products from closing data
+        hist_non_prep_ids = [sc.product_id for sc in stock_counts_for_display if not sc.product.requires_preparation]
+        hist_recipe_cost: dict = {}
+        hist_non_prep_pack: dict = {}
+        hist_ready_ing_ids: set = set()
+        for r in (
+            Recipe.objects.filter(product_id__in=hist_non_prep_ids)
+            .select_related("ingredient")
+            .prefetch_related("ingredient__pack_definitions")
+        ):
+            cost = (r.ingredient.cost_per_base_unit or Decimal("0")) * r.quantity_per_unit
+            hist_recipe_cost[r.product_id] = hist_recipe_cost.get(r.product_id, Decimal("0")) + cost
+            hist_ready_ing_ids.add(r.ingredient_id)
+            if r.product_id not in hist_non_prep_pack:
+                active_pack = r.ingredient.active_pack()
+                if active_pack:
+                    hist_non_prep_pack[r.product_id] = active_pack.pieces_per_pack
+
+        display_stock = []
+        for sc in sorted(stock_counts_for_display, key=lambda x: (x.product.category, x.product.name)):
+            purchase_price = hist_recipe_cost.get(sc.product_id, Decimal("0")) if not sc.product.requires_preparation else None
+            ppp = hist_non_prep_pack.get(sc.product_id) if not sc.product.requires_preparation else None
+            display_stock.append({
+                "product_name": sc.product.name,
+                "product_category": sc.product.category,
+                "pieces_available": sc.remains_pieces,
+                "requires_preparation": sc.product.requires_preparation,
+                "selling_price": str(price_map.get(sc.product_id, Decimal("0"))),
+                "purchase_price": str(purchase_price) if purchase_price is not None else None,
+                "pieces_per_pack": str(ppp) if ppp is not None else None,
+            })
+
+        # ── Historical raw stock: DayStart confirmed + StockIn − PrepConsumed ──
+        from stock.models import StockInItem as _StockInItem
+
+        # Per-ingredient approved stock-in for this date
+        stockin_map: dict = {}      # ingredient_id -> Decimal pieces
+        stockin_ing_cache: dict = {}
+        for item in (
+            _StockInItem.objects.filter(
+                stock_in_record__outlet_id=outlet,
+                stock_in_record__stock_in_date=date,
+                stock_in_record__status="APPROVED",
+                ingredient__isnull=False,
+                ingredient__tracking_mode="RECIPE_LINKED",
+            )
+            .select_related("ingredient", "pack_definition")
+            .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
+        ):
+            stockin_map[item.ingredient_id] = (
+                stockin_map.get(item.ingredient_id, Decimal("0")) + item.base_unit_quantity()
+            )
+            stockin_ing_cache[item.ingredient_id] = item.ingredient
+
+        # Per-ingredient consumption: fresh prep pieces × recipe quantity_per_unit
+        fresh_pieces: dict = {}  # product_id -> total fresh pieces prepared
+        for pl in prep_logs_raw:
+            if pl.source == "FRESH":
+                fresh_pieces[pl.product_id] = fresh_pieces.get(pl.product_id, 0) + pl.pieces_prepared
+
+        consumed_map: dict = {}  # ingredient_id -> Decimal
+        recipe_ing_cache: dict = {}
+        if fresh_pieces:
+            for r in (
+                Recipe.objects.filter(
+                    product_id__in=list(fresh_pieces.keys()),
+                    ingredient__tracking_mode="RECIPE_LINKED",
+                )
+                .select_related("ingredient")
+                .prefetch_related("ingredient__aliases", "ingredient__pack_definitions")
+            ):
+                recipe_ing_cache[r.ingredient_id] = r.ingredient
+                delta = Decimal(fresh_pieces[r.product_id]) * r.quantity_per_unit
+                consumed_map[r.ingredient_id] = consumed_map.get(r.ingredient_id, Decimal("0")) + delta
+
+        # Merge all relevant ingredient IDs
+        chk_by_ing = {chk.ingredient_id: chk for chk in day_start_checks_raw}
+        all_ing_ids = set(chk_by_ing.keys()) | set(stockin_map.keys())
+
+        raw_stock_entries = []
+        for ing_id in all_ing_ids:
+            chk = chk_by_ing.get(ing_id)
+            if chk:
+                ing = chk.ingredient
+            else:
+                ing = stockin_ing_cache.get(ing_id) or recipe_ing_cache.get(ing_id)
+            if ing is None or ing.tracking_mode != "RECIPE_LINKED":
+                continue
+            if ing_id in hist_ready_ing_ids:
+                continue  # shown as display_stock (non-prep product)
+
+            opening = chk.confirmed_qty if chk else Decimal("0")
+            day_end_qty = opening + stockin_map.get(ing_id, Decimal("0")) - consumed_map.get(ing_id, Decimal("0"))
+
+            active_pack = ing.active_pack()
+            raw_stock_entries.append({
+                "ingredient": _display_name(ing),
+                "base_unit": ing.base_unit,
+                "quantity_available": str(day_end_qty.quantize(Decimal("0.001"))),
+                "cost_per_base_unit": str(ing.cost_per_base_unit or Decimal("0")),
+                "ingredient_group": resolve_ingredient_group(ing, _category_map),
+                "primary_product": _product_map.get(ing_id, ""),
+                "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
+            })
+        raw_stock = sorted(raw_stock_entries, key=lambda r: r["ingredient"].lower())
+
+    else:
+        # ── Live stock (today / non-closed day) ───────────────────────────────
+        display_stock = []
+        for s in _display_qs:
+            purchase_price = _recipe_cost.get(s.product_id, Decimal("0")) if not s.product.requires_preparation else None
+            ppp = _non_prep_pack.get(s.product_id) if not s.product.requires_preparation else None
+            display_stock.append({
+                "product_name": s.product.name,
+                "product_category": s.product.category,
+                "pieces_available": s.pieces_available,
+                "requires_preparation": s.product.requires_preparation,
+                "selling_price": str(price_map.get(s.product_id, Decimal("0"))),
+                "purchase_price": str(purchase_price) if purchase_price is not None else None,
+                "pieces_per_pack": str(ppp) if ppp is not None else None,
+            })
+
+        raw_stock = []
+        for rs in sorted(raw_stock_raw, key=lambda r: _display_name(r.ingredient).lower()):
+            active_pack = rs.ingredient.active_pack()
+            raw_stock.append({
+                "ingredient": _display_name(rs.ingredient),
+                "base_unit": rs.ingredient.base_unit,
+                "quantity_available": str(rs.quantity_available),
+                "cost_per_base_unit": str(rs.ingredient.cost_per_base_unit or Decimal("0")),
+                "ingredient_group": resolve_ingredient_group(rs.ingredient, _category_map),
+                "primary_product": _product_map.get(rs.ingredient_id, ""),
+                "pieces_per_pack": str(active_pack.pieces_per_pack) if active_pack else None,
+            })
 
     # ── Closing snapshot — materialise stock_counts once, compute from memory ──
     closing_data = None
@@ -1616,6 +1726,125 @@ def day_overview(request):
     # ── Today's P&L ───────────────────────────────────────────────────────
     pnl = compute_pnl(date, date, outlet)
 
+    # ── Periodic stock checks (supplies) for the day ──────────────────────
+    periodic_checks_raw = list(
+        PeriodicStockCheck.objects.filter(outlet_id=outlet, checked_at__date=date)
+        .select_related("ingredient", "checked_by")
+        .prefetch_related("ingredient__aliases")
+        .order_by("checked_at")
+    )
+    periodic_checks = []
+    for pc in periodic_checks_raw:
+        alias = next((a for a in pc.ingredient.aliases.all() if a.is_active), None)
+        display_name = alias.alias_text if alias else pc.ingredient.name
+        periodic_checks.append({
+            "id": pc.id,
+            "ingredient_name": display_name,
+            "base_unit": pc.ingredient.base_unit,
+            "counted_qty": str(pc.counted_qty),
+            "consumed_since_last_check": str(pc.consumed_since_last_check),
+            "stock_in_since_last_check": str(pc.stock_in_since_last_check),
+            "note": pc.note,
+            "checked_at": pc.checked_at.isoformat(),
+            "checked_by_name": pc.checked_by.name if pc.checked_by else "",
+        })
+
+    # ── Approved stock-in for PERIODIC_COUNT ingredients (supplies) ───────
+    from stock.models import StockInItem as _StockInItemPeriodicCheck
+    from catalog.models import TrackingMode as _TrackingModePC
+    supply_stock_ins = []
+    for si_item in (
+        _StockInItemPeriodicCheck.objects.filter(
+            stock_in_record__outlet_id=outlet,
+            stock_in_record__stock_in_date=date,
+            stock_in_record__status="APPROVED",
+            ingredient__isnull=False,
+            ingredient__tracking_mode=_TrackingModePC.PERIODIC_COUNT,
+        )
+        .select_related(
+            "ingredient", "pack_definition",
+            "stock_in_record__reviewed_by", "stock_in_record__submitted_by",
+        )
+        .prefetch_related("ingredient__aliases")
+        .order_by("stock_in_record__reviewed_at")
+    ):
+        alias = next((a for a in si_item.ingredient.aliases.all() if a.is_active), None)
+        display_name = alias.alias_text if alias else si_item.ingredient.name
+        reviewer = si_item.stock_in_record.reviewed_by
+        supply_stock_ins.append({
+            "ingredient_name": display_name,
+            "base_unit": si_item.ingredient.base_unit,
+            "quantity_added": str(si_item.base_unit_quantity()),
+            "approved_at": si_item.stock_in_record.reviewed_at.isoformat()
+                if si_item.stock_in_record.reviewed_at else None,
+            "approved_by_name": reviewer.name if reviewer else "",
+        })
+
+    # ── Opening balance per PERIODIC_COUNT ingredient for the viewed date ─
+    # Collect display_name → ingredient_id from all supply events today.
+    from decimal import Decimal as _Decimal
+    _supply_name_to_id: dict[str, int] = {}
+    for pc in periodic_checks_raw:
+        alias = next((a for a in pc.ingredient.aliases.all() if a.is_active), None)
+        dname = alias.alias_text if alias else pc.ingredient.name
+        _supply_name_to_id[dname] = pc.ingredient_id
+    for si_entry in supply_stock_ins:
+        # supply_stock_ins already built; re-derive id from the StockInItem query result
+        pass  # ids collected below via direct query
+
+    # Collect ingredient ids from today's stock-ins (supply_stock_ins has names, not ids)
+    _supply_si_ids = list(
+        _StockInItemPeriodicCheck.objects.filter(
+            stock_in_record__outlet_id=outlet,
+            stock_in_record__stock_in_date=date,
+            stock_in_record__status="APPROVED",
+            ingredient__isnull=False,
+            ingredient__tracking_mode=_TrackingModePC.PERIODIC_COUNT,
+        )
+        .select_related("ingredient")
+        .prefetch_related("ingredient__aliases")
+        .values_list("ingredient_id", flat=True)
+        .distinct()
+    )
+    supply_ing_ids = set(_supply_name_to_id.values()) | set(_supply_si_ids)
+
+    supply_opening_levels: dict[str, str] = {}  # display_name → opening_qty
+    # Build reverse map: ing_id → display_name (use periodic checks + a fresh alias lookup)
+    _ing_id_to_name: dict[int, str] = {v: k for k, v in _supply_name_to_id.items()}
+    # For ids only in stock-ins (no recount today), resolve display names
+    _missing_ids = supply_ing_ids - set(_ing_id_to_name.keys())
+    if _missing_ids:
+        from catalog.models import Ingredient as _IngModel
+        for _ing in _IngModel.objects.filter(id__in=_missing_ids).prefetch_related("aliases"):
+            _alias = next((a for a in _ing.aliases.all() if a.is_active), None)
+            _ing_id_to_name[_ing.id] = _alias.alias_text if _alias else _ing.name
+
+    for ing_id in supply_ing_ids:
+        last_check = (
+            PeriodicStockCheck.objects.filter(
+                outlet_id=outlet, ingredient_id=ing_id, checked_at__date__lt=date
+            )
+            .order_by("-checked_at")
+            .first()
+        )
+        base_qty = _Decimal(str(last_check.counted_qty)) if last_check else _Decimal("0")
+        base_time = last_check.checked_at if last_check else None
+
+        # Stock-ins approved after base_time and strictly before the viewed date
+        prior_si_qs = _StockInItemPeriodicCheck.objects.filter(
+            ingredient_id=ing_id,
+            stock_in_record__outlet_id=outlet,
+            stock_in_record__status="APPROVED",
+            stock_in_record__reviewed_at__date__lt=date,
+        ).select_related("pack_definition")
+        if base_time:
+            prior_si_qs = prior_si_qs.filter(stock_in_record__reviewed_at__gte=base_time)
+        for prior_si in prior_si_qs:
+            base_qty += _Decimal(str(prior_si.base_unit_quantity()))
+
+        display_name = _ing_id_to_name.get(ing_id, str(ing_id))
+        supply_opening_levels[display_name] = str(base_qty)
+
     # ── Account transactions for the day ──────────────────────────────────
     from finance.models import AccountTransaction
     from django.db.models import Q
@@ -1657,4 +1886,7 @@ def day_overview(request):
             "gross_profit": str(pnl["gross_profit"].quantize(Decimal("0.01"))),
         },
         "transactions": transactions,
+        "periodic_checks": periodic_checks,
+        "supply_stock_ins": supply_stock_ins,
+        "supply_opening_levels": supply_opening_levels,
     })

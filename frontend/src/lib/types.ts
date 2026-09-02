@@ -386,6 +386,7 @@ export interface PackagingLevel {
   base_unit: string;
   pieces_per_pack: string | null;
   current_qty: string;
+  cost_per_base_unit: string | null;
   source: "counted" | "counted_plus_stock_in" | "stock_in_derived";
   last_checked_at: string | null;
 }
@@ -895,6 +896,26 @@ export interface DayOverviewTransaction {
   note: string;
 }
 
+export interface DayOverviewPeriodicCheck {
+  id: number;
+  ingredient_name: string;
+  base_unit: string;
+  counted_qty: string;
+  consumed_since_last_check: string;
+  stock_in_since_last_check: string;
+  note: string;
+  checked_at: string;
+  checked_by_name: string;
+}
+
+export interface DayOverviewSupplyStockIn {
+  ingredient_name: string;
+  base_unit: string;
+  quantity_added: string;
+  approved_at: string | null;
+  approved_by_name: string;
+}
+
 export interface DayOverview {
   date: string;
   operating_day: {
@@ -920,6 +941,9 @@ export interface DayOverview {
     gross_profit: string;
   };
   transactions: DayOverviewTransaction[];
+  periodic_checks: DayOverviewPeriodicCheck[];
+  supply_stock_ins: DayOverviewSupplyStockIn[];
+  supply_opening_levels: Record<string, string>;
 }
 
 export interface Paginated<T> {

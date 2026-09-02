@@ -1327,6 +1327,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
                 source = "stock_in_derived"
                 last_at = None
             alias = ing.aliases.filter(is_active=True).first()
+            cost_per_base_unit = ing.cost_per_base_unit
             result.append({
                 "ingredient": ing.id,
                 "ingredient_name": ing.name,
@@ -1335,6 +1336,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
                 "base_unit": ing.base_unit,
                 "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
                 "current_qty": current_qty,
+                "cost_per_base_unit": str(cost_per_base_unit) if cost_per_base_unit is not None else None,
                 "source": source,
                 "last_checked_at": last_at,
             })

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { packBreakdown } from "@/lib/format";
-import type { DisplayStock, IngredientGroup, Paginated, RawStock } from "@/lib/types";
+import { packBreakdown, shortDate, timeOf } from "@/lib/format";
+import type { DisplayStock, IngredientGroup, PackagingLevel, Paginated, RawStock } from "@/lib/types";
 
 function bdt(val: string | null | undefined): string {
   if (!val) return "—";
@@ -40,17 +40,20 @@ export default function StockLevels() {
 
   const [raw, setRaw] = useState<RawStock[]>([]);
   const [ready, setReady] = useState<DisplayStock[]>([]);
+  const [supplies, setSupplies] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
-    const [r, d] = await Promise.all([
+    const [r, d, s] = await Promise.all([
       api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),
       api<Paginated<DisplayStock>>(`/display-stock/?outlet=${outlet}`),
+      api<PackagingLevel[]>(`/periodic-stock-checks/levels/?outlet=${outlet}`),
     ]);
     setRaw(r.results);
     setReady(d.results);
+    setSupplies(s);
     setLoading(false);
   }
 
@@ -65,6 +68,10 @@ export default function StockLevels() {
   const filteredReady = useMemo(
     () => (q ? ready.filter((d) => d.product_name.toLowerCase().includes(q)) : ready),
     [ready, q]
+  );
+  const filteredSupplies = useMemo(
+    () => (q ? supplies.filter((s) => s.ingredient_display_name.toLowerCase().includes(q)) : supplies),
+    [supplies, q]
   );
 
   const totalValue = useMemo(() => {
@@ -177,6 +184,70 @@ export default function StockLevels() {
           <p className="font-mono text-xs text-ink-soft">{q ? "No products match." : "Nothing prepared yet."}</p>
         )}
       </section>
+
+      {/* ── Packaging & Supplies (PERIODIC_COUNT levels) ── */}
+      {filteredSupplies.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-baseline justify-between">
+            <p className="font-mono text-[11px] uppercase tracking-wide text-ink-soft">Packaging &amp; Supplies</p>
+            <p className="font-mono text-[9px] text-ink-soft/50 uppercase tracking-wide">Last counted</p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {filteredSupplies.map((s) => {
+              const qty = Number(s.current_qty);
+              const low = qty < 5;
+              const zero = qty === 0;
+              const packs = s.pieces_per_pack
+                ? packBreakdown(s.current_qty, s.pieces_per_pack, s.base_unit)
+                : null;
+              const isEstimated = s.source === "stock_in_derived";
+              return (
+                <div
+                  key={s.ingredient}
+                  className={`flex items-center justify-between gap-3 rounded border px-3 py-2 ${
+                    zero ? "border-chili/30 bg-chili/5"
+                    : low ? "border-gold/30 bg-gold/5"
+                    : "border-[#d8cdb0] bg-paper"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-mono text-[12px] font-medium text-ink truncate">
+                        {s.ingredient_display_name}
+                      </p>
+                      {isEstimated && (
+                        <span className="shrink-0 rounded-full bg-ink-soft/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wide text-ink-soft/60">
+                          est.
+                        </span>
+                      )}
+                    </div>
+                    {s.last_checked_at ? (
+                      <p className="font-mono text-[10px] text-ink-soft/60">
+                        Counted {shortDate(s.last_checked_at)} · {timeOf(s.last_checked_at)}
+                      </p>
+                    ) : (
+                      <p className="font-mono text-[10px] text-ink-soft/40 italic">Never counted — based on stock-in</p>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className={`font-mono text-[14px] font-bold leading-tight ${
+                      zero ? "text-chili" : low ? "text-gold-deep" : "text-ink"
+                    }`}>
+                      {qty} <span className="text-[10px] font-normal text-ink-soft">{s.base_unit}</span>
+                    </p>
+                    {packs && (
+                      <p className="font-mono text-[9px] text-ink-soft/50">{packs}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {q && filteredSupplies.length === 0 && (
+            <p className="font-mono text-xs text-ink-soft">No supplies match.</p>
+          )}
+        </section>
+      )}
     </div>
   );
 }

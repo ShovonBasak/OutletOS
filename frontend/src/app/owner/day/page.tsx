@@ -5,7 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { pushPermissionState, subscribeToPush } from "@/lib/push";
 import { bdt, bdtD, shortDate, today, timeOf } from "@/lib/format";
-import type { DayOverview, DayOverviewStockIn, DayOverviewSalesProduct, DayOverviewTransaction } from "@/lib/types";
+import type { DayOverview, DayOverviewStockIn, DayOverviewSalesProduct, DayOverviewTransaction, DayOverviewPeriodicCheck, DayOverviewSupplyStockIn, PackagingLevel } from "@/lib/types";
 import { INGREDIENT_GROUPS } from "@/lib/types";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -132,6 +132,7 @@ function KpiPill({
 export default function OwnerHome() {
   const [date, setDate] = useState(today());
   const [data, setData] = useState<DayOverview | null>(null);
+  const [periodicLevels, setPeriodicLevels] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "busy">(
@@ -146,8 +147,12 @@ export default function OwnerHome() {
     setLoading(true);
     setData(null);
     try {
-      const d = await api<DayOverview>(`/reports/day-overview/?outlet=1&date=${date}`);
+      const [d, pl] = await Promise.all([
+        api<DayOverview>(`/reports/day-overview/?outlet=1&date=${date}`),
+        api<PackagingLevel[]>(`/periodic-stock-checks/levels/?outlet=1`),
+      ]);
       setData(d);
+      setPeriodicLevels(pl);
     } finally {
       setLoading(false);
     }
@@ -376,7 +381,7 @@ export default function OwnerHome() {
                   ? "bg-gold/15 text-gold-deep border border-gold/20"
                   : "bg-ink-soft/10 text-ink-soft"
               }
-              defaultOpen={true}
+              defaultOpen={opDay?.status === "CLOSED"}
             >
               {!data.closing ? (
                 <p className="font-mono text-[11px] text-ink-soft italic">No closing for this day.</p>
@@ -632,21 +637,35 @@ export default function OwnerHome() {
 
             {/* Day end / Current stock */}
             {(() => {
-              const beverages = data.display_stock.filter(
-                s => !s.requires_preparation && s.product_category === "Beverages" && s.pieces_available > 0
-              );
-              const otherReady = data.display_stock.filter(
-                s => !s.requires_preparation && s.product_category !== "Beverages" && s.pieces_available > 0
-              );
+              const allDisplay = data.display_stock.filter(s => !s.requires_preparation);
               const rawStock = data.raw_stock ?? [];
-              const totalItems = beverages.length + otherReady.length + rawStock.length;
+              const supplyItems = periodicLevels;
+              const totalItems = allDisplay.length + rawStock.length + supplyItems.length;
 
-              const bevTotal = beverages.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
-              const otherReadyTotal = otherReady.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
+              const displayTotal = allDisplay.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
               const rawTotal = rawStock.reduce((sum, rs) => sum + Number(rs.quantity_available) * Number(rs.cost_per_base_unit), 0);
+              const supplyTotal = supplyItems.reduce((sum, s) => sum + Number(s.current_qty) * Number(s.cost_per_base_unit ?? 0), 0);
 
-              const COL4 = "grid grid-cols-[minmax(0,1fr)_3rem_6rem_6.5rem]";
+              const COL4 = "grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_6.5rem]";
               const sectionTitle = opDay?.status === "CLOSED" ? "Day end stock" : "Current stock";
+
+              // Single unified group per category: products (display_stock) + ingredients (raw_stock) merged
+              const unifiedGroups = [
+                ...INGREDIENT_GROUPS,
+                { key: "Supply", icon: "📦" },
+              ].map(({ key, icon }) => ({
+                key,
+                icon,
+                products: allDisplay
+                  .filter(s => s.product_category === key)
+                  .sort((a, b) => a.product_name.localeCompare(b.product_name)),
+                ingredients: rawStock
+                  .filter(rs => rs.ingredient_group === key)
+                  .sort((a, b) =>
+                    a.primary_product.localeCompare(b.primary_product) ||
+                    a.ingredient.localeCompare(b.ingredient)
+                  ),
+              })).filter(g => g.products.length > 0 || g.ingredients.length > 0);
 
               return (
                 <Section
@@ -660,129 +679,108 @@ export default function OwnerHome() {
                   ) : (
                     <div className="flex flex-col gap-0 -mx-1">
 
-                      {/* ── Beverages ── */}
-                      {beverages.length > 0 && (
-                        <>
-                          <div className="px-1 pb-0.5 pt-1">
-                            <span className="font-mono text-[9px] uppercase tracking-widest text-gold-deep">Beverages</span>
-                          </div>
-                          <div className={`${COL4} px-1 pb-1 pt-1`}>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Pcs</span>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost/pc</span>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
-                          </div>
-                          {beverages.map((s, i) => {
-                            const cost = Number(s.purchase_price ?? 0);
-                            const pks = packLabel(s.pieces_available, s.pieces_per_pack);
-                            return (
-                              <div key={`bev-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
-                                <span className="font-mono text-[11px] text-ink truncate">{s.product_name}</span>
-                                <div className="text-right">
-                                  <p className={`font-mono text-[11px] font-semibold ${s.pieces_available < 5 ? "text-chili" : "text-ink"}`}>{s.pieces_available}</p>
-                                  {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
-                                </div>
-                                <span className="font-mono text-[10px] text-ink-soft text-right self-start mt-0.5">{cost > 0 ? bdtD(cost) : "—"}</span>
-                                <span className="font-mono text-[11px] text-ink-soft text-right self-start mt-0.5">{cost > 0 ? bdtD(s.pieces_available * cost) : "—"}</span>
+                      {/* Column headers */}
+                      <div className={`${COL4} px-1 pb-1 pt-1`}>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Qty</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
+                      </div>
+
+                      {/* Unified category groups — products + ingredients under one header */}
+                      {unifiedGroups.flatMap(({ key, icon, products, ingredients }, gi) => [
+                        <div key={`grp-${key}`} className={`px-1 pb-0.5 ${gi === 0 ? "pt-1" : "pt-3"}`}>
+                          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">
+                            {icon} {key}
+                          </span>
+                        </div>,
+                        // Product rows (ready-to-sell pieces)
+                        ...products.map((s, i) => {
+                          const cost = Number(s.purchase_price ?? 0);
+                          const pks = packLabel(s.pieces_available, s.pieces_per_pack);
+                          return (
+                            <div key={`prod-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                              <div className="min-w-0">
+                                <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.product_name}</p>
                               </div>
-                            );
-                          })}
-                          {bevTotal > 0 && (
-                            <div className="flex justify-end pt-1.5 px-1">
-                              <span className="font-mono text-[10px] text-gold-deep font-semibold">Subtotal: {bdtD(bevTotal)}</span>
+                              <div className="text-center">
+                                <p className={`font-mono text-[11px] font-semibold ${s.pieces_available === 0 ? "text-ink-soft/40" : s.pieces_available < 5 ? "text-chili" : "text-ink"}`}>{s.pieces_available}</p>
+                                {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                              </div>
+                              <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 && s.pieces_available > 0 ? bdtD(s.pieces_available * cost) : "—"}</span>
                             </div>
-                          )}
-                        </>
-                      )}
+                          );
+                        }),
+                        // Ingredient rows (raw material)
+                        ...ingredients.map((rs, i) => {
+                          const qty = Number(rs.quantity_available);
+                          const cost = Number(rs.cost_per_base_unit);
+                          const pks = packLabel(qty, rs.pieces_per_pack);
+                          return (
+                            <div key={`raw-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                              <div className="min-w-0">
+                                <p className="font-mono text-[11px] text-ink leading-tight break-words">{rs.ingredient}</p>
+                                <p className="font-mono text-[9px] text-ink-soft/60">{rs.base_unit}</p>
+                              </div>
+                              <div className="text-center">
+                                <p className={`font-mono text-[11px] font-semibold ${qty === 0 ? "text-ink-soft/40" : qty < 5 ? "text-chili" : "text-ink"}`}>
+                                  {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                                </p>
+                                {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                              </div>
+                              <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                              <span className="self-center font-mono text-[11px] text-ink font-medium text-right">{cost > 0 && qty > 0 ? bdtD(qty * cost) : "—"}</span>
+                            </div>
+                          );
+                        }),
+                      ])}
 
-                      {/* ── Other ready to sell + Raw ingredients ── */}
-                      {(otherReady.length > 0 || rawStock.length > 0) && (
+                      {/* Supplies */}
+                      {supplyItems.length > 0 && (
                         <>
-                          <div className={`px-1 pb-0.5 ${beverages.length > 0 ? "pt-3" : "pt-1"}`}>
-                            <span className="font-mono text-[9px] uppercase tracking-widest text-chrome">
-                              Raw &amp; ready to sell
-                            </span>
+                          <div className="px-1 pt-3 pb-0.5">
+                            <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">📦 Supplies</span>
                           </div>
                           <div className={`${COL4} px-1 pb-1 pt-1`}>
                             <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Qty</span>
-                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost/unit</span>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Qty</span>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost</span>
                             <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
                           </div>
-
-                          {otherReady.map((s, i) => {
-                            const cost = Number(s.purchase_price ?? 0);
-                            const pks = packLabel(s.pieces_available, s.pieces_per_pack);
+                          {supplyItems.map((s) => {
+                            const qty = Number(s.current_qty);
+                            const cost = Number(s.cost_per_base_unit ?? 0);
+                            const pks = packLabel(qty, s.pieces_per_pack);
+                            const zero = qty === 0;
+                            const low = qty < 5;
                             return (
-                              <div key={`ors-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                              <div key={`sup-${s.ingredient}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
                                 <div className="min-w-0">
-                                  <p className="font-mono text-[11px] text-ink truncate">{s.product_name}</p>
-                                  <p className="font-mono text-[9px] text-ink-soft/60">{s.product_category}</p>
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.ingredient_display_name}</p>
+                                  {s.last_checked_at && (
+                                    <p className="font-mono text-[9px] text-ink-soft/60">{shortDate(s.last_checked_at)} · {timeOf(s.last_checked_at)}</p>
+                                  )}
                                 </div>
-                                <div className="text-right">
-                                  <p className={`font-mono text-[11px] font-semibold ${s.pieces_available < 5 ? "text-chili" : "text-ink"}`}>{s.pieces_available}</p>
+                                <div className="text-center">
+                                  <p className={`font-mono text-[11px] font-semibold ${zero ? "text-chili" : low ? "text-gold-deep" : "text-ink"}`}>
+                                    {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                                  </p>
                                   {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
                                 </div>
                                 <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
-                                <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 ? bdtD(s.pieces_available * cost) : "—"}</span>
+                                <span className="self-center font-mono text-[11px] text-ink font-medium text-right">{cost > 0 ? bdtD(qty * cost) : "—"}</span>
                               </div>
                             );
                           })}
-
-                          {[...INGREDIENT_GROUPS, { key: "Supply", icon: "📦" }].flatMap(({ key, icon }) => {
-                            const group = rawStock
-                              .filter((rs) => rs.ingredient_group === key)
-                              .sort(
-                                (a, b) =>
-                                  a.primary_product.localeCompare(b.primary_product) ||
-                                  a.ingredient.localeCompare(b.ingredient)
-                              );
-                            if (group.length === 0) return [];
-                            return [
-                              <div key={`grp-${key}`} className="col-span-4 px-1 pt-2 pb-0.5">
-                                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">
-                                  {icon} {key}
-                                </span>
-                              </div>,
-                              ...group.map((rs, i) => {
-                                const qty = Number(rs.quantity_available);
-                                const cost = Number(rs.cost_per_base_unit);
-                                const pks = packLabel(qty, rs.pieces_per_pack);
-                                return (
-                                  <div key={`raw-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
-                                    <div className="min-w-0">
-                                      <p className="font-mono text-[11px] text-ink truncate">{rs.ingredient}</p>
-                                      <p className="font-mono text-[9px] text-ink-soft/60">{rs.base_unit}</p>
-                                    </div>
-                                    <div className="text-right">
-                                      <p className={`font-mono text-[11px] font-semibold ${qty < 5 ? "text-chili" : "text-ink"}`}>
-                                        {qty % 1 === 0 ? qty : qty.toFixed(2)}
-                                      </p>
-                                      {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
-                                    </div>
-                                    <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
-                                    <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 ? bdtD(qty * cost) : "—"}</span>
-                                  </div>
-                                );
-                              }),
-                            ];
-                          })}
-
-                          {(otherReadyTotal + rawTotal) > 0 && (
-                            <div className="flex justify-end pt-1.5 px-1">
-                              <span className="font-mono text-[10px] text-chrome font-semibold">
-                                Subtotal: {bdtD(otherReadyTotal + rawTotal)}
-                              </span>
-                            </div>
-                          )}
                         </>
                       )}
 
                       {/* Grand total */}
-                      {beverages.length > 0 && (otherReady.length > 0 || rawStock.length > 0) && (bevTotal + otherReadyTotal + rawTotal) > 0 && (
+                      {(displayTotal + rawTotal + supplyTotal) > 0 && (
                         <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
                           <span className="font-mono text-[11px] font-semibold text-ink">
-                            Total: {bdtD(bevTotal + otherReadyTotal + rawTotal)}
+                            Total: {bdtD(displayTotal + rawTotal + supplyTotal)}
                           </span>
                         </div>
                       )}
@@ -848,7 +846,7 @@ export default function OwnerHome() {
                       : `${rows.length} product${rows.length !== 1 ? "s" : ""}`
                   }
                   badgeColor={rows.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
-                  defaultOpen={false}
+                  defaultOpen={opDay?.status !== "CLOSED" && rows.length > 0}
                 >
                   {rows.length === 0 ? (
                     <p className="font-mono text-[11px] text-ink-soft italic">No preparation entries for this day.</p>
@@ -980,7 +978,7 @@ export default function OwnerHome() {
                   ? "bg-gold/15 text-gold-deep border border-gold/20"
                   : "bg-ink-soft/10 text-ink-soft"
               }
-              defaultOpen={pendingStockIns.length > 0}
+              defaultOpen={false}
             >
               {data.stock_ins.length === 0 ? (
                 <p className="font-mono text-[11px] text-ink-soft italic">No stock received today.</p>
@@ -1035,7 +1033,7 @@ export default function OwnerHome() {
                   ? "bg-chili/10 text-chili border border-chili/20"
                   : "bg-leaf/10 text-leaf-deep"
               }
-              defaultOpen={discrepancies.length > 0}
+              defaultOpen={false}
             >
               {data.day_start_checks.length === 0 ? (
                 <p className="font-mono text-[11px] text-ink-soft italic">
@@ -1044,90 +1042,90 @@ export default function OwnerHome() {
               ) : (
                 <div className="flex flex-col gap-0 -mx-1">
                   {(() => {
-                    const COL = "grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-3";
+                    const COL = "grid grid-cols-[minmax(0,1fr)_4rem_4rem_3.5rem]";
+
+                    const renderRow = (chk: (typeof data.day_start_checks)[0], key: string) => {
+                      const disc = Number(chk.discrepancy_qty);
+                      const sysQty = Number(chk.system_qty);
+                      const confQty = Number(chk.confirmed_qty);
+                      const isShortfall = disc > 0;
+                      const isSurplus = disc < 0;
+                      const sysPacks = packLabel(sysQty, chk.pieces_per_pack);
+                      const confPacks = packLabel(confQty, chk.pieces_per_pack);
+                      const fmtQty = (n: number) => n % 1 === 0 ? String(n) : n.toFixed(2);
+                      return (
+                        <div
+                          key={key}
+                          className={`${COL} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8] ${
+                            isShortfall ? "bg-chili/5" : isSurplus ? "bg-gold/5" : ""
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="font-mono text-[11px] text-ink leading-tight break-words">{chk.ingredient}</p>
+                            <p className="font-mono text-[9px] text-ink-soft/60">{chk.base_unit}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="font-mono text-[11px] text-ink-soft">{fmtQty(sysQty)}</p>
+                            {sysPacks && <p className="font-mono text-[9px] text-ink-soft/50">{sysPacks}</p>}
+                          </div>
+                          <div className="text-center">
+                            <p className={`font-mono text-[11px] font-semibold ${isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink"}`}>
+                              {fmtQty(confQty)}
+                            </p>
+                            {confPacks && <p className="font-mono text-[9px] text-ink-soft/50">{confPacks}</p>}
+                          </div>
+                          <span className={`self-center font-mono text-[11px] font-semibold text-right ${
+                            isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink-soft/40"
+                          }`}>
+                            {disc === 0 ? "—" : disc > 0 ? `−${fmtQty(disc)}` : `+${fmtQty(Math.abs(disc))}`}
+                          </span>
+                          {(isShortfall || isSurplus) && (
+                            <div className="col-span-4 pb-0.5">
+                              <span className="font-mono text-[10px] text-ink-soft/70 capitalize">
+                                {chk.discrepancy_reason
+                                  ? chk.discrepancy_reason.toLowerCase().replace(/_/g, " ")
+                                  : "no reason given"}
+                                {chk.note ? ` · ${chk.note}` : ""}
+                                {isShortfall && Number(chk.shrinkage_cost) > 0 && (
+                                  <span className="text-chili"> · shrinkage {bdt(chk.shrinkage_cost)}</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
                     const knownGroups = new Set(INGREDIENT_GROUPS.map(g => g.key));
-                    const grouped = [...INGREDIENT_GROUPS, { key: "Other", icon: "🗂" }].flatMap(({ key, icon }) => {
+                    const grouped = [...INGREDIENT_GROUPS, { key: "Other", icon: "🗂" }].flatMap(({ key, icon }, gi) => {
                       const rows = data.day_start_checks.filter(c => c.ingredient_group === key);
                       if (rows.length === 0) return [];
                       return [
-                        <div key={`grp-${key}`} className="px-1 pt-2 pb-0.5">
-                          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/50">
+                        <div key={`grp-${key}`} className={`px-1 pb-0.5 ${gi === 0 ? "pt-1" : "pt-3"}`}>
+                          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">
                             {icon} {key}
                           </span>
                         </div>,
-                        <div key={`hdr-${key}`} className={`${COL} px-1 pb-1`}>
-                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Ingredient</span>
-                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">System</span>
-                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Confirmed</span>
-                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Δ</span>
-                        </div>,
-                        ...rows.map((chk, i) => {
-                          const disc = Number(chk.discrepancy_qty);
-                          const sysQty = Number(chk.system_qty);
-                          const confQty = Number(chk.confirmed_qty);
-                          const isShortfall = disc > 0;
-                          const isSurplus = disc < 0;
-                          const sysPacks = packLabel(sysQty, chk.pieces_per_pack);
-                          const confPacks = packLabel(confQty, chk.pieces_per_pack);
-                          return (
-                            <div
-                              key={`${key}-${i}`}
-                              className={`${COL} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8] ${
-                                isShortfall ? "bg-chili/5" : isSurplus ? "bg-gold/5" : ""
-                              }`}
-                            >
-                              <span className="font-mono text-[11px] text-ink truncate">{chk.ingredient}</span>
-                              <div className="text-right">
-                                <p className="font-mono text-[11px] text-ink-soft">
-                                  {sysQty.toFixed(1)} {chk.base_unit}
-                                </p>
-                                {sysPacks && <p className="font-mono text-[9px] text-ink-soft/50">{sysPacks}</p>}
-                              </div>
-                              <div className="text-right">
-                                <p className="font-mono text-[11px] text-ink">{confQty.toFixed(1)}</p>
-                                {confPacks && <p className="font-mono text-[9px] text-ink-soft/50">{confPacks}</p>}
-                              </div>
-                              <span
-                                className={`font-mono text-[11px] font-semibold text-right self-start mt-0.5 ${
-                                  isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink-soft"
-                                }`}
-                              >
-                                {disc === 0 ? "—" : disc > 0 ? `−${disc.toFixed(1)}` : `+${Math.abs(disc).toFixed(1)}`}
-                              </span>
-                              {(isShortfall || isSurplus) && (
-                                <div className="col-span-4 pl-0 pb-0.5">
-                                  <span className="font-mono text-[10px] text-ink-soft capitalize">
-                                    {chk.discrepancy_reason
-                                      ? chk.discrepancy_reason.toLowerCase().replace(/_/g, " ")
-                                      : "no reason given"}
-                                    {chk.note ? ` · ${chk.note}` : ""}
-                                    {isShortfall && Number(chk.shrinkage_cost) > 0 && (
-                                      <span className="text-chili"> · shrinkage {bdt(chk.shrinkage_cost)}</span>
-                                    )}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        }),
+                        ...rows.map((chk, i) => renderRow(chk, `${key}-${i}`)),
                       ];
                     });
-                    const ungrouped = data.day_start_checks.filter(c => !knownGroups.has(c.ingredient_group) && c.ingredient_group !== "Other");
-                    return [...grouped, ...ungrouped.map((chk, i) => {
-                      const disc = Number(chk.discrepancy_qty);
-                      const isShortfall = disc > 0;
-                      const isSurplus = disc < 0;
-                      return (
-                        <div key={`ung-${i}`} className={`${COL} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8] ${isShortfall ? "bg-chili/5" : isSurplus ? "bg-gold/5" : ""}`}>
-                          <span className="font-mono text-[11px] text-ink truncate">{chk.ingredient}</span>
-                          <span className="font-mono text-[11px] text-ink-soft text-right">{Number(chk.system_qty).toFixed(1)} {chk.base_unit}</span>
-                          <span className="font-mono text-[11px] text-ink text-right">{Number(chk.confirmed_qty).toFixed(1)}</span>
-                          <span className={`font-mono text-[11px] font-semibold text-right ${isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink-soft"}`}>
-                            {disc === 0 ? "—" : disc > 0 ? `−${disc.toFixed(1)}` : `+${Math.abs(disc).toFixed(1)}`}
-                          </span>
+
+                    const ungrouped = data.day_start_checks.filter(
+                      c => !knownGroups.has(c.ingredient_group) && c.ingredient_group !== "Other"
+                    );
+
+                    return (
+                      <>
+                        <div className={`${COL} px-1 pb-1 pt-1`}>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Ingredient</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">System</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Confirmed</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Δ</span>
                         </div>
-                      );
-                    })];
+                        {grouped}
+                        {ungrouped.map((chk, i) => renderRow(chk, `ung-${i}`))}
+                      </>
+                    );
                   })()}
                   {totalShrinkage > 0 && (
                     <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
@@ -1139,6 +1137,153 @@ export default function OwnerHome() {
                 </div>
               )}
             </Section>
+
+            {/* Packaging & Supplies counts */}
+            {(() => {
+              type SupplyEntry =
+                | { kind: "recount"; time: string; data: DayOverviewPeriodicCheck }
+                | { kind: "stockin"; time: string; data: DayOverviewSupplyStockIn };
+
+              const entries: SupplyEntry[] = [
+                ...(data.periodic_checks ?? []).map((c) => ({
+                  kind: "recount" as const,
+                  time: c.checked_at,
+                  data: c,
+                })),
+                ...(data.supply_stock_ins ?? []).filter((s) => s.approved_at).map((s) => ({
+                  kind: "stockin" as const,
+                  time: s.approved_at!,
+                  data: s,
+                })),
+              ].sort((a, b) => a.time.localeCompare(b.time));
+
+              // Build running balance per ingredient to compute before/after for every entry.
+              // Anchor: for each ingredient, the first recount's "before" =
+              //   counted_qty + consumed_since_last_check - stock_in_since_last_check
+              // (this is the level at the previous periodic check, before any of today's events)
+              type Computed = { before: number | null; adj: number; after: number | null };
+              const computed: Computed[] = entries.map(() => ({ before: null, adj: 0, after: null }));
+
+              const byIng = new Map<string, number[]>();
+              entries.forEach((e, i) => {
+                const name = e.data.ingredient_name;
+                if (!byIng.has(name)) byIng.set(name, []);
+                byIng.get(name)!.push(i);
+              });
+
+              const openingLevels: Record<string, string> = data.supply_opening_levels ?? {};
+
+              for (const [ingName, indices] of byIng.entries()) {
+                // Anchor: opening balance from backend (level at start of viewed day)
+                const openingStr = openingLevels[ingName];
+                let running: number | null = openingStr != null ? Number(openingStr) : null;
+
+                for (const i of indices) {
+                  const e = entries[i];
+                  if (e.kind === "recount") {
+                    const c = e.data;
+                    const after = Number(c.counted_qty);
+                    computed[i].before = running;
+                    computed[i].after = after;
+                    computed[i].adj = running !== null ? after - running : 0;
+                    running = after;
+                  } else {
+                    const qty = Number(e.data.quantity_added);
+                    computed[i].before = running;
+                    computed[i].adj = qty;
+                    computed[i].after = running !== null ? running + qty : null;
+                    running = computed[i].after ?? (running !== null ? running + qty : null);
+                  }
+                }
+              }
+
+              const COLS = "grid grid-cols-[minmax(0,1fr)_3rem_3.5rem_3rem]";
+
+              const fmt = (n: number | null) =>
+                n === null ? "—" : String(Math.round(n * 100) / 100);
+
+              return (
+                <Section
+                  title="Packaging & Supplies"
+                  badge={entries.length === 0 ? "No entries" : `${entries.length} log${entries.length !== 1 ? "s" : ""}`}
+                  badgeColor={entries.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
+                  defaultOpen={false}
+                >
+                  {entries.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">
+                      No supply counts recorded for this day.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+                      <div className={`${COLS} px-1 pb-1`}>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Before</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Adj</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">After</span>
+                      </div>
+                      {entries.map((entry, idx) => {
+                        const { before, adj, after } = computed[idx];
+                        const adjR = Math.round(adj * 100) / 100;
+                        const afterN = after !== null ? Math.round(after * 100) / 100 : null;
+
+                        if (entry.kind === "recount") {
+                          const c = entry.data;
+                          return (
+                            <div
+                              key={`rc-${c.id}`}
+                              className={`${COLS} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{c.ingredient_name}</p>
+                                  <span className="shrink-0 rounded-sm bg-chrome/10 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-chrome">Recount</span>
+                                </div>
+                                <p className="font-mono text-[9px] text-ink-soft/60">
+                                  {timeOf(c.checked_at)}
+                                  {c.checked_by_name ? ` · ${c.checked_by_name}` : ""}
+                                  {c.note ? ` · ${c.note}` : ""}
+                                </p>
+                              </div>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{fmt(before)}</span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-center ${adjR < 0 ? "text-chili" : adjR > 0 ? "text-leaf-deep" : "text-ink-soft/40"}`}>
+                                {adjR === 0 ? "—" : adjR > 0 ? `+${adjR}` : `${adjR}`}
+                              </span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-right ${afterN === 0 ? "text-chili" : afterN !== null && afterN < 5 ? "text-gold-deep" : "text-ink"}`}>
+                                {fmt(after)}
+                              </span>
+                            </div>
+                          );
+                        } else {
+                          const s = entry.data;
+                          return (
+                            <div
+                              key={`si-${idx}`}
+                              className={`${COLS} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.ingredient_name}</p>
+                                  <span className="shrink-0 rounded-sm bg-leaf-deep/10 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-leaf-deep">Stock-in</span>
+                                </div>
+                                <p className="font-mono text-[9px] text-ink-soft/60">
+                                  {s.approved_at ? timeOf(s.approved_at) : ""}
+                                  {s.approved_by_name ? ` · ${s.approved_by_name}` : ""}
+                                </p>
+                              </div>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{fmt(before)}</span>
+                              <span className="self-center font-mono text-[11px] font-semibold text-leaf-deep text-center">+{adjR}</span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-right ${afterN === 0 ? "text-chili" : afterN !== null && afterN < 5 ? "text-gold-deep" : "text-ink"}`}>
+                                {fmt(after)}
+                              </span>
+                            </div>
+                          );
+                        }
+                      })}
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
 
           </div>
         </>
