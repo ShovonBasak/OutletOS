@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
 from catalog.models import Product
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
@@ -462,6 +462,50 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         closing.save()
         self._close_operating_day(closing)
         self._record_account_transactions(closing, request.user)
+        return self._fresh_response(closing)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAdmin], url_path="reopen")
+    def reopen(self, request, pk=None):
+        """Owner reopens a LOCKED or SUBMITTED closing so staff can re-edit.
+
+        Reverses everything _close_operating_day and _record_account_transactions did:
+        - Deletes AccountTransaction rows tied to this closing
+        - Adds back the DisplayStock that was deducted at close
+        - Sets OperatingDay back to IN_PROGRESS
+        - Sets DailyClosing back to DRAFT
+        """
+        from finance.models import AccountTransaction, SourceType
+        from stock.models import DisplayStock, OperatingDay, OperatingDayStatus
+
+        closing = self.get_object()
+        if closing.status == ClosingStatus.DRAFT:
+            raise ValidationError("Closing is already in DRAFT — nothing to reopen.")
+
+        # 1. Delete account transactions created by this closing
+        AccountTransaction.objects.filter(
+            source_type=SourceType.DAILY_CLOSING,
+            source_id=closing.id,
+        ).delete()
+
+        # 2. Restore DisplayStock: add back what was deducted at close
+        #    (available_pieces − remains_pieces was deducted; add it back)
+        for count in closing.stock_counts.all():
+            restore = count.available_pieces - count.remains_pieces
+            if restore > 0:
+                DisplayStock.adjust(closing.outlet, count.product, restore)
+
+        # 3. Reopen OperatingDay
+        OperatingDay.objects.filter(
+            outlet=closing.outlet,
+            date=closing.closing_date,
+        ).update(status=OperatingDayStatus.IN_PROGRESS)
+
+        # 4. Reset closing to DRAFT
+        closing.status = ClosingStatus.DRAFT
+        closing.submitted_at = None
+        closing.has_variance_flag = False
+        closing.save()
+
         return self._fresh_response(closing)
 
     @staticmethod
