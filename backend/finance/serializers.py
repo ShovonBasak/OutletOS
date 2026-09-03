@@ -2,7 +2,7 @@ from django.db.models import Sum
 from rest_framework import serializers
 
 from .models import (
-    FinancialAccount, AccountTransaction, AccountTransfer,
+    FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
     CapitalTransaction, AccountBalanceCheck,
 )
 
@@ -87,3 +87,12 @@ class AccountBalanceCheckSerializer(serializers.ModelSerializer):
             "discrepancy", "reason", "reason_display", "note",
         ]
         read_only_fields = ["checked_by", "system_balance", "discrepancy"]
+
+
+class AccountRoleAccessSerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source="account.name", read_only=True)
+    account_type = serializers.CharField(source="account.account_type", read_only=True)
+
+    class Meta:
+        model = AccountRoleAccess
+        fields = ["id", "role", "account", "account_name", "account_type"]

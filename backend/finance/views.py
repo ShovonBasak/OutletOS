@@ -8,11 +8,12 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
 from .models import (
-    FinancialAccount, AccountTransaction, AccountTransfer,
+    FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
     CapitalTransaction, AccountBalanceCheck,
 )
 from .serializers import (
     FinancialAccountSerializer, FinancialAccountNameSerializer,
+    AccountRoleAccessSerializer,
     AccountTransactionSerializer, AccountTransferSerializer,
     CapitalTransactionSerializer, AccountBalanceCheckSerializer,
 )
@@ -37,6 +38,13 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
         # inactive accounts can be fetched and reactivated — only filter on list.
         if self.action != "list":
             return qs
+        # Apply role-based account access if configured for this user's role.
+        role = self.request.user.role
+        role_ids = list(
+            AccountRoleAccess.objects.filter(role=role).values_list("account_id", flat=True)
+        )
+        if role_ids:
+            qs = qs.filter(id__in=role_ids)
         if not self.request.user.is_owner_or_admin:
             return qs.filter(is_active=True)
         if self.request.query_params.get("is_active") != "all":
@@ -370,3 +378,22 @@ class StaffCashHistoryView(APIView):
             },
             "accounts": others,
         })
+
+
+class AccountRoleAccessViewSet(viewsets.ModelViewSet):
+    """Admin-only: configure which accounts each role can see.
+
+    GET  /account-role-access/        — list all mappings
+    POST /account-role-access/        — add a mapping {role, account}
+    DELETE /account-role-access/{id}/ — remove a mapping
+    """
+    serializer_class = AccountRoleAccessSerializer
+    permission_classes = [IsAdmin]
+    queryset = AccountRoleAccess.objects.select_related("account").all()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        role = self.request.query_params.get("role")
+        if role:
+            qs = qs.filter(role=role)
+        return qs

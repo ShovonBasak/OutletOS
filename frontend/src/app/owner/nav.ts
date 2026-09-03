@@ -72,7 +72,8 @@ export const OWNER_NAV: NavGroup[] = [
     group: "Administration",
     adminOnly: true,
     items: [
-      { href: "/owner/products", label: "Products & recipes" },
+      { href: "/owner/products",                         label: "Products & recipes" },
+      { href: "/owner/settings/account-access",          label: "Account access" },
     ],
   },
   // Setup group — Admin only
@@ -123,6 +124,7 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/settings/pricing",         "Pricing & promos"],
   ["/owner/settings/menu-mapping",    "Menu mapping"],
   ["/owner/settings/cost-categories", "Cost categories"],
+  ["/owner/settings/account-access",  "Account access"],
 ];
 
 export function titleFor(pathname: string): string {

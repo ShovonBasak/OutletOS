@@ -7,7 +7,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { shortDate, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
-import AccountSelect from "@/components/AccountSelect";
+import AccountPicker from "@/components/AccountPicker";
+import SearchablePicker from "@/components/SearchablePicker";
 import type { OtherIncomeCategory, FinancialAccountName, Paginated } from "@/lib/types";
 
 export default function StaffOtherIncome() {
@@ -74,16 +75,15 @@ export default function StaffOtherIncome() {
         <p className="text-xs text-ink-soft">Logged for {shortDate(opDate)}</p>
       </div>
 
-      <label className="field">
+      <div className="field">
         <span className="field-label">Category</span>
-        <select className="field-input" value={category} onChange={(e) => setCategory(e.target.value)}>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+        <SearchablePicker
+          options={categories}
+          value={category}
+          onChange={setCategory}
+          searchPlaceholder="Search categories…"
+        />
+      </div>
       <label className="field">
         <span className="field-label">Amount (৳)</span>
         <input
@@ -93,15 +93,14 @@ export default function StaffOtherIncome() {
           onChange={(e) => setAmount(e.target.value)}
         />
       </label>
-      <label className="field">
+      <div className="field">
         <span className="field-label">Received into</span>
-        <AccountSelect
+        <AccountPicker
           accounts={accounts}
           value={accountId}
           onChange={setAccountId}
-          placeholder=""
         />
-      </label>
+      </div>
       <label className="field">
         <span className="field-label">Note</span>
         <input className="field-input" value={note} onChange={(e) => setNote(e.target.value)} />

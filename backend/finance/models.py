@@ -40,6 +40,27 @@ class FinancialAccount(models.Model):
         return self.opening_balance + txn_sum
 
 
+class AccountRoleAccess(models.Model):
+    """Controls which accounts are available per user role.
+
+    If any rows exist for a role, only those accounts are offered to that role.
+    If no rows exist for a role, all active accounts are available (default-open).
+    """
+    ROLE_CHOICES = [("STAFF", "Staff"), ("OWNER", "Owner"), ("ADMIN", "Admin")]
+
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    account = models.ForeignKey(
+        FinancialAccount, on_delete=models.CASCADE, related_name="role_access"
+    )
+
+    class Meta:
+        unique_together = [("role", "account")]
+        ordering = ["role", "account__name"]
+
+    def __str__(self):
+        return f"{self.role} → {self.account.name}"
+
+
 class TransactionType(models.TextChoices):
     SALES_COLLECTION = "SALES_COLLECTION", "Sales Collection"
     EXPENSE_PAYMENT = "EXPENSE_PAYMENT", "Expense Payment"

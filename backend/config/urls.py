@@ -44,6 +44,7 @@ from closing.views import DailyClosingViewSet, ChannelSettlementViewSet
 from costs.views import CostCategoryViewSet, ExpenseViewSet
 from finance.views import (
     FinancialAccountViewSet,
+    AccountRoleAccessViewSet,
     AccountTransactionViewSet,
     AccountTransferViewSet,
     CapitalTransactionViewSet,
@@ -102,6 +103,7 @@ router.register("expenses", ExpenseViewSet)
 router.register("income-categories", OtherIncomeCategoryViewSet)
 router.register("other-incomes", OtherIncomeViewSet)
 router.register("financial-accounts", FinancialAccountViewSet, basename="financial-accounts")
+router.register("account-role-access", AccountRoleAccessViewSet, basename="account-role-access")
 router.register("account-transactions", AccountTransactionViewSet)
 router.register("account-transfers", AccountTransferViewSet)
 router.register("capital-transactions", CapitalTransactionViewSet)
