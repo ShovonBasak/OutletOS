@@ -143,11 +143,56 @@ class PaymentInline(admin.TabularInline):
     extra = 0
 
 
+def reopen_day(modeladmin, request, queryset):
+    """Reopen a LOCKED or SUBMITTED closing: reverses transactions, restores
+    DisplayStock, and sets both DailyClosing and OperatingDay back to editable."""
+    from finance.models import AccountTransaction, SourceType
+    from stock.models import DisplayStock, OperatingDay, OperatingDayStatus
+    from .models import ClosingStatus
+
+    reopened = 0
+    skipped = 0
+    for closing in queryset.prefetch_related("stock_counts__product"):
+        if closing.status == ClosingStatus.DRAFT:
+            skipped += 1
+            continue
+
+        AccountTransaction.objects.filter(
+            source_type=SourceType.DAILY_CLOSING,
+            source_id=closing.id,
+        ).delete()
+
+        for count in closing.stock_counts.all():
+            restore = count.available_pieces - count.remains_pieces
+            if restore > 0:
+                DisplayStock.adjust(closing.outlet, count.product, restore)
+
+        OperatingDay.objects.filter(
+            outlet=closing.outlet,
+            date=closing.closing_date,
+        ).update(status=OperatingDayStatus.IN_PROGRESS)
+
+        closing.status = ClosingStatus.DRAFT
+        closing.submitted_at = None
+        closing.has_variance_flag = False
+        closing.save()
+        reopened += 1
+
+    msg = f"{reopened} closing(s) reopened."
+    if skipped:
+        msg += f" {skipped} skipped (already DRAFT)."
+    modeladmin.message_user(request, msg)
+
+
+reopen_day.short_description = "Reopen selected day(s) for corrections"
+
+
 @admin.register(DailyClosing)
 class DailyClosingAdmin(admin.ModelAdmin):
     list_display = ["closing_date", "outlet", "status", "staff"]
     list_filter  = ["status", "outlet"]
     inlines      = [StockCountInline, SalesLineInline, PaymentInline]
+    actions      = [reopen_day]
 
     def get_urls(self):
         urls = super().get_urls()

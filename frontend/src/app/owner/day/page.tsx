@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { pushPermissionState, subscribeToPush } from "@/lib/push";
@@ -144,7 +143,6 @@ export default function OwnerHome() {
   const [loading, setLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [showZeroQty, setShowZeroQty] = useState(false);
-  const [confirmReopen, setConfirmReopen] = useState(false);
   const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "busy">(
     "default"
   );
@@ -192,18 +190,7 @@ export default function OwnerHome() {
     }
   }
 
-  async function reopenClosing(id: number) {
-    setActionBusy(`reopen-${id}`);
-    setConfirmReopen(false);
-    try {
-      await api(`/daily-closings/${id}/reopen/`, { method: "POST" });
-      await load();
-    } finally {
-      setActionBusy(null);
-    }
-  }
-
-  async function enableNotifications() {
+async function enableNotifications() {
     setNotifState("busy");
     try {
       const ok = await subscribeToPush();
@@ -213,8 +200,6 @@ export default function OwnerHome() {
     }
   }
 
-  const { user } = useAuth();
-  const isAdmin = user?.role === "ADMIN";
   const isToday = date === today();
   const opDay = data?.operating_day;
   const statusCfg = opDay
@@ -224,9 +209,7 @@ export default function OwnerHome() {
   const pendingStockIns = (data?.stock_ins ?? []).filter((s) => s.status === "PENDING");
   const closingNeedsReview =
     data?.closing && data.closing.status === "SUBMITTED";
-  const closingIsLocked =
-    isAdmin && data?.closing && data.closing.status === "LOCKED";
-  const hasActions = pendingStockIns.length > 0 || closingNeedsReview || closingIsLocked;
+  const hasActions = pendingStockIns.length > 0 || closingNeedsReview;
 
   const discrepancies = (data?.day_start_checks ?? []).filter(
     (c) => Number(c.discrepancy_qty) !== 0
@@ -382,47 +365,6 @@ export default function OwnerHome() {
                 </div>
               )}
 
-              {closingIsLocked && data.closing && (
-                <div className="queue-item">
-                  <div className="qtop">
-                    <span>Closing — {shortDate(date)}</span>
-                    <span className="stamp stamp-approved rotate-0">Locked</span>
-                  </div>
-                  <div className="qmeta">
-                    Revenue {bdt(data.closing.channel_day_net_revenue)} — reopen to correct sells or wastage
-                  </div>
-                  <div className="qbtns">
-                    {!confirmReopen ? (
-                      <button
-                        className="reject"
-                        disabled={actionBusy === `reopen-${data.closing.id}`}
-                        onClick={() => setConfirmReopen(true)}
-                      >
-                        Reopen day
-                      </button>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-[10px] text-chili">
-                          Reverses transactions &amp; restores stock. Staff must re-submit.
-                        </span>
-                        <button
-                          className="reject"
-                          disabled={actionBusy === `reopen-${data.closing.id}`}
-                          onClick={() => reopenClosing(data.closing!.id)}
-                        >
-                          {actionBusy === `reopen-${data.closing.id}` ? "…" : "Yes, reopen"}
-                        </button>
-                        <button
-                          className="font-mono text-[10px] text-ink-soft hover:text-ink"
-                          onClick={() => setConfirmReopen(false)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -448,7 +390,7 @@ export default function OwnerHome() {
                   ? "bg-gold/15 text-gold-deep border border-gold/20"
                   : "bg-ink-soft/10 text-ink-soft"
               }
-              defaultOpen={!!data.closing}
+              defaultOpen={opDay?.status === "CLOSED"}
             >
               {!data.closing ? (
                 <p className="font-mono text-[11px] text-ink-soft italic">No closing for this day.</p>
@@ -546,41 +488,6 @@ export default function OwnerHome() {
                     </div>
                   )}
 
-                  {/* Reopen */}
-                  {isAdmin && (data.closing.status === "LOCKED" || data.closing.status === "SUBMITTED") && (
-                    <div className="pt-1 border-t border-ink/10">
-                      {!confirmReopen ? (
-                        <button
-                          className="font-mono text-[11px] text-chili hover:underline disabled:opacity-40"
-                          disabled={actionBusy === `reopen-${data.closing.id}`}
-                          onClick={() => setConfirmReopen(true)}
-                        >
-                          Reopen day for corrections
-                        </button>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2 rounded border border-chili/30 bg-chili/5 px-3 py-2">
-                          <p className="font-mono text-[11px] text-chili flex-1">
-                            This will reverse all transactions and restore display stock. Staff will need to re-submit closing.
-                          </p>
-                          <div className="flex gap-2">
-                            <button
-                              className="rounded bg-chili px-3 py-1 font-mono text-[11px] font-semibold text-paper disabled:opacity-40"
-                              disabled={actionBusy === `reopen-${data.closing.id}`}
-                              onClick={() => reopenClosing(data.closing!.id)}
-                            >
-                              {actionBusy === `reopen-${data.closing.id}` ? "…" : "Yes, reopen"}
-                            </button>
-                            <button
-                              className="font-mono text-[11px] text-ink-soft hover:text-ink"
-                              onClick={() => setConfirmReopen(false)}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
             </Section>
