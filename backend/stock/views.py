@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.db import models
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -811,6 +812,26 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
             qs = qs.filter(DQ(op_date=local_today) | DQ(op_date__isnull=True, timestamp__date=local_today))
         return qs
 
+    def _sync_closing_available(self, outlet, product, delta, op_date=None):
+        """If an open closing exists for today with a stock count for this product,
+        shift available_pieces by delta and recompute flags / walk-in lines."""
+        from closing.models import DailyClosing, DailyClosingStockCount
+        from closing.services import recompute_closing as _recompute_closing
+        date = op_date or timezone.localdate()
+        closing = (
+            DailyClosing.objects
+            .filter(outlet=outlet, closing_date=date)
+            .exclude(status="LOCKED")
+            .first()
+        )
+        if not closing:
+            return
+        updated = DailyClosingStockCount.objects.filter(
+            daily_closing=closing, product=product
+        ).update(available_pieces=models.F("available_pieces") + delta)
+        if updated:
+            _recompute_closing(closing)
+
     def perform_create(self, serializer):
         data = serializer.validated_data
         product = data["product"]
@@ -873,6 +894,7 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
             consume_for_preparation(outlet, product, pieces)
 
         DisplayStock.adjust(outlet, product, pieces)
+        self._sync_closing_available(outlet, product, pieces, op_date)
         return instance
 
     def perform_destroy(self, instance):
@@ -907,11 +929,13 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
                     f"Delete {'that' if names.count(',') == 0 else 'those'} prep log(s) first."
                 )
 
+        op_date = instance.op_date or instance.timestamp.date()
         if instance.source == PrepSource.FRESH:
             restock_from_preparation(outlet, product, pieces)
         # For CARRIED_FORWARD, no raw stock was touched — only undo DisplayStock.
         DisplayStock.adjust(outlet, product, -pieces)
         instance.delete()
+        self._sync_closing_available(outlet, product, -pieces, op_date)
 
 
 class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
