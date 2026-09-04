@@ -17,7 +17,27 @@ def recompute_closing(closing):
     Idempotent: safe to call after each step (stock count, online sell). Walk-in
     quantity for each product = derived_walkin_sold when > 0.
     """
+    from .models import ClosingStatus
+    from stock.models import DisplayStock
+
     walk_in = _walk_in_channel()
+
+    # For DRAFT closings, keep available_pieces in sync with DisplayStock for prep
+    # products. Non-prep products have their available_pieces set by the stock-count
+    # step (day-start + stock-in formula) and their DisplayStock is set to `remains`
+    # by _initialize_direct_stock — touching those would corrupt the formula.
+    if closing.status == ClosingStatus.DRAFT:
+        for count in (
+            closing.stock_counts
+            .select_related("product")
+            .filter(product__requires_preparation=True)
+        ):
+            ds = DisplayStock.objects.filter(
+                outlet=closing.outlet, product=count.product
+            ).first()
+            if ds is not None and ds.pieces_available != count.available_pieces:
+                count.available_pieces = ds.pieces_available
+                count.save(update_fields=["available_pieces"])
 
     # Sum app-channel quantities (everything except Walk-in) per product.
     app_sold = defaultdict(int)
