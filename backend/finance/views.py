@@ -67,12 +67,16 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
 
 class AccountTransactionViewSet(viewsets.ModelViewSet):
     """
-    Read-only by default; manual ADJUSTMENT entries can be created by the owner.
+    Read/create for owner+admin; destroy restricted to admin only.
     Expense/transfer/capital actions auto-create their transactions elsewhere.
     """
     queryset = AccountTransaction.objects.select_related("account", "entered_by")
     serializer_class = AccountTransactionSerializer
-    permission_classes = [IsOwnerOrAdmin]
+
+    def get_permissions(self):
+        if self.action == "destroy":
+            return [IsAdmin()]
+        return [IsOwnerOrAdmin()]
 
     def get_queryset(self):
         qs = super().get_queryset()

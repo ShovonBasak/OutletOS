@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { bdt, shortDate, today } from "@/lib/format";
 import AccountSelect from "@/components/AccountSelect";
 import type {
@@ -41,6 +42,7 @@ const BALANCE_COLOR = (n: number) =>
   n < 0 ? "text-chili-deep" : n > 0 ? "text-leaf-deep" : "text-ink";
 
 export default function AccountsPage() {
+  const { isAdmin } = useAuth();
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [transactions, setTransactions] = useState<AccountTransaction[]>([]);
   const [transfers, setTransfers] = useState<AccountTransfer[]>([]);
@@ -51,6 +53,8 @@ export default function AccountsPage() {
   const [filterAccount, setFilterAccount] = useState("");
   const [filterFrom, setFilterFrom] = useState(today().slice(0, 8) + "01");
   const [filterTo, setFilterTo] = useState(today());
+  const [txnDeleteConfirm, setTxnDeleteConfirm] = useState<number | null>(null);
+  const [txnError, setTxnError] = useState<string | null>(null);
 
   // Transfer form
   const [tfFrom, setTfFrom] = useState("");
@@ -184,6 +188,19 @@ export default function AccountsPage() {
   async function loadCapitals() {
     const d = await api<Paginated<CapitalTransaction>>("/capital-transactions/?limit=50");
     setCapitals(d.results);
+  }
+
+  async function deleteTransaction(id: number) {
+    setTxnError(null);
+    try {
+      await api(`/account-transactions/${id}/`, { method: "DELETE" });
+      setTxnDeleteConfirm(null);
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      await loadAccounts();
+    } catch {
+      setTxnError("Could not delete transaction.");
+      setTxnDeleteConfirm(null);
+    }
   }
 
   useEffect(() => {
@@ -446,6 +463,7 @@ export default function AccountsPage() {
             </label>
           </div>
 
+          {txnError && <p className="font-mono text-[11px] text-chili-deep">{txnError}</p>}
           <div className="overflow-x-auto">
             <table className="datatable min-w-[640px]">
               <thead>
@@ -455,6 +473,7 @@ export default function AccountsPage() {
                   <th>Type</th>
                   <th className="text-right">Amount</th>
                   <th>Note</th>
+                  {isAdmin && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -479,12 +498,33 @@ export default function AccountsPage() {
                         {amt >= 0 ? "+" : ""}{bdt(amt)}
                       </td>
                       <td className="text-ink-soft text-xs">{t.note || "—"}</td>
+                      {isAdmin && (
+                        <td>
+                          {txnDeleteConfirm === t.id ? (
+                            <span className="flex items-center gap-1">
+                              <button
+                                className="font-mono text-[10px] text-chili-deep font-bold"
+                                onClick={() => deleteTransaction(t.id)}
+                              >Confirm</button>
+                              <button
+                                className="font-mono text-[10px] text-ink-soft"
+                                onClick={() => setTxnDeleteConfirm(null)}
+                              >Cancel</button>
+                            </span>
+                          ) : (
+                            <button
+                              className="font-mono text-[11px] text-chili opacity-40 hover:opacity-100"
+                              onClick={() => setTxnDeleteConfirm(t.id)}
+                            >✕</button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
                 {transactions.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="text-ink-soft">No transactions in this period.</td>
+                    <td colSpan={isAdmin ? 6 : 5} className="text-ink-soft">No transactions in this period.</td>
                   </tr>
                 )}
               </tbody>
