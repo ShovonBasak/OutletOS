@@ -259,6 +259,7 @@ export interface StockInItem {
   // Price fields from supplier slip
   rate?: string | null;
   total_amount?: string | null;
+  discount?: string | null;
   sd_rate?: string | null;
   sd_amount?: string | null;
   vat_rate?: string | null;

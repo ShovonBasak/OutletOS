@@ -40,6 +40,7 @@ interface EditLine {
   // Price fields — preserved from Excel/OCR import, absent for pure manual lines
   rate?: string | null;
   total_amount?: string | null;
+  discount?: string | null;
   sd_rate?: string | null;
   sd_amount?: string | null;
   vat_rate?: string | null;
@@ -213,6 +214,7 @@ export default function StockInPage() {
       wasUnrecognized: it.ingredient == null,
       rate: it.rate ?? null,
       total_amount: it.total_amount ?? null,
+      discount: it.discount ?? null,
       sd_rate: it.sd_rate ?? null,
       sd_amount: it.sd_amount ?? null,
       vat_rate: it.vat_rate ?? null,
@@ -235,8 +237,11 @@ export default function StockInPage() {
   }
 
   async function loadRecords(p = 1, append = false) {
+    // sort=created: newest-uploaded first, regardless of stock_in_date — that
+    // field can be a slip OCR misread and owner may later correct it, which
+    // shouldn't reshuffle where staff finds the record they just submitted.
     const r = await api<Paginated<StockInRecord>>(
-      `/stock-in/?outlet=${outlet}&page=${p}&page_size=${PAGE_SIZE}`
+      `/stock-in/?outlet=${outlet}&page=${p}&page_size=${PAGE_SIZE}&sort=created`
     );
     setRecords((prev) => (append ? [...prev, ...r.results] : r.results));
     setPage(p);
@@ -361,6 +366,28 @@ export default function StockInPage() {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
 
+  // Manual lines have no slip to read a price off of — staff types the final,
+  // already-discounted price per pack/piece, and the line + grand totals are
+  // derived from it. Slip-extracted lines keep whatever price OCR/Excel found.
+  function applyManualPricing(line: EditLine): EditLine {
+    if (line.source !== "MANUAL") return line;
+    const qty = parseFloat(line.confirmed_quantity) || 0;
+    const price = parseFloat(line.rate ?? "") || 0;
+    if (qty > 0 && price > 0) {
+      const total = (qty * price).toFixed(2);
+      return { ...line, total_amount: total, line_total: total, unit_price: line.rate };
+    }
+    return { ...line, total_amount: null, line_total: null, unit_price: null };
+  }
+
+  function updateQty(i: number, value: string) {
+    setLines((ls) => ls.map((l, idx) => (idx === i ? applyManualPricing({ ...l, confirmed_quantity: value }) : l)));
+  }
+
+  function updatePrice(i: number, value: string) {
+    setLines((ls) => ls.map((l, idx) => (idx === i ? applyManualPricing({ ...l, rate: value }) : l)));
+  }
+
   function setLineIngredient(i: number, ingredientId: number) {
     const ing = ingById.get(ingredientId);
     updateLine(i, {
@@ -377,6 +404,53 @@ export default function StockInPage() {
   function lineNeedsYield(l: EditLine) {
     return l.ingredient != null && l.unit_captured === "PACK" && l.pack_definition == null;
   }
+
+  // Slip-extracted rate is pre-tax; line_total is after SD/VAT/discount. Never
+  // render "rate × qty = line_total" — that arithmetic doesn't hold once tax
+  // or a discount applies, so break the two apart with what sits in between.
+  function slipPriceBreakdown(l: EditLine) {
+    if (!l.line_total) return null;
+    const qty = Number(l.confirmed_quantity);
+    const rate = l.rate != null ? Number(l.rate) : null;
+    const subtotal = l.total_amount != null ? Number(l.total_amount) : rate != null ? rate * qty : null;
+    const sd = l.sd_amount ? Number(l.sd_amount) : 0;
+    const vat = l.vat_amount ? Number(l.vat_amount) : 0;
+    const discount = l.discount ? Number(l.discount) : 0;
+    const total = Number(l.line_total);
+    const hasAdjustments = sd > 0 || vat > 0 || discount > 0;
+
+    if (!hasAdjustments) {
+      return (
+        <p className="mt-1.5 font-mono text-[10px] text-ink-soft">
+          {rate != null ? `${qty} × ৳${rate.toFixed(2)} = ` : ""}৳{total.toFixed(2)}
+        </p>
+      );
+    }
+
+    return (
+      <div className="mt-1.5 flex flex-col gap-0.5 font-mono text-[10px] text-ink-soft">
+        {rate != null && subtotal != null && (
+          <p>
+            {qty} × ৳{rate.toFixed(2)} = ৳{subtotal.toFixed(2)}{" "}
+            <span className="text-ink-soft/60">pre-tax</span>
+          </p>
+        )}
+        {sd > 0 && <p>+ ৳{sd.toFixed(2)} SD{l.sd_rate ? ` (${Number(l.sd_rate)}%)` : ""}</p>}
+        {vat > 0 && <p>+ ৳{vat.toFixed(2)} VAT{l.vat_rate ? ` (${Number(l.vat_rate)}%)` : ""}</p>}
+        {discount > 0 && <p>− ৳{discount.toFixed(2)} discount</p>}
+        <p className="font-semibold text-ink">= ৳{total.toFixed(2)} total</p>
+      </div>
+    );
+  }
+
+  const draftTotal = useMemo(
+    () =>
+      lines.reduce((s, l) => {
+        const v = parseFloat(l.line_total ?? "");
+        return s + (isNaN(v) ? 0 : v);
+      }, 0),
+    [lines]
+  );
 
   async function persist(): Promise<StockInRecord | null> {
     if (!draft) return null;
@@ -424,6 +498,7 @@ export default function StockInPage() {
         pack_definition: l.pack_definition,
         rate: l.rate ?? null,
         total_amount: l.total_amount ?? null,
+        discount: l.discount ?? null,
         sd_rate: l.sd_rate ?? null,
         sd_amount: l.sd_amount ?? null,
         vat_rate: l.vat_rate ?? null,
@@ -583,7 +658,7 @@ export default function StockInPage() {
                       className="field-input !px-1.5 !py-1 w-16 text-center"
                       inputMode="decimal"
                       value={l.confirmed_quantity}
-                      onChange={(e) => updateLine(i, { confirmed_quantity: e.target.value })}
+                      onChange={(e) => updateQty(i, e.target.value)}
                     />
                     <select
                       className="field-input !px-1.5 !py-1 w-24"
@@ -602,6 +677,24 @@ export default function StockInPage() {
                       Remove
                     </button>
                   </div>
+
+                  {l.source === "MANUAL" ? (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="font-mono text-[10px] text-ink-soft">৳</span>
+                      <input
+                        className="field-input !px-1.5 !py-1 w-24 text-center"
+                        inputMode="decimal"
+                        placeholder={`price / ${l.unit_captured === "PACK" ? "pack" : "unit"}`}
+                        value={l.rate ?? ""}
+                        onChange={(e) => updatePrice(i, e.target.value)}
+                      />
+                      <span className="flex-1 text-right font-mono text-[10px] text-ink-soft">
+                        {l.line_total ? `= ৳${Number(l.line_total).toFixed(2)}` : "no price entered"}
+                      </span>
+                    </div>
+                  ) : (
+                    slipPriceBreakdown(l)
+                  )}
 
                   {needYield && (
                     <div className="mt-1.5 rounded bg-chili/10 px-2 py-1.5">
@@ -632,7 +725,17 @@ export default function StockInPage() {
             <button className="btn btn-ghost" onClick={addManualLine}>
               + Add line manually
             </button>
+            <p className="font-mono text-[10px] text-ink-soft/70">
+              No invoice for this delivery (e.g. beverages)? Add each item manually above with its price — a slip isn&apos;t required.
+            </p>
           </div>
+
+          {draftTotal > 0 && (
+            <div className="flex items-center justify-between border-t border-dashed border-[#d8cdb0] pt-2">
+              <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Total (this stock-in)</span>
+              <span className="font-mono text-sm font-bold text-ink">৳{draftTotal.toFixed(2)}</span>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <button className="btn btn-ghost flex-1" disabled={busy === "save"} onClick={save}>

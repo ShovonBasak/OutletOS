@@ -102,6 +102,11 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             qs = qs.filter(
                 Q(invoice_number__icontains=search) | Q(id__icontains=search)
             )
+        # Staff's list is keyed to when a record was created, not the (often
+        # corrected) invoice date — a just-uploaded stock-in always surfaces
+        # at the top regardless of what stock_in_date says.
+        if self.request.query_params.get("sort") == "created":
+            return qs.order_by("-created_at", "-id")
         return qs.order_by("-stock_in_date", "-created_at")
 
     def get_serializer_class(self):
@@ -352,6 +357,21 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
 
+        return Response(self.get_serializer(record).data)
+
+    @action(detail=True, methods=["patch"], url_path="set-date", permission_classes=[IsOwnerOrAdmin])
+    def set_date(self, request, pk=None):
+        """Owner/admin correction for a slip date OCR got wrong. Only before
+        approval — once approved, stock_in_date has already fed RawStock,
+        cost-versioning and reports and must not move."""
+        record = self.get_object()
+        if record.status not in (StockInStatus.DRAFT, StockInStatus.PENDING):
+            raise ValidationError("Can only edit the date before approval.")
+        new_date = request.data.get("stock_in_date")
+        if not new_date:
+            raise ValidationError("stock_in_date is required.")
+        record.stock_in_date = new_date
+        record.save(update_fields=["stock_in_date"])
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])

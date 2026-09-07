@@ -124,12 +124,14 @@ function InvoiceRow({
   accounts,
   onAct,
   onResume,
+  onEditDate,
 }: {
   r: StockInRecord;
   busy: boolean;
   accounts: FinancialAccount[];
   onAct: (id: number, action: "approve" | "reject" | "delete", accountId?: number | null) => void;
   onResume?: (detail: StockInRecord) => void;
+  onEditDate?: (id: number, newDate: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<StockInRecord | null>(null);
@@ -139,6 +141,8 @@ function InvoiceRow({
   const [approvalAccount, setApprovalAccount] = useState(
     r.paid_from_account ? String(r.paid_from_account) : (primaryId ? String(primaryId) : "")
   );
+  const [dateEdit, setDateEdit] = useState(r.stock_in_date);
+  useEffect(() => { setDateEdit(r.stock_in_date); }, [r.stock_in_date]);
   const invoiceLabel = r.invoice_number
     ? r.invoice_number
     : `#SI-${String(r.id).padStart(4, "0")}`;
@@ -227,6 +231,30 @@ function InvoiceRow({
 
           {r.status === "PENDING" && (
             <div className="mt-3 flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] uppercase text-ink-soft">
+                  Invoice date {dateEdit !== r.stock_in_date && <span className="text-chili-deep">(unsaved)</span>}
+                </span>
+                <p className="font-mono text-[9px] text-ink-soft/70">
+                  Slip OCR sometimes misreads this — correct it before approving.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    className="field-input flex-1"
+                    value={dateEdit}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setDateEdit(e.target.value)}
+                  />
+                  <button
+                    className="btn btn-ghost !px-3 !py-1.5 font-mono text-[11px] shrink-0"
+                    disabled={busy || dateEdit === r.stock_in_date || !dateEdit}
+                    onClick={(e) => { e.stopPropagation(); onEditDate?.(r.id, dateEdit); }}
+                  >
+                    Save date
+                  </button>
+                </div>
+              </div>
               <div className="flex flex-col gap-1">
                 <span className="font-mono text-[10px] uppercase text-ink-soft">Paid from account</span>
                 <AccountPicker
@@ -434,6 +462,19 @@ export default function StockInApprovals() {
       } else {
         await api(`/stock-in/${id}/${action}/`, { method: "POST" });
       }
+      await loadRecords();
+    } finally {
+      setActBusy(null);
+    }
+  }
+
+  async function editDate(id: number, newDate: string) {
+    setActBusy(id);
+    try {
+      await api(`/stock-in/${id}/set-date/`, {
+        method: "PATCH",
+        body: JSON.stringify({ stock_in_date: newDate }),
+      });
       await loadRecords();
     } finally {
       setActBusy(null);
@@ -1012,6 +1053,7 @@ export default function StockInApprovals() {
             accounts={accounts}
             onAct={act}
             onResume={r.status === "DRAFT" ? resumeDraft : undefined}
+            onEditDate={editDate}
           />
         ))}
         {records.length === 0 && (
