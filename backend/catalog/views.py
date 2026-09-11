@@ -8,10 +8,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
+from accounts.permissions import IsAdmin, IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
 from .models import (
     ComboComponent,
     Ingredient,
+    Organization,
     Outlet,
     PackDefinition,
     Product,
@@ -23,6 +25,7 @@ from .models import (
 from .serializers import (
     ComboComponentSerializer,
     IngredientSerializer,
+    OrganizationSerializer,
     OutletSerializer,
     PackDefinitionSerializer,
     PrepProductSerializer,
@@ -35,13 +38,72 @@ from .serializers import (
 )
 
 
-class OutletViewSet(viewsets.ModelViewSet):
+class OrganizationViewSet(viewsets.ModelViewSet):
+    """Platform-admin only: manage franchise organizations (the tenant root).
+    OWNER/STAFF never touch this — they only ever have one organization."""
+
+    queryset = Organization.objects.all()
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsAdmin]
+
+    @action(detail=False, methods=["post"])
+    def bootstrap(self, request):
+        """One-shot onboarding: create an Organization, its first Outlet, and
+        its first OWNER login, in a single guided call.
+
+        Body: {name, slug?, outlet_name, owner_name, owner_phone, owner_password}
+        """
+        from django.db import IntegrityError, transaction
+        from django.utils.text import slugify
+        from accounts.models import Role, User
+
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            raise ValidationError({"name": "This field is required."})
+        slug = (request.data.get("slug") or slugify(name)).strip()
+        outlet_name = (request.data.get("outlet_name") or f"{name} — Main Outlet").strip()
+        owner_name = (request.data.get("owner_name") or "").strip()
+        owner_phone = (request.data.get("owner_phone") or "").strip()
+        owner_password = request.data.get("owner_password") or ""
+
+        if not owner_name or not owner_phone or not owner_password:
+            raise ValidationError(
+                "owner_name, owner_phone, and owner_password are all required."
+            )
+        if len(owner_password) < 8:
+            raise ValidationError({"owner_password": "Must be at least 8 characters."})
+
+        try:
+            with transaction.atomic():
+                org = Organization.objects.create(name=name, slug=slug)
+                outlet = Outlet.objects.create(organization=org, name=outlet_name)
+                owner = User.objects.create_user(
+                    phone=owner_phone,
+                    password=owner_password,
+                    name=owner_name,
+                    role=Role.OWNER,
+                    organization=org,
+                )
+        except IntegrityError as exc:
+            raise ValidationError(f"Could not create organization: {exc}")
+
+        return Response(
+            {
+                "organization": OrganizationSerializer(org).data,
+                "outlet": OutletSerializer(outlet).data,
+                "owner": {"id": owner.id, "name": owner.name, "phone": owner.phone},
+            },
+            status=201,
+        )
+
+
+class OutletViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = Outlet.objects.all()
     serializer_class = OutletSerializer
     permission_classes = [IsOwnerOrAdminOrReadOnly]
 
 
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     # Full prefetch used for detail/create/update and for ?expand=full list requests.
     queryset = Product.objects.all().prefetch_related(
         "components", "recipes__ingredient", "product_recipe_components__component_product", "prices"
@@ -83,6 +145,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         else:
             # Slim list: skip heavy nested prefetches, only fetch prices for selling_price.
             qs = Product.objects.all().prefetch_related("prices")
+
+        qs = self.scope_queryset(qs)
 
         if not prep:
             if not (self.request.user.is_owner_or_admin and p.get("include_inactive") == "1"):
@@ -188,7 +252,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
 
         known_names = list(
-            Product.objects.filter(is_active=True).values_list("name", flat=True)
+            self.scope_queryset(Product.objects.filter(is_active=True))
+            .values_list("name", flat=True)
         )
 
         images = []
@@ -211,13 +276,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({"detail": f"Extraction failed: {exc}"}, status=500)
 
 
-class ComboComponentViewSet(viewsets.ModelViewSet):
+class ComboComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ComboComponent.objects.select_related("combo_product", "component_product")
     serializer_class = ComboComponentSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "combo_product__organization"
 
 
-class IngredientViewSet(viewsets.ModelViewSet):
+class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = Ingredient.objects.prefetch_related("aliases", "pack_definitions")
     serializer_class = IngredientSerializer
     permission_classes = [IsAdminOrReadOnly]
@@ -257,11 +323,15 @@ class IngredientViewSet(viewsets.ModelViewSet):
             raise ValidationError("Attach at least one slip image (field 'slips').")
 
         known_names = list(
-            Ingredient.objects.filter(is_active=True).values_list("name", flat=True)
+            self.scope_queryset(Ingredient.objects.filter(is_active=True))
+            .values_list("name", flat=True)
         )
+        org = self.resolve_organization()
         known_aliases = list(
-            SupplierProductAlias.objects.filter(is_active=True).values_list("alias_text", flat=True)
-        )
+            SupplierProductAlias.objects.filter(
+                is_active=True, ingredient__organization=org
+            ).values_list("alias_text", flat=True)
+        ) if org else []
         all_known = list({*known_names, *known_aliases})
 
         images = [f.read() for f in files]
@@ -292,12 +362,17 @@ class IngredientViewSet(viewsets.ModelViewSet):
         Body: {items:[{name, base_unit, tracking_mode, pieces_per_pack?,
         cost_per_pack?, alias?}]}. Each row also seeds a PackDefinition (when a
         pack yield is given) and a SupplierProductAlias (the slip wording)."""
+        org = self.resolve_organization()
+        if org is None:
+            raise ValidationError("Could not resolve an organization for this request.")
+
         created_ids = []
         for item in request.data.get("items", []):
             name = (item.get("name") or "").strip()
             if not name:
                 continue
             ingredient, _ = Ingredient.objects.get_or_create(
+                organization=org,
                 name=name,
                 defaults={
                     "base_unit": (item.get("base_unit") or "piece").strip() or "piece",
@@ -327,10 +402,11 @@ class IngredientViewSet(viewsets.ModelViewSet):
         return Response(IngredientSerializer(ingredients, many=True).data, status=201)
 
 
-class SupplierProductAliasViewSet(viewsets.ModelViewSet):
+class SupplierProductAliasViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = SupplierProductAlias.objects.select_related("ingredient")
     serializer_class = SupplierProductAliasSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "ingredient__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -340,10 +416,11 @@ class SupplierProductAliasViewSet(viewsets.ModelViewSet):
         return qs
 
 
-class PackDefinitionViewSet(viewsets.ModelViewSet):
+class PackDefinitionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = PackDefinition.objects.select_related("ingredient")
     serializer_class = PackDefinitionSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "ingredient__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -363,10 +440,11 @@ class PackDefinitionViewSet(viewsets.ModelViewSet):
         serializer.save()
 
 
-class RecipeViewSet(viewsets.ModelViewSet):
+class RecipeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = Recipe.objects.select_related("product", "ingredient")
     serializer_class = RecipeSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -376,10 +454,11 @@ class RecipeViewSet(viewsets.ModelViewSet):
         return qs
 
 
-class RecipeProductComponentViewSet(viewsets.ModelViewSet):
+class RecipeProductComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = RecipeProductComponent.objects.select_related("product", "component_product")
     serializer_class = RecipeProductComponentSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -389,7 +468,7 @@ class RecipeProductComponentViewSet(viewsets.ModelViewSet):
         return qs
 
 
-class ProductPriceViewSet(viewsets.ModelViewSet):
+class ProductPriceViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """Direct CRUD on individual ProductPrice rows.
 
     Use POST /products/{id}/set-price/ for the normal "change price going forward"
@@ -400,6 +479,7 @@ class ProductPriceViewSet(viewsets.ModelViewSet):
     queryset = ProductPrice.objects.select_related("product", "changed_by").order_by("-effective_from")
     serializer_class = ProductPriceSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()

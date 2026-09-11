@@ -17,7 +17,7 @@ import {
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
   const { loading, isAdmin } = useRequireRole(["OWNER", "ADMIN"]);
-  const { user, logout } = useAuth();
+  const { user, logout, isPlatformAdmin, selectedOrgId, selectedOrgName, selectOrg } = useAuth();
   const pathname = usePathname();
 
   const nav = navFor(isAdmin);
@@ -113,7 +113,18 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="desktoptop hidden md:flex">
             <h1>{titleFor(pathname)}</h1>
-            <div className="date">{user?.outlet_name ?? "Outlet"}</div>
+            {isPlatformAdmin && selectedOrgId ? (
+              <button
+                type="button"
+                onClick={() => selectOrg(null)}
+                className="date font-mono text-[10px] uppercase tracking-widest text-chili"
+                title="Viewing this organization's data — click to return to all organizations"
+              >
+                Viewing: {selectedOrgName ?? `Org #${selectedOrgId}`} ✕
+              </button>
+            ) : (
+              <div className="date">{user?.outlet_name ?? "Outlet"}</div>
+            )}
           </div>
           <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-6">{children}</main>
         </div>

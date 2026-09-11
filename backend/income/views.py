@@ -1,28 +1,36 @@
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 
+from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
 from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.scoping import resolve_outlet_param
 from .models import OtherIncomeCategory, OtherIncome
 from .serializers import OtherIncomeCategorySerializer, OtherIncomeSerializer
 
 
-class OtherIncomeCategoryViewSet(viewsets.ModelViewSet):
+class OtherIncomeCategoryViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = OtherIncomeCategory.objects.all()
     serializer_class = OtherIncomeCategorySerializer
     permission_classes = [IsAdminOrReadOnly]
 
 
-class OtherIncomeViewSet(viewsets.ModelViewSet):
+class OtherIncomeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = OtherIncome.objects.select_related("category", "outlet", "received_into_account")
     serializer_class = OtherIncomeSerializer
+    org_lookup = "outlet__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         return qs
 
     def perform_create(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        user = self.request.user
+        if outlet and not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         income = serializer.save(entered_by=self.request.user)
         self._create_account_transaction(income)
 

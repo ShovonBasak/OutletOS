@@ -77,7 +77,7 @@ export default function PnlPage() {
     setLoading(true);
     setShrinkage(null);
     try {
-      const q = `outlet=1&start=${start}&end=${end}`;
+      const q = `start=${start}&end=${end}`;
       const data = await api<Pnl>(`/reports/pnl/?${q}`);
       setPnl(data);
       api<ShrinkageDetail>(`/reports/shrinkage-detail/?${q}`)

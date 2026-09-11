@@ -31,19 +31,32 @@ class TeamUserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.request.user.is_admin:
-            return User.objects.all().order_by("name")
-        return User.objects.filter(role=Role.STAFF).order_by("name")
+            qs = User.objects.all()
+            org_param = self.request.query_params.get("organization")
+            if org_param:
+                qs = qs.filter(organization_id=org_param)
+            return qs.order_by("name")
+        return User.objects.filter(
+            role=Role.STAFF, organization_id=self.request.user.organization_id
+        ).order_by("name")
+
+    def _check_outlet_in_org(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        if outlet and outlet.organization_id != self.request.user.organization_id:
+            raise ValidationError({"outlet": "Outlet does not belong to your organization."})
 
     def perform_create(self, serializer):
         if not self.request.user.is_admin:
-            serializer.save(role=Role.STAFF)
+            self._check_outlet_in_org(serializer)
+            serializer.save(role=Role.STAFF, organization=self.request.user.organization)
         else:
             serializer.save()
 
     def perform_update(self, serializer):
         instance = self.get_object()
         if not self.request.user.is_admin:
-            serializer.save(role=instance.role)
+            self._check_outlet_in_org(serializer)
+            serializer.save(role=instance.role, organization=instance.organization)
         else:
             serializer.save()
 

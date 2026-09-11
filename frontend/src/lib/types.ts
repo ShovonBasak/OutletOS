@@ -6,6 +6,8 @@ export interface User {
   role: Role;
   outlet: number | null;
   outlet_name: string | null;
+  organization: number | null;
+  organization_name: string | null;
   phone: string;
   is_active: boolean;
   avatar_url: string | null;
@@ -17,6 +19,16 @@ export interface Outlet {
   address: string;
   is_active: boolean;
   allow_staff_date_selection: boolean;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  address: string;
+  is_active: boolean;
+  created_at: string;
+  outlet_count: number;
 }
 
 export type ProductType = "SINGLE" | "COMBO";

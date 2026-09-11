@@ -4,6 +4,9 @@ from catalog.models import Outlet
 
 
 class OtherIncomeCategory(models.Model):
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.PROTECT, related_name="other_income_categories",
+    )
     name = models.CharField(max_length=80)
 
     class Meta:

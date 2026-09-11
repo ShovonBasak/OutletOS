@@ -44,7 +44,7 @@ export default function SellHistoryPage() {
     setLoading(true);
     try {
       const res = await api<SellHistoryResponse>(
-        `/reports/sell-history/?outlet=1&start=${start}&end=${end}`
+        `/reports/sell-history/?start=${start}&end=${end}`
       );
       setData(res);
     } finally {

@@ -1,25 +1,30 @@
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 
+from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
 from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.scoping import resolve_outlet_param
 from .models import CostCategory, Expense
 from .serializers import CostCategorySerializer, ExpenseSerializer
 
 
-class CostCategoryViewSet(viewsets.ModelViewSet):
+class CostCategoryViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = CostCategory.objects.all()
     serializer_class = CostCategorySerializer
     permission_classes = [IsAdminOrReadOnly]
 
 
-class ExpenseViewSet(viewsets.ModelViewSet):
+class ExpenseViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = Expense.objects.select_related("category", "outlet", "paid_from_account")
     serializer_class = ExpenseSerializer
+    org_lookup = "outlet__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
         p = self.request.query_params
-        if p.get("outlet"):
-            qs = qs.filter(outlet_id=p["outlet"])
+        outlet = resolve_outlet_param(self.request)
+        if outlet:
+            qs = qs.filter(outlet_id=outlet)
         if p.get("date_from"):
             qs = qs.filter(date__gte=p["date_from"])
         if p.get("date_to"):
@@ -31,6 +36,10 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         return qs.order_by("-date", "-id")
 
     def perform_create(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        user = self.request.user
+        if outlet and not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         expense = serializer.save(entered_by=self.request.user)
         self._create_account_transaction(expense)
 

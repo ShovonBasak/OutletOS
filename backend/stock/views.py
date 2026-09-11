@@ -11,7 +11,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
+from accounts.mixins import OrgScopedQuerySetMixin
 from accounts.permissions import IsOwnerOrAdmin
+from accounts.scoping import resolve_outlet_param
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
 from .models import (
@@ -61,10 +63,11 @@ class StockInListPagination(PageNumberPagination):
     max_page_size = 100
 
 
-class StockInRecordViewSet(viewsets.ModelViewSet):
+class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = StockInRecord.objects.all()  # required by DRF router for basename detection
     serializer_class = StockInRecordSerializer
     pagination_class = StockInListPagination
+    org_lookup = "outlet__organization"
 
     _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
         "items__ingredient", "items__pack_definition"
@@ -91,10 +94,11 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = self._list_queryset() if self._is_slim() else self._FULL_QUERYSET
+        qs = self.scope_queryset(qs)
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         search = self.request.query_params.get("search", "").strip()
@@ -115,6 +119,10 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         return StockInRecordSerializer
 
     def perform_create(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        user = self.request.user
+        if outlet and not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         serializer.save(submitted_by=self.request.user)
 
     def _guard_editable(self, record):
@@ -805,9 +813,10 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         return Response(data)
 
 
-class PreparationLogViewSet(viewsets.ModelViewSet):
+class PreparationLogViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = PreparationLog.objects.select_related("product", "outlet")
     serializer_class = PreparationLogSerializer
+    org_lookup = "outlet__organization"
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -816,10 +825,10 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
-            qs = PreparationLog.objects.select_related("product")
+            qs = self.scope_queryset(PreparationLog.objects.select_related("product"))
         else:
             qs = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         date_param = self.request.query_params.get("date")
@@ -856,6 +865,9 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
         data = serializer.validated_data
         product = data["product"]
         outlet = data["outlet"]
+        user = self.request.user
+        if not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         source = data.get("source", PrepSource.FRESH)
         op_date = data.get("op_date")
 
@@ -958,12 +970,13 @@ class PreparationLogViewSet(viewsets.ModelViewSet):
         self._sync_closing_available(outlet, product, -pieces, op_date)
 
 
-class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
+class RawStockViewSet(OrgScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = RawStock.objects.select_related("ingredient", "outlet").prefetch_related(
         "ingredient__aliases",
         "ingredient__pack_definitions",
     )
     serializer_class = RawStockSerializer
+    org_lookup = "outlet__organization"
 
     def get_serializer_class(self):
         if self.request.query_params.get("slim") == "1":
@@ -981,20 +994,23 @@ class RawStockViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         if self.request.query_params.get("slim") == "1":
             # Skip the aliases prefetch — RawStockPrepSerializer doesn't use it.
-            qs = RawStock.objects.select_related("ingredient").prefetch_related(
-                "ingredient__pack_definitions"
+            qs = self.scope_queryset(
+                RawStock.objects.select_related("ingredient").prefetch_related(
+                    "ingredient__pack_definitions"
+                )
             )
         else:
             qs = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         return qs
 
 
-class DisplayStockViewSet(viewsets.ReadOnlyModelViewSet):
+class DisplayStockViewSet(OrgScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = DisplayStock.objects.select_related("product", "outlet")
     serializer_class = DisplayStockSerializer
+    org_lookup = "outlet__organization"
 
     def get_serializer_class(self):
         if self.request.query_params.get("slim") == "1":
@@ -1003,8 +1019,12 @@ class DisplayStockViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         # Slim mode: drop select_related("product") — DisplayStockPrepSerializer doesn't access it.
-        qs = DisplayStock.objects.all() if self.request.query_params.get("slim") == "1" else super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        qs = (
+            self.scope_queryset(DisplayStock.objects.all())
+            if self.request.query_params.get("slim") == "1"
+            else super().get_queryset()
+        )
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         return qs
@@ -1035,17 +1055,18 @@ def _initialize_direct_stock(outlet):
         ds.save(update_fields=["pieces_available"])
 
 
-class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
+class OperatingDayViewSet(OrgScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     """Gates the staff daily flow. Read + custom transitions (start, confirm)."""
 
     queryset = OperatingDay.objects.select_related("outlet", "started_by").prefetch_related(
         "stock_checks__ingredient__aliases",
     )
     serializer_class = OperatingDaySerializer
+    org_lookup = "outlet__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         date = self.request.query_params.get("date")
@@ -1054,7 +1075,7 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
     def _outlet(self, request):
-        outlet_id = request.data.get("outlet") or request.query_params.get("outlet")
+        outlet_id = resolve_outlet_param(request, source="both")
         if outlet_id:
             from catalog.models import Outlet
 
@@ -1252,15 +1273,16 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(self.get_serializer(day).data)
 
 
-class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
+class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """Packaging & supplies — staff reports what's left; consumption is inferred."""
 
     queryset = PeriodicStockCheck.objects.select_related("ingredient", "outlet", "checked_by")
     serializer_class = PeriodicStockCheckSerializer
+    org_lookup = "outlet__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         ingredient = self.request.query_params.get("ingredient")
@@ -1300,7 +1322,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         """Full recount. Body: {outlet, ingredient, counted_qty, note?}."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
-        outlet = _outlet_obj(request.data.get("outlet") or request.user.outlet_id)
+        outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
         obj = self._record(
             outlet,
             ingredient,
@@ -1315,7 +1337,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
         """One-tap 'used the last of a bundle' — subtracts the pack size from the
         last count. Body: {outlet, ingredient}."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
-        outlet = _outlet_obj(request.data.get("outlet") or request.user.outlet_id)
+        outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
         prev = (
             PeriodicStockCheck.objects.filter(outlet=outlet, ingredient=ingredient)
             .order_by("-checked_at")
@@ -1335,11 +1357,10 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
         """Effective current qty for every PERIODIC_COUNT ingredient.
         Returns the latest counted_qty when a check exists, otherwise derives
         the quantity from all approved stock-in records (bootstrap case)."""
-        outlet = _outlet_obj(
-            request.query_params.get("outlet") or request.user.outlet_id
-        )
+        outlet = _outlet_obj(resolve_outlet_param(request))
         ingredients = Ingredient.objects.filter(
-            tracking_mode=TrackingMode.PERIODIC_COUNT, is_active=True
+            organization_id=outlet.organization_id,
+            tracking_mode=TrackingMode.PERIODIC_COUNT, is_active=True,
         ).prefetch_related("aliases")
         # Latest check per ingredient (Python dedup — SQLite-safe, no DISTINCT ON).
         checks_qs = (
@@ -1415,7 +1436,7 @@ class StaffHomeSummaryView(_HomeSummaryBase):
         from catalog.models import Outlet
         from closing.models import DailyClosing
 
-        outlet_id = int(request.query_params.get("outlet", 1))
+        outlet_id = resolve_outlet_param(request)
         date_str = request.query_params.get("date", str(datetime.date.today()))
 
         # Outlet — only the one flag needed on the home page
@@ -1489,13 +1510,14 @@ class StaffHomeSummaryView(_HomeSummaryBase):
         })
 
 
-class FryerOilChangeViewSet(viewsets.ModelViewSet):
+class FryerOilChangeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = FryerOilChangeSerializer
     http_method_names = ["get", "post", "head", "options"]
+    org_lookup = "outlet__organization"
 
     def get_queryset(self):
-        qs = FryerOilChange.objects.select_related("logged_by")
-        outlet = self.request.query_params.get("outlet")
+        qs = self.scope_queryset(FryerOilChange.objects.select_related("logged_by"))
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             qs = qs.filter(outlet_id=outlet)
         pan = self.request.query_params.get("pan")
@@ -1504,4 +1526,8 @@ class FryerOilChangeViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        user = self.request.user
+        if outlet and not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         serializer.save(logged_by=self.request.user)

@@ -12,6 +12,10 @@ class AccountType(models.TextChoices):
 
 
 class FinancialAccount(models.Model):
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.PROTECT,
+        related_name="financial_accounts",
+    )
     outlet = models.ForeignKey(
         Outlet, on_delete=models.CASCADE, null=True, blank=True,
         related_name="financial_accounts"

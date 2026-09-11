@@ -63,7 +63,7 @@ export default function SellCorrectionsPage() {
     setAddSearch("");
     try {
       const res = await api<DailySellsResponse>(
-        `/reports/daily-sells/?outlet=1&date=${date}`
+        `/reports/daily-sells/?date=${date}`
       );
       setRows(res.rows);
     } catch (e: unknown) {

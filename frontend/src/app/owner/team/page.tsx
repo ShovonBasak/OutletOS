@@ -254,6 +254,8 @@ function UserCard({
             placeholder="New password (min 8 chars)"
             value={newPwd}
             onChange={(e) => { setNewPwd(e.target.value); setErr(null); }}
+            autoComplete="new-password"
+            name={`reset-password-${user.id}`}
           />
           <ErrorMsg msg={err} />
           <div className="flex gap-2">
@@ -333,12 +335,15 @@ function AddUserForm({
         placeholder="Full name"
         value={form.name}
         onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+        autoComplete="off"
       />
       <input
         className={fieldCls(!form.phone.trim() && !!err)}
         placeholder="Phone number (used to log in)"
         value={form.phone}
         onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+        autoComplete="off"
+        name="new-member-phone"
       />
       <input
         type="password"
@@ -346,6 +351,8 @@ function AddUserForm({
         placeholder="Initial password (min 8 chars)"
         value={form.password}
         onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+        autoComplete="new-password"
+        name="new-member-password"
       />
       {isAdmin && (
         <select

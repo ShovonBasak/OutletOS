@@ -88,7 +88,7 @@ export default function ReportsPage() {
     setAllProducts(null);
     setProdExpanded(false);
     try {
-      const q = `outlet=1&start=${start}&end=${end}`;
+      const q = `start=${start}&end=${end}`;
       const [p, prod, ch, tr, pur] = await Promise.all([
         api<Pnl>(`/reports/pnl/?${q}`),
         api<ProductPerformanceResponse>(`/reports/product-performance/?${q}&limit=5`),
@@ -115,7 +115,7 @@ export default function ReportsPage() {
     if (allProducts) { setProdExpanded(true); return; }
     setProdExpandLoading(true);
     try {
-      const q = `outlet=1&start=${start}&end=${end}`;
+      const q = `start=${start}&end=${end}`;
       const res = await api<ProductPerformanceResponse>(`/reports/product-performance/?${q}`);
       setAllProducts(res.rows);
       setProdExpanded(true);
@@ -126,7 +126,7 @@ export default function ReportsPage() {
 
   // Stock value is always live — no date range
   useEffect(() => {
-    api<StockValueReport>("/reports/stock-value/?outlet=1").then(setStock);
+    api<StockValueReport>("/reports/stock-value/").then(setStock);
   }, []);
 
   useEffect(() => {

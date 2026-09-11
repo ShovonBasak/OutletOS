@@ -7,11 +7,15 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     outlet_name = serializers.CharField(source="outlet.name", read_only=True, default=None)
+    organization_name = serializers.CharField(source="organization.name", read_only=True, default=None)
     avatar_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "name", "role", "outlet", "outlet_name", "phone", "is_active", "password", "avatar_url"]
+        fields = [
+            "id", "name", "role", "outlet", "outlet_name", "organization", "organization_name",
+            "phone", "is_active", "password", "avatar_url",
+        ]
 
     def get_avatar_url(self, obj):
         if not obj.avatar:
@@ -47,6 +51,8 @@ class RoleTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
         token["role"] = user.role
         token["name"] = user.name
+        token["organization_id"] = user.organization_id
+        token["organization_name"] = user.organization.name if user.organization_id else None
         return token
 
     def validate(self, attrs):

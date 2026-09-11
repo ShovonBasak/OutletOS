@@ -26,7 +26,7 @@ export default function OtherIncomePage() {
   const [catError, setCatError] = useState<string | null>(null);
 
   async function refreshEntries() {
-    const d = await api<Paginated<OtherIncome>>("/other-incomes/?outlet=1");
+    const d = await api<Paginated<OtherIncome>>("/other-incomes/");
     setEntries(d.results);
   }
 

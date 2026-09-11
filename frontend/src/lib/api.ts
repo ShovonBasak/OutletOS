@@ -3,6 +3,37 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api"
 const ACCESS_KEY = "cp_access";
 const REFRESH_KEY = "cp_refresh";
 const USER_KEY = "cp_user";
+const ADMIN_ORG_KEY = "cp_admin_org";
+
+/** The organization a platform admin (Role.ADMIN) has chosen to view/manage.
+ * OWNER/STAFF never set this — they only ever have one organization. */
+export function getSelectedOrgId(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(ADMIN_ORG_KEY);
+  if (!raw) return null;
+  try {
+    return (JSON.parse(raw) as { id: number }).id;
+  } catch {
+    return null;
+  }
+}
+
+export function getSelectedOrgName(): string | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(ADMIN_ORG_KEY);
+  if (!raw) return null;
+  try {
+    return (JSON.parse(raw) as { name: string | null }).name;
+  } catch {
+    return null;
+  }
+}
+
+export function setSelectedOrgId(id: number | null, name: string | null = null) {
+  if (typeof window === "undefined") return;
+  if (id == null) localStorage.removeItem(ADMIN_ORG_KEY);
+  else localStorage.setItem(ADMIN_ORG_KEY, JSON.stringify({ id, name }));
+}
 
 export function getAccess(): string | null {
   if (typeof window === "undefined") return null;
@@ -70,7 +101,17 @@ export async function api<T = unknown>(
   };
   if (access) headers.Authorization = `Bearer ${access}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  // A platform admin (Role.ADMIN) has no organization of their own; when
+  // they've picked one to view/manage, thread it onto every request so the
+  // backend's org-scoping mixin knows which tenant to filter to.
+  let finalPath = path;
+  const user = getStoredUser<{ role?: string }>();
+  const orgId = getSelectedOrgId();
+  if (user?.role === "ADMIN" && orgId != null && !/[?&]organization=/.test(path)) {
+    finalPath += (path.includes("?") ? "&" : "?") + `organization=${orgId}`;
+  }
+
+  const res = await fetch(`${API_BASE}${finalPath}`, { ...options, headers });
 
   if (res.status === 401 && retry) {
     const newAccess = await refreshAccess();

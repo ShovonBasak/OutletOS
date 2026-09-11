@@ -12,6 +12,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from accounts.views import UserViewSet, TeamUserViewSet, MeView, RoleTokenObtainPairView, ChangePasswordView, PushSubscriptionViewSet
 from catalog.views import (
+    OrganizationViewSet,
     OutletViewSet,
     ProductViewSet,
     ProductPriceViewSet,
@@ -76,6 +77,7 @@ router = DefaultRouter()
 router.register("users", UserViewSet)
 router.register("team-users", TeamUserViewSet, basename="team-users")
 router.register("push-subscriptions", PushSubscriptionViewSet, basename="push-subscriptions")
+router.register("organizations", OrganizationViewSet)
 router.register("outlets", OutletViewSet)
 router.register("products", ProductViewSet)
 router.register("product-prices", ProductPriceViewSet)

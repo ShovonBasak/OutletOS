@@ -156,8 +156,8 @@ export default function OwnerHome() {
     setData(null);
     try {
       const [d, pl] = await Promise.all([
-        api<DayOverview>(`/reports/day-overview/?outlet=1&date=${date}`),
-        api<PackagingLevel[]>(`/periodic-stock-checks/levels/?outlet=1`),
+        api<DayOverview>(`/reports/day-overview/?date=${date}`),
+        api<PackagingLevel[]>(`/periodic-stock-checks/levels/`),
       ]);
       setData(d);
       setPeriodicLevels(pl);

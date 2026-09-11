@@ -3,7 +3,29 @@ from decimal import Decimal
 from django.db import models
 
 
+class Organization(models.Model):
+    """A franchise account. The tenant root: every Outlet — and everything that
+    hangs off catalog data (Product, Ingredient) or finances — belongs to exactly
+    one Organization. Cross-organization access is reserved for the ADMIN
+    (platform-admin) role."""
+
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=120, unique=True)
+    address = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Outlet(models.Model):
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, related_name="outlets",
+    )
     name = models.CharField(max_length=120)
     address = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
@@ -34,6 +56,9 @@ class Product(models.Model):
     Selling price is version-tracked in ProductPrice — use active_price() to get
     the current value instead of a raw field on this model."""
 
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, related_name="products",
+    )
     name = models.CharField(max_length=120)
     category = models.CharField(max_length=80, blank=True)
     product_type = models.CharField(
@@ -101,6 +126,9 @@ class Ingredient(models.Model):
     thing you buy, regardless of what a supplier calls it. Stock (RawStock) and
     packs (PackDefinition) live here, not on Product."""
 
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, related_name="ingredients",
+    )
     name = models.CharField(max_length=120)
     # The countable unit recipes are written in — chosen for what's natural in a
     # recipe (e.g. "portion" for mayo, not "bottle"), so recipe lines stay whole.

@@ -6,7 +6,9 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from accounts.mixins import OrgScopedQuerySetMixin
 from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.scoping import resolve_outlet_param
 from catalog.models import Product
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
@@ -28,7 +30,7 @@ from .serializers import (
 from .services import recompute_closing
 
 
-class DailyClosingViewSet(viewsets.ModelViewSet):
+class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     # Full prefetch — used for detail/create/update actions.
     queryset = DailyClosing.objects.prefetch_related(
         "stock_counts__product__prices",
@@ -38,6 +40,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         "payments__account",
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
+    org_lookup = "outlet__organization"
 
     # Slim prefetch for list — drops heavy stock_count product nesting; still
     # fetches sales_lines/channel_discounts/payments for the financial rollup
@@ -57,10 +60,10 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         expand_full = self.request.query_params.get("expand") == "full"
         if self.action == "list" and not expand_full:
-            base = self._LIST_QUERYSET
+            base = self.scope_queryset(self._LIST_QUERYSET)
         else:
             base = super().get_queryset()
-        outlet = self.request.query_params.get("outlet")
+        outlet = resolve_outlet_param(self.request)
         if outlet:
             base = base.filter(outlet_id=outlet)
         date = self.request.query_params.get("date")
@@ -91,7 +94,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         """
         from datetime import date as date_cls
         from stock.models import OperatingDay, OperatingDayStatus
-        outlet = request.query_params.get("outlet", 1)
+        outlet = resolve_outlet_param(request)
 
         active_day = (
             OperatingDay.objects.filter(outlet_id=outlet)
@@ -123,11 +126,14 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         """
         from django.db.models import Sum
 
-        outlet = request.query_params.get("outlet")
+        outlet = resolve_outlet_param(request)
         date_from = request.query_params.get("date_from")
         date_to = request.query_params.get("date_to")
 
+        user = request.user
         lines_qs = DailyClosingSalesLine.objects.select_related("channel")
+        if not user.is_admin:
+            lines_qs = lines_qs.filter(daily_closing__outlet__organization_id=user.organization_id)
         if outlet:
             lines_qs = lines_qs.filter(daily_closing__outlet_id=outlet)
         if date_from:
@@ -146,6 +152,8 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         )
 
         discounts_qs = DailyChannelDiscount.objects.all()
+        if not user.is_admin:
+            discounts_qs = discounts_qs.filter(daily_closing__outlet__organization_id=user.organization_id)
         if outlet:
             discounts_qs = discounts_qs.filter(daily_closing__outlet_id=outlet)
         if date_from:
@@ -174,6 +182,10 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         return Response(result)
 
     def perform_create(self, serializer):
+        outlet = serializer.validated_data.get("outlet")
+        user = self.request.user
+        if outlet and not user.is_admin and outlet.organization_id != user.organization_id:
+            raise ValidationError("Outlet does not belong to your organization.")
         closing = serializer.save(staff=self.request.user)
         # Link to today's OperatingDay so the gated flow knows closing has begun.
         from stock.models import OperatingDay
@@ -554,7 +566,8 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         ).update(status=OperatingDayStatus.CLOSED)
 
 
-class ChannelSettlementViewSet(viewsets.ModelViewSet):
+class ChannelSettlementViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ChannelSettlement.objects.select_related("channel", "outlet")
     serializer_class = ChannelSettlementSerializer
     permission_classes = [IsOwnerOrAdminOrReadOnly]
+    org_lookup = "outlet__organization"

@@ -6,7 +6,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
 from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.scoping import resolve_organization_id
 from .models import (
     FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
     CapitalTransaction, AccountBalanceCheck,
@@ -19,7 +21,7 @@ from .serializers import (
 )
 
 
-class FinancialAccountViewSet(viewsets.ModelViewSet):
+class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
@@ -30,10 +32,10 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [IsAuthenticated()]
-        return [IsAdmin()]
+        return [IsOwnerOrAdmin()]
 
     def get_queryset(self):
-        qs = FinancialAccount.objects.all()
+        qs = self.scope_queryset(FinancialAccount.objects.all())
         # Detail actions (retrieve/update/destroy) must see all accounts so that
         # inactive accounts can be fetched and reactivated — only filter on list.
         if self.action != "list":
@@ -52,26 +54,31 @@ class FinancialAccountViewSet(viewsets.ModelViewSet):
         return qs
 
     def partial_update(self, request, *args, **kwargs):
-        # Enforce single primary-cash account: unset all others before saving.
+        # Enforce single primary-cash account: unset all others in the SAME
+        # organization before saving (never touch other tenants' accounts).
         if request.data.get("is_primary_cash"):
-            FinancialAccount.objects.exclude(pk=kwargs["pk"]).update(is_primary_cash=False)
+            account = self.get_object()
+            FinancialAccount.objects.filter(
+                organization=account.organization
+            ).exclude(pk=account.pk).update(is_primary_cash=False)
         return super().partial_update(request, *args, **kwargs)
 
     @action(detail=False, methods=["get"], permission_classes=[IsOwnerOrAdmin])
     def summary(self, request):
         """All active accounts with current balances — owner dashboard."""
-        accounts = FinancialAccount.objects.filter(is_active=True)
+        accounts = self.scope_queryset(FinancialAccount.objects.filter(is_active=True))
         data = FinancialAccountSerializer(accounts, many=True).data
         return Response(data)
 
 
-class AccountTransactionViewSet(viewsets.ModelViewSet):
+class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """
     Read/create for owner+admin; destroy restricted to admin only.
     Expense/transfer/capital actions auto-create their transactions elsewhere.
     """
     queryset = AccountTransaction.objects.select_related("account", "entered_by")
     serializer_class = AccountTransactionSerializer
+    org_lookup = "account__organization"
 
     def get_permissions(self):
         if self.action == "destroy":
@@ -95,10 +102,11 @@ class AccountTransactionViewSet(viewsets.ModelViewSet):
         serializer.save(entered_by=self.request.user, source_type="MANUAL")
 
 
-class AccountTransferViewSet(viewsets.ModelViewSet):
+class AccountTransferViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = AccountTransfer.objects.select_related("from_account", "to_account", "entered_by")
     serializer_class = AccountTransferSerializer
     permission_classes = [IsOwnerOrAdmin]
+    org_lookup = "from_account__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -139,10 +147,11 @@ class AccountTransferViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class CapitalTransactionViewSet(viewsets.ModelViewSet):
+class CapitalTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = CapitalTransaction.objects.select_related("account", "entered_by")
     serializer_class = CapitalTransactionSerializer
     permission_classes = [IsOwnerOrAdmin]
+    org_lookup = "account__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -175,10 +184,11 @@ class CapitalTransactionViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class AccountBalanceCheckViewSet(viewsets.ModelViewSet):
+class AccountBalanceCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = AccountBalanceCheck.objects.select_related("account", "checked_by")
     serializer_class = AccountBalanceCheckSerializer
     permission_classes = [IsOwnerOrAdmin]
+    org_lookup = "account__organization"
 
     def perform_create(self, serializer):
         account = serializer.validated_data["account"]
@@ -213,17 +223,19 @@ class StaffCashView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def _cash_account(self):
-        return FinancialAccount.objects.filter(is_primary_cash=True, is_active=True).first()
+    def _cash_account(self, request):
+        return FinancialAccount.objects.filter(
+            organization_id=resolve_organization_id(request), is_primary_cash=True, is_active=True
+        ).first()
 
     def get(self, request):
-        cash = self._cash_account()
+        cash = self._cash_account(request)
         if not cash:
             return Response({"error": "No primary cash account configured."}, status=404)
 
         others = (
             FinancialAccount.objects
-            .filter(is_active=True)
+            .filter(organization_id=resolve_organization_id(request), is_active=True)
             .exclude(pk=cash.pk)
             .values("id", "name", "account_type")
         )
@@ -237,7 +249,7 @@ class StaffCashView(APIView):
         })
 
     def post(self, request):
-        cash = self._cash_account()
+        cash = self._cash_account(request)
         if not cash:
             return Response({"error": "No primary cash account configured."}, status=404)
 
@@ -257,7 +269,9 @@ class StaffCashView(APIView):
             return Response({"error": "Transfer amount exceeds available cash balance."}, status=400)
 
         try:
-            to_account = FinancialAccount.objects.get(pk=to_id, is_active=True)
+            to_account = FinancialAccount.objects.get(
+                pk=to_id, organization_id=resolve_organization_id(request), is_active=True
+            )
         except FinancialAccount.DoesNotExist:
             return Response({"error": "Destination account not found."}, status=400)
 
@@ -311,7 +325,9 @@ class StaffCashHistoryView(APIView):
         from django.core.paginator import Paginator
         from .models import TransactionType
 
-        cash = FinancialAccount.objects.filter(is_primary_cash=True, is_active=True).first()
+        cash = FinancialAccount.objects.filter(
+            organization_id=resolve_organization_id(request), is_primary_cash=True, is_active=True
+        ).first()
         if not cash:
             return Response({"error": "No primary cash account configured."}, status=404)
 
@@ -362,7 +378,7 @@ class StaffCashHistoryView(APIView):
 
         others = list(
             FinancialAccount.objects
-            .filter(is_active=True)
+            .filter(organization_id=resolve_organization_id(request), is_active=True)
             .exclude(pk=cash.pk)
             .values("id", "name", "account_type")
         )
@@ -397,6 +413,9 @@ class AccountRoleAccessViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        org_param = self.request.query_params.get("organization")
+        if org_param:
+            qs = qs.filter(account__organization_id=org_param)
         role = self.request.query_params.get("role")
         if role:
             qs = qs.filter(role=role)

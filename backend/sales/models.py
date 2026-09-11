@@ -19,6 +19,9 @@ class CommissionBasis(models.TextChoices):
 
 
 class SalesChannel(models.Model):
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.PROTECT, related_name="sales_channels",
+    )
     name = models.CharField(max_length=60)
     commission_rate = models.DecimalField(max_digits=5, decimal_places=4, default=0)  # 0.20 = 20%
     settlement_type = models.CharField(
@@ -69,6 +72,9 @@ class DiscountType(models.TextChoices):
 class ChannelPromotion(models.Model):
     """Simple ongoing discount on regular (non-combo) items."""
 
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.CASCADE, related_name="channel_promotions",
+    )
     channel = models.ForeignKey(
         SalesChannel, null=True, blank=True, on_delete=models.CASCADE, related_name="promotions"
     )  # null = all channels
@@ -91,6 +97,9 @@ class ChannelPromotion(models.Model):
 class OrderLevelOffer(models.Model):
     """Reference-only. Threshold deals can't be computed from daily aggregates."""
 
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.CASCADE, related_name="order_level_offers",
+    )
     channel = models.ForeignKey(
         SalesChannel, null=True, blank=True, on_delete=models.CASCADE, related_name="order_offers"
     )

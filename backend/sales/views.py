@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
 from accounts.permissions import IsAdminOrReadOnly
 from catalog.models import Product
 from .models import (
@@ -36,7 +37,7 @@ def _recompute_channel_lines(channel):
     return count
 
 
-class SalesChannelViewSet(viewsets.ModelViewSet):
+class SalesChannelViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
     permission_classes = [IsAdminOrReadOnly]
@@ -62,22 +63,23 @@ class SalesChannelViewSet(viewsets.ModelViewSet):
         return Response({"recomputed": count})
 
 
-class ChannelPromotionViewSet(viewsets.ModelViewSet):
+class ChannelPromotionViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = ChannelPromotion.objects.all()
     serializer_class = ChannelPromotionSerializer
     permission_classes = [IsAdminOrReadOnly]
 
 
-class OrderLevelOfferViewSet(viewsets.ModelViewSet):
+class OrderLevelOfferViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = OrderLevelOffer.objects.all()
     serializer_class = OrderLevelOfferSerializer
     permission_classes = [IsAdminOrReadOnly]
 
 
-class ChannelMenuMapViewSet(viewsets.ModelViewSet):
+class ChannelMenuMapViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ChannelMenuMap.objects.select_related("channel", "product")
     serializer_class = ChannelMenuMapSerializer
     permission_classes = [IsAdminOrReadOnly]
+    org_lookup = "channel__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -96,5 +98,11 @@ def price_resolve(request):
         channel = SalesChannel.objects.get(pk=request.query_params["channel"])
     except (KeyError, Product.DoesNotExist, SalesChannel.DoesNotExist):
         return Response({"detail": "product and channel query params required."}, status=400)
+    user = request.user
+    if not user.is_admin and (
+        product.organization_id != user.organization_id
+        or channel.organization_id != user.organization_id
+    ):
+        return Response({"detail": "Not found."}, status=404)
     price, basis = resolve_price(product, channel)
     return Response({"product": product.id, "channel": channel.id, "price": price, "basis": basis})

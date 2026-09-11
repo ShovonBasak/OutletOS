@@ -17,6 +17,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.scoping import resolve_outlet_param
 from catalog.models import Outlet, Product, ProductType, TrackingMode
 from closing.models import (
     ChannelSettlement,
@@ -326,7 +327,7 @@ def compute_pnl(start, end, outlet=None):
 def pnl_report(request):
     """?start=&end=&outlet= — accrual P&L per the data-model formulas."""
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
     return Response(compute_pnl(start, end, outlet))
 
 
@@ -335,7 +336,7 @@ def pnl_report(request):
 def settlement_report(request):
     """Settlement variance per channel/period for DIRECT_TO_ACCOUNT channels."""
     qs = ChannelSettlement.objects.select_related("channel")
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
     if outlet:
         qs = qs.filter(outlet_id=outlet)
     rows = []
@@ -364,7 +365,7 @@ def packaging_report(request):
     item's own trailing baseline is a signal to investigate, not proof of misuse.
     """
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     total_units_sold = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
@@ -415,7 +416,7 @@ def product_performance(request):
     """Per-product: units sold, gross revenue, net revenue, recipe COGS, gross profit, margin %.
     ?start=&end=&outlet= (range capped at MAX_RANGE_DAYS)"""
     start, end, range_clamped = _clamped_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start,
@@ -481,7 +482,7 @@ def product_performance(request):
 def channel_breakdown(request):
     """Revenue by sales channel: qty, gross, commission, net. ?start=&end=&outlet="""
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start,
@@ -540,7 +541,7 @@ def channel_breakdown(request):
 def stock_value(request):
     """Current raw stock on hand valued at latest ingredient cost. ?outlet="""
     from stock.models import RawStock
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     qs = RawStock.objects.select_related("ingredient").filter(quantity_available__gt=0)
     if outlet:
@@ -577,7 +578,7 @@ def daily_trend(request):
     """Day-by-day revenue and gross profit for a period. ?start=&end=&outlet="""
     from django.db.models import Sum
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start,
@@ -608,7 +609,7 @@ def dashboard_summary(request):
     ?start=YYYY-MM-DD&end=YYYY-MM-DD&outlet=1  (default: last 30 days)
     """
     from datetime import date as date_cls, timedelta
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
     today_d = timezone.localdate()
 
     end_d = date_cls.fromisoformat(request.query_params["end"]) if request.query_params.get("end") else today_d
@@ -719,7 +720,7 @@ def sell_history(request):
     Returns { dates: [...], rows: [...], range_clamped: bool }
     """
     start, end, range_clamped = _clamped_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     lines = (
         DailyClosingSalesLine.objects
@@ -787,7 +788,7 @@ def stock_in_history(request):
     Returns { dates: [...], rows: [...], range_clamped: bool }
     """
     start, end, range_clamped = _clamped_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     items = (
         StockInItem.objects
@@ -868,7 +869,7 @@ def daily_sells(request):
     app_sold = total from non-walk-in channels (floor for corrections).
     """
     from datetime import date as date_cls
-    outlet_id = request.query_params.get("outlet", "1")
+    outlet_id = resolve_outlet_param(request)
     date_str = request.query_params.get("date")
     if not date_str:
         return Response({"error": "date required"}, status=400)
@@ -924,7 +925,7 @@ def correct_sells(request):
     Adjusts walk-in DailyClosingSalesLine, syncs PrepLog, applies RawStock delta.
     """
     from datetime import date as date_cls
-    outlet_id = int(request.data.get("outlet", 1))
+    outlet_id = int(resolve_outlet_param(request, source="data"))
     date_str = request.data.get("date")
     corrections = request.data.get("corrections", [])
 
@@ -1066,7 +1067,7 @@ def shrinkage_detail(request):
     ?start=&end=&outlet=
     """
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     checks = (
         DayStartStockCheck.objects
@@ -1120,7 +1121,7 @@ def purchase_summary(request):
     ?start=&end=&outlet=
     """
     start, end = _default_range(request)
-    outlet = request.query_params.get("outlet")
+    outlet = resolve_outlet_param(request)
 
     records = (
         StockInRecord.objects
@@ -1296,7 +1297,7 @@ def _do_rebuild(outlet: Outlet) -> dict:
 @permission_classes([IsAuthenticated])
 def rebuild_rawstock_api(request):
     """Full RawStock rebuild from all historical data. Body: {outlet: 1}"""
-    outlet_id = int(request.data.get("outlet", 1))
+    outlet_id = int(resolve_outlet_param(request, source="data"))
     try:
         outlet = Outlet.objects.get(id=outlet_id)
     except Outlet.DoesNotExist:
@@ -1320,7 +1321,7 @@ def day_overview(request):
     from catalog.models import Recipe
     from catalog.utils import build_ingredient_category_map, build_ingredient_product_map, resolve_ingredient_group
 
-    outlet = request.query_params.get("outlet", "1")
+    outlet = resolve_outlet_param(request)
     date_str = request.query_params.get("date")
     try:
         date = datetime.date.fromisoformat(date_str) if date_str else timezone.localdate()

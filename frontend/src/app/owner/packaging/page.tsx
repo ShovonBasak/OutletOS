@@ -23,7 +23,7 @@ export default function PackagingReportPage() {
 
   useEffect(() => {
     const { start, end } = rangeFor(period);
-    api<PackagingReport>(`/reports/packaging/?outlet=1&start=${start}&end=${end}`).then(setReport);
+    api<PackagingReport>(`/reports/packaging/?start=${start}&end=${end}`).then(setReport);
   }, [period]);
 
   return (

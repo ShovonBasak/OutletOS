@@ -38,6 +38,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     name = models.CharField(max_length=120)
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.STAFF)
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    # nullable only for ADMIN (platform admin, cross-organization). OWNER/STAFF
+    # always belong to exactly one Organization.
+    organization = models.ForeignKey(
+        "catalog.Organization", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="users",
+    )
     # nullable for OWNER (may oversee multiple outlets); set for STAFF.
     outlet = models.ForeignKey(
         "catalog.Outlet", null=True, blank=True, on_delete=models.SET_NULL, related_name="users"

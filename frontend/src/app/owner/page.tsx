@@ -381,7 +381,7 @@ export default function OwnerDashboard() {
     setAllProducts(null);
     setProdExpanded(false);
     try {
-      const d = await api<DashboardData>(`/reports/dashboard/?outlet=1&start=${range.start}&end=${range.end}`);
+      const d = await api<DashboardData>(`/reports/dashboard/?start=${range.start}&end=${range.end}`);
       setData(d);
     } finally {
       setLoading(false);
@@ -392,7 +392,7 @@ export default function OwnerDashboard() {
     if (allProducts) { setProdExpanded(true); return; }
     setProdExpandLoading(true);
     try {
-      const q = `outlet=1&start=${range.start}&end=${range.end}`;
+      const q = `start=${range.start}&end=${range.end}`;
       const res = await api<ProductPerformanceResponse>(`/reports/product-performance/?${q}`);
       setAllProducts(res.rows.map(r => ({
         product_name: r.product_name,

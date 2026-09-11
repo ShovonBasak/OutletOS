@@ -27,7 +27,7 @@ export default function SettlementsPage() {
   const [rows, setRows] = useState<SettlementRow[]>([]);
 
   useEffect(() => {
-    api<SettlementRow[]>("/reports/settlements/?outlet=1").then(setRows).catch(() => setRows([]));
+    api<SettlementRow[]>("/reports/settlements/").then(setRows).catch(() => setRows([]));
   }, []);
 
   return (

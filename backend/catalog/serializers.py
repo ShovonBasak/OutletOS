@@ -6,6 +6,7 @@ from rest_framework import serializers
 from .models import (
     ComboComponent,
     Ingredient,
+    Organization,
     Outlet,
     PackDefinition,
     Product,
@@ -14,6 +15,15 @@ from .models import (
     RecipeProductComponent,
     SupplierProductAlias,
 )
+
+
+class OrganizationSerializer(serializers.ModelSerializer):
+    outlet_count = serializers.IntegerField(source="outlets.count", read_only=True)
+
+    class Meta:
+        model = Organization
+        fields = ["id", "name", "slug", "address", "is_active", "created_at", "outlet_count"]
+        read_only_fields = ["created_at"]
 
 
 class OutletSerializer(serializers.ModelSerializer):

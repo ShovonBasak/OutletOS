@@ -10,6 +10,9 @@ class CostType(models.TextChoices):
 
 
 class CostCategory(models.Model):
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.PROTECT, related_name="cost_categories",
+    )
     name = models.CharField(max_length=80)
     cost_type = models.CharField(max_length=10, choices=CostType.choices)
 

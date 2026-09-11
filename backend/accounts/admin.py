@@ -9,7 +9,7 @@ from .models import User
 class PhoneUserCreationForm(UserCreationForm):
     class Meta:
         model = User
-        fields = ("phone", "name", "role", "outlet")
+        fields = ("phone", "name", "role", "organization", "outlet")
 
 
 class PhoneUserChangeForm(UserChangeForm):
@@ -23,19 +23,19 @@ class UserAdmin(BaseUserAdmin):
     form = PhoneUserChangeForm
     add_form = PhoneUserCreationForm
 
-    list_display = ["name", "phone", "role", "outlet", "is_active"]
-    list_filter = ["role", "is_active"]
+    list_display = ["name", "phone", "role", "organization", "outlet", "is_active"]
+    list_filter = ["role", "organization", "is_active"]
     search_fields = ["name", "phone"]
     ordering = ["phone"]
 
     fieldsets = (
         (None, {"fields": ("phone", "password")}),
-        ("Personal info", {"fields": ("name", "role", "outlet")}),
+        ("Personal info", {"fields": ("name", "role", "organization", "outlet")}),
         ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser")}),
     )
     add_fieldsets = (
         (None, {
             "classes": ("wide",),
-            "fields": ("phone", "name", "role", "outlet", "password1", "password2"),
+            "fields": ("phone", "name", "role", "organization", "outlet", "password1", "password2"),
         }),
     )

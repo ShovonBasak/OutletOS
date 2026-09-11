@@ -74,6 +74,7 @@ export const OWNER_NAV: NavGroup[] = [
     items: [
       { href: "/owner/products",                         label: "Products & recipes" },
       { href: "/owner/settings/account-access",          label: "Account access" },
+      { href: "/owner/organizations",                    label: "Organizations" },
     ],
   },
   // Setup group — Admin only

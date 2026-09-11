@@ -48,7 +48,7 @@ export default function StockInHistoryPage() {
     setLoading(true);
     try {
       const res = await api<StockInHistoryResponse>(
-        `/reports/stock-in-history/?outlet=1&start=${start}&end=${end}`
+        `/reports/stock-in-history/?start=${start}&end=${end}`
       );
       setData(res);
     } finally {
