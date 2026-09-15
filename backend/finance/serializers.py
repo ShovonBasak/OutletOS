@@ -1,4 +1,3 @@
-from django.db.models import Sum
 from rest_framework import serializers
 
 from .models import (
@@ -8,7 +7,7 @@ from .models import (
 
 
 class FinancialAccountSerializer(serializers.ModelSerializer):
-    current_balance = serializers.SerializerMethodField()
+    current_balance = serializers.ReadOnlyField()
     account_type_display = serializers.CharField(source="get_account_type_display", read_only=True)
 
     class Meta:
@@ -18,10 +17,6 @@ class FinancialAccountSerializer(serializers.ModelSerializer):
             "opening_balance", "opening_balance_date", "is_active", "is_primary_cash",
             "current_balance",
         ]
-
-    def get_current_balance(self, obj):
-        txn_sum = obj.transactions.aggregate(total=Sum("amount"))["total"] or 0
-        return str(obj.opening_balance + txn_sum)
 
 
 class FinancialAccountNameSerializer(serializers.ModelSerializer):
@@ -36,14 +31,32 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
     transaction_type_display = serializers.CharField(source="get_transaction_type_display", read_only=True)
 
+    # Fields locked once a transaction is posted — real accounting software
+    # doesn't edit posted ledger entries in place (that would require
+    # re-cascading every later balance); correct a mistake by deleting and
+    # re-entering instead. Only `note` stays freely editable.
+    LOCKED_FIELDS = ("account", "amount", "date", "transaction_type")
+
     class Meta:
         model = AccountTransaction
         fields = [
             "id", "account", "account_name", "transaction_type", "transaction_type_display",
             "amount", "date", "source_type", "source_id",
             "entered_by", "entered_by_name", "note",
+            "balance_before", "balance_after", "created_at",
         ]
-        read_only_fields = ["entered_by"]
+        read_only_fields = ["entered_by", "balance_before", "balance_after", "created_at"]
+
+    def update(self, instance, validated_data):
+        changed = [
+            f for f in self.LOCKED_FIELDS
+            if f in validated_data and validated_data[f] != getattr(instance, f)
+        ]
+        if changed:
+            raise serializers.ValidationError({
+                f: "Locked after posting — delete and re-create instead of editing." for f in changed
+            })
+        return super().update(instance, validated_data)
 
 
 class AccountTransferSerializer(serializers.ModelSerializer):

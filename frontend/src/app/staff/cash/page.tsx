@@ -12,6 +12,8 @@ interface Transaction {
   transaction_type_display: string;
   amount: string;
   date: string;
+  balance_before: string;
+  balance_after: string;
   source_type: string;
   note: string;
   category_name: string | null;
@@ -297,11 +299,16 @@ export default function CashHistoryPage() {
                     )}
                   </div>
 
-                  <p
-                    className={`shrink-0 font-mono text-sm font-bold tabular-nums ${amtColor(t.amount)}`}
-                  >
-                    {fmtAmount(t.amount)}
-                  </p>
+                  <div className="shrink-0 text-right">
+                    <p
+                      className={`font-mono text-sm font-bold tabular-nums ${amtColor(t.amount)}`}
+                    >
+                      {fmtAmount(t.amount)}
+                    </p>
+                    <p className="font-mono text-[9px] text-ink-soft/70 tabular-nums">
+                      bal {bdt(t.balance_after)}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>

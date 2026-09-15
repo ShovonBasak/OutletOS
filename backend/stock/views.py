@@ -468,7 +468,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         Accepts optional paid_from_account in request body to override the account.
         """
         from django.db import IntegrityError, transaction
-        from finance.models import AccountTransaction
+        from finance import services as finance_services
         from decimal import Decimal
 
         record = self.get_object()
@@ -504,14 +504,10 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 )
             )
             if total > 0:
-                AccountTransaction.objects.create(
-                    account=record.paid_from_account,
-                    transaction_type="SUPPLIER_ORDER_DEDUCTION",
-                    amount=-total,
-                    date=record.stock_in_date,
-                    source_type="STOCK_IN_RECORD",
-                    source_id=record.id,
-                    entered_by=request.user,
+                finance_services.post_transaction(
+                    account=record.paid_from_account, transaction_type="SUPPLIER_ORDER_DEDUCTION",
+                    amount=-total, date=record.stock_in_date, entered_by=request.user,
+                    source_type="STOCK_IN_RECORD", source_id=record.id,
                     note=f"Stock-in {record.invoice_number or f'#{record.id}'} approved",
                 )
 
