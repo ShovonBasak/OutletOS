@@ -398,6 +398,15 @@ _HISTORIC_STOCKIN_SCHEMA = {
                         "nullable": True,
                         "description": "VAT amount for this line (BDT). Null if not present.",
                     },
+                    "discount": {
+                        "type": "number",
+                        "nullable": True,
+                        "description": (
+                            "Per-line discount amount in BDT, when the slip shows one — "
+                            "some product categories (e.g. beverages) carry a Discount "
+                            "column instead of SD/VAT. Null if no discount column/value."
+                        ),
+                    },
                     "line_total": {
                         "type": "number",
                         "nullable": True,
@@ -417,22 +426,29 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
         "You read a photographed supplier tax invoice / delivery slip and extract structured data.\n\n"
         "INVOICE HEADER:\n"
         "- invoice_number: the invoice/challan reference exactly as printed (e.g. 'INV-001/6419/0826'); null if absent\n"
-        "- date: invoice/delivery date as YYYY-MM-DD; use the invoice date, not expiry dates; null if absent\n\n"
+        "- date: invoice/delivery date, converted to ISO YYYY-MM-DD; null if absent. "
+        "IMPORTANT — dates printed on these slips use DAY-MONTH-YEAR order (DD-MM-YYYY or "
+        "DD/MM/YYYY), NOT month-day-year. For example '03-04-2026' printed on the slip means "
+        "3 April 2026 (day=3, month=4), and must be returned as '2026-04-03' — never "
+        "'2026-03-04'. Use the invoice date, not expiry dates.\n\n"
         "INVOICE COLUMN LAYOUT (CP Bangladesh tax invoices):\n"
         "  No. | Product/Service Name | Qty | Unit | Per Unit Price | Total Amount | "
-        "SD Rate | SD Amount | VAT Rate | VAT Amount | Total Value incl. VAT & Tax\n\n"
+        "Discount | SD Rate | SD Amount | VAT Rate | VAT Amount | Total Value incl. VAT & Tax\n"
+        "  (Discount is common on beverage lines instead of SD/VAT; most other lines have no "
+        "Discount column at all.)\n\n"
         "EXTRACTION RULES:\n"
         "- raw_text: product/service name exactly as printed\n"
         "- quantity: the Qty column value (decimal, e.g. 2.00 not 200)\n"
         "- unit: PACK if counting whole packs/cartons/bags; PIECE if individual units\n"
         "- rate: Per Unit Price column — cost per unit BEFORE any tax (BDT)\n"
         "- total_amount: Total Amount column — pre-tax subtotal = quantity × rate (BDT)\n"
+        "- discount: Discount column value in BDT, if the slip has one for this line; null otherwise\n"
         "- sd_rate: SD Rate column percentage (e.g. 0 or 10); null if column absent\n"
         "- sd_amount: SD Amount column value in BDT; null if column absent\n"
         "- vat_rate: VAT Rate column percentage (e.g. 15); null if column absent\n"
         "- vat_amount: VAT Amount column value in BDT; null if column absent\n"
         "- line_total: 'Total Value incl. VAT & Tax' column — AFTER-TAX total for this line (BDT); "
-        "verify: line_total ≈ total_amount + sd_amount + vat_amount\n\n"
+        "verify: line_total ≈ total_amount − discount + sd_amount + vat_amount\n\n"
         "SLIP TOTALS:\n"
         "- subtotal: slip-level pre-tax subtotal (BDT)\n"
         "- vat_total: total VAT on the slip (BDT)\n"
@@ -447,9 +463,11 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
         "Read the attached tax invoice / delivery slip and extract all structured data.\n\n"
         "Return:\n"
         "1. Invoice number/reference (exactly as printed, or null)\n"
-        "2. Invoice/delivery date (ISO YYYY-MM-DD, or null)\n"
+        "2. Invoice/delivery date as ISO YYYY-MM-DD — remember the slip prints dates as "
+        "DD-MM-YYYY (day before month), so convert accordingly rather than assuming "
+        "month-first; or null\n"
         "3. Every product line — raw text, quantity, unit, rate (pre-tax per unit), "
-        "total_amount (pre-tax subtotal), sd_rate, sd_amount, vat_rate, vat_amount, "
+        "total_amount (pre-tax subtotal), discount, sd_rate, sd_amount, vat_rate, vat_amount, "
         "line_total (after-tax total), and matched catalog ingredient name\n"
         "4. Slip totals: subtotal (pre-tax), vat_total, grand_total (after tax)\n\n"
         f"Our ingredient catalog: {known}\n\n"
@@ -501,6 +519,7 @@ def verify_and_correct(parsed: dict, tolerance: float = 0.05) -> dict:
         qty = _num(item.get("quantity"))
         rate = _num(item.get("rate"))
         total_amount = _num(item.get("total_amount"))
+        discount = _num(item.get("discount"))
         sd_amount = _num(item.get("sd_amount"))
         vat_amount = _num(item.get("vat_amount"))
         line_total = _num(item.get("line_total"))
@@ -517,9 +536,11 @@ def verify_and_correct(parsed: dict, tolerance: float = 0.05) -> dict:
         if total_amount is None and qty and rate:
             total_amount = round(qty * rate, 2)
 
-        # 3. Backfill after-tax line total.
+        # 3. Backfill after-tax line total: total − discount + SD + VAT (per the
+        # model's documented formula — discount applies instead of/alongside SD/VAT
+        # on some lines, e.g. beverages).
         if line_total is None and total_amount is not None:
-            line_total = round(total_amount + (sd_amount or 0) + (vat_amount or 0), 2)
+            line_total = round(total_amount - (discount or 0) + (sd_amount or 0) + (vat_amount or 0), 2)
 
         # 4. unit_price = after-tax total ÷ qty (what the model stores).
         unit_price = round(line_total / qty, 4) if (line_total and qty and qty > 0) else None
@@ -527,14 +548,15 @@ def verify_and_correct(parsed: dict, tolerance: float = 0.05) -> dict:
         # 5. Flag residual inconsistencies for staff review.
         if total_amount is not None and sd_amount is not None and vat_amount is not None \
                 and line_total is not None:
-            if not _close(total_amount + sd_amount + vat_amount, line_total):
-                flags.append("line_total ≠ total_amount + sd + vat")
+            if not _close(total_amount - (discount or 0) + sd_amount + vat_amount, line_total):
+                flags.append("line_total ≠ total_amount − discount + sd + vat")
         if qty is not None and qty <= 0:
             flags.append("quantity is zero or negative")
 
         item["quantity"] = qty
         item["rate"] = rate
         item["total_amount"] = total_amount
+        item["discount"] = discount
         item["line_total"] = line_total
         item["unit_price"] = unit_price
         item["flags"] = flags
@@ -616,7 +638,9 @@ def extract_historic_prep_log(images: list[bytes], known_products: list[str]) ->
     system = (
         "You are a preparation log assistant for CP Five Star, a fried-chicken outlet in Dhaka, Bangladesh. "
         "You read a handwritten or printed preparation/production log slip and extract:\n"
-        "1. The date of preparation\n"
+        "1. The date of preparation — written as DAY-MONTH-YEAR (DD-MM-YYYY or DD/MM/YYYY), "
+        "NOT month-day-year. E.g. '05-11-2026' written on the slip means 5 November 2026 "
+        "(day=5, month=11), and must be returned as '2026-11-05', never '2026-05-11'.\n"
         "2. Each product prepared, how many pieces, and whether freshly made or carried forward from the previous day\n\n"
         "MATCHING RULES:\n"
         "- Match product names by meaning: '3pc Crispy' → 'Crispy Chicken 3pc'\n"
@@ -628,7 +652,8 @@ def extract_historic_prep_log(images: list[bytes], known_products: list[str]) ->
     known = ", ".join(sorted(known_products)) or "(none yet)"
     instruction = (
         "Read the attached preparation log slip. Extract:\n"
-        "1. The preparation date (ISO YYYY-MM-DD)\n"
+        "1. The preparation date as ISO YYYY-MM-DD — remember the slip writes dates "
+        "DD-MM-YYYY (day before month), so convert accordingly, not month-first\n"
         "2. Each prepared product — raw text, pieces prepared, matched product name, and FRESH or CARRIED_FORWARD\n\n"
         f"Our product catalog: {known}\n\n"
         "Do not skip any product line."

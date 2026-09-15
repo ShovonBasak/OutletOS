@@ -50,6 +50,8 @@ from .services import (
     carry_forward_candidates,
     consume_for_preparation,
     get_or_create_today,
+    merge_duplicate_stock_in_lines,
+    reconcile_backdated_stock_in,
     restock_from_preparation,
     stock_in_since,
 )
@@ -215,8 +217,10 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         if record_update_fields:
             record.save(update_fields=record_update_fields)
 
+        raw_items, merge_warnings = merge_duplicate_stock_in_lines(result.get("items", []))
+
         lines: list[ExtractedLine] = []
-        for item in result.get("items", []):
+        for item in raw_items:
             matched_name = item.get("matched_ingredient")
             ingredient_id = None
             pack_definition_id = None
@@ -235,6 +239,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 unit_captured=item.get("unit", "PACK"),
                 rate=item.get("rate"),
                 total_amount=item.get("total_amount"),
+                discount=item.get("discount"),
                 sd_rate=item.get("sd_rate"),
                 sd_amount=item.get("sd_amount"),
                 vat_rate=item.get("vat_rate"),
@@ -245,6 +250,13 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
         record.items.filter(source=LineSource.SLIP_EXTRACTED).delete()
         for line in lines:
+            # Noise filter: a resolved line with no usable quantity and no raw
+            # text is virtually always an OCR misread of a header/blank row,
+            # not a real delivery line.
+            if (line.ingredient_id is not None
+                    and not (line.extracted_quantity or 0) > 0
+                    and not line.raw_text.strip()):
+                continue
             StockInItem.objects.create(
                 stock_in_record=record,
                 ingredient_id=line.ingredient_id,
@@ -256,6 +268,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 confirmed_quantity=line.extracted_quantity or Decimal("0"),
                 rate=_dec(line.rate),
                 total_amount=_dec(line.total_amount),
+                discount=_dec(line.discount),
                 sd_rate=_dec(line.sd_rate),
                 sd_amount=_dec(line.sd_amount),
                 vat_rate=_dec(line.vat_rate),
@@ -266,6 +279,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         record = self.get_queryset().get(pk=record.pk)
         data = self.get_serializer(record).data
         data["extracted_count"] = len(lines)
+        data["merge_warnings"] = merge_warnings
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="resolve-line")
@@ -334,6 +348,11 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         record = self.get_object()
         if record.status != StockInStatus.DRAFT:
             raise ValidationError("Only DRAFT records can be submitted.")
+        if record.stock_in_date > timezone.localdate():
+            raise ValidationError(
+                f"Stock-in date {record.stock_in_date} is in the future — likely a "
+                "date entry/OCR mistake. Correct it before submitting."
+            )
         unresolved = record.unresolved_lines
         if unresolved:
             raise ValidationError(
@@ -374,6 +393,72 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         record.save(update_fields=["stock_in_date"])
         return Response(self.get_serializer(record).data)
 
+    def _lock_and_transition_to_approved(self, record, request):
+        """Locks the row, re-validates, adjusts RawStock, and flips PENDING →
+        APPROVED — all inside one transaction. Split out of `approve()` so the
+        lock's scope is obvious: everything with real side effects happens
+        inside it, and nothing after it needs the lock held."""
+        from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
+
+        with transaction.atomic():
+            record = StockInRecord.objects.select_for_update().get(pk=record.pk)
+
+            # Re-check inside the lock: two near-simultaneous approve requests
+            # (double-click, a retried request) can both pass an earlier,
+            # unlocked status check before either commits — both would then run
+            # the RawStock-adjustment loop below and double-count the delivery.
+            if record.status != StockInStatus.PENDING:
+                raise ValidationError("Only PENDING records can be approved.")
+
+            # Scoped to (outlet, invoice_number, stock_in_date) — CP Bangladesh
+            # invoice numbers recur across genuinely different deliveries (seen
+            # in real data, ~2 weeks apart), so invoice_number alone isn't a
+            # reliable duplicate signal; pairing it with the date is.
+            duplicate = StockInRecord.objects.filter(
+                outlet=record.outlet,
+                invoice_number=record.invoice_number,
+                stock_in_date=record.stock_in_date,
+                status=StockInStatus.APPROVED,
+            ).exclude(pk=record.pk).exclude(invoice_number="").first()
+            if record.invoice_number and duplicate:
+                raise ValidationError(
+                    f"Invoice '{record.invoice_number}' dated {record.stock_in_date} is "
+                    f"already approved as stock-in #{duplicate.pk}. If this is genuinely "
+                    "a different delivery, correct the invoice number or date first."
+                )
+
+            account_id = request.data.get("paid_from_account")
+            if account_id is not None:
+                from finance.models import FinancialAccount
+                try:
+                    record.paid_from_account = FinancialAccount.objects.get(pk=account_id) if account_id else None
+                except FinancialAccount.DoesNotExist:
+                    raise ValidationError("Invalid account.")
+
+            for item in record.items.select_related("ingredient", "pack_definition"):
+                if not item.ingredient_id:
+                    continue
+                if item.ingredient.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
+                    continue  # ONE_TIME: cost audit only; PERIODIC_COUNT: tracked via periodic checks
+                RawStock.adjust(record.outlet, item.ingredient, item.base_unit_quantity())
+
+                if (item.pack_definition_id
+                        and item.unit_captured == UnitCaptured.PACK
+                        and item.confirmed_quantity):
+                    cost = _effective_cost_per_pack(
+                        item.unit_price, item.line_total, item.confirmed_quantity
+                    )
+                    if cost:
+                        update_pack_definition_cost(
+                            item.pack_definition_id, cost, record.stock_in_date
+                        )
+
+            record.status = StockInStatus.APPROVED
+            record.reviewed_by = request.user
+            record.reviewed_at = timezone.now()
+            record.save()
+        return record
+
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def approve(self, request, pk=None):
         """Owner approves PENDING → APPROVED; RawStock increments (base units).
@@ -382,44 +467,33 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         from the slip so that future COGS calculations use the current purchase cost.
         Accepts optional paid_from_account in request body to override the account.
         """
-        from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
-        from finance.models import AccountTransaction, FinancialAccount
+        from django.db import IntegrityError, transaction
+        from finance.models import AccountTransaction
         from decimal import Decimal
 
         record = self.get_object()
-        if record.status != StockInStatus.PENDING:
-            raise ValidationError("Only PENDING records can be approved.")
+        try:
+            record = self._lock_and_transition_to_approved(record, request)
+        except IntegrityError:
+            # Belt-and-suspenders: the row lock above protects against
+            # re-approving the SAME record twice, but not two DIFFERENT records
+            # that both carry the same invoice number approved in the same
+            # instant — uniq_approved_invoice_per_outlet is the actual backstop
+            # for that race, and lands here as an IntegrityError.
+            raise ValidationError(
+                "This invoice number is already approved for this outlet "
+                "(a concurrent approval won the race) — refresh and check."
+            )
 
-        # Allow owner to override or set the payment account at approval time.
-        account_id = request.data.get("paid_from_account")
-        if account_id is not None:
+        # Outside the lock: cascades a correction to any already-confirmed later
+        # day's Day-Start Stock Check / RawStock / closing when this slip is dated
+        # for an earlier day (the "late slip" pattern) — a no-op otherwise.
+        for w in reconcile_backdated_stock_in(record):
             try:
-                record.paid_from_account = FinancialAccount.objects.get(pk=account_id) if account_id else None
-            except FinancialAccount.DoesNotExist:
-                raise ValidationError("Invalid account.")
-
-        for item in record.items.select_related("ingredient", "pack_definition"):
-            if not item.ingredient_id:
-                continue
-            if item.ingredient.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
-                continue  # ONE_TIME: cost audit only; PERIODIC_COUNT: tracked via periodic checks
-            RawStock.adjust(record.outlet, item.ingredient, item.base_unit_quantity())
-
-            if (item.pack_definition_id
-                    and item.unit_captured == UnitCaptured.PACK
-                    and item.confirmed_quantity):
-                cost = _effective_cost_per_pack(
-                    item.unit_price, item.line_total, item.confirmed_quantity
-                )
-                if cost:
-                    update_pack_definition_cost(
-                        item.pack_definition_id, cost, record.stock_in_date
-                    )
-
-        record.status = StockInStatus.APPROVED
-        record.reviewed_by = request.user
-        record.reviewed_at = timezone.now()
-        record.save()
+                from accounts.push import send_push_to_owners
+                send_push_to_owners(title="Stock-in needs review", body=w, url="/owner/stock-in")
+            except Exception:
+                pass
 
         # Deduct from the payment account if one is set.
         if record.paid_from_account_id:

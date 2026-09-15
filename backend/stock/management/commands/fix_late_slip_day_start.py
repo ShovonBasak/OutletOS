@@ -5,6 +5,14 @@ Stock Check had already been confirmed (the "late slip" pattern — physically
 delivered/attributed to the previous day, but logged into the system after the
 next day's check was already done).
 
+NOTE: as of the fix for this incident, StockInRecordViewSet.approve() and
+historic_import.import_stock_in_slip() both call
+stock.services.reconcile_backdated_stock_in() automatically right after
+approval, so *new* occurrences of this pattern self-correct without needing
+this command. This command remains as a manual backfill tool for records
+approved before that hook existed, and for cascading a fix across multiple
+days at once from the CLI.
+
 This is an ABSOLUTE recomputation, not an incremental adjustment — every value is
 derived fresh from immutable ledger data (approved StockInItem rows, PreparationLog
 consumption, DailyClosingSalesLine sales) each run, and every field is SET rather

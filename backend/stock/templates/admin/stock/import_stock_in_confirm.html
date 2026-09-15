@@ -202,7 +202,7 @@
         <input type="checkbox" name="item_${i}_${j}_include" ${item.ingredient_id ? 'checked' : ''}>
         <span class="raw-text">
           ${item.raw_text}
-          ${item.rate || item.total_amount ? `<br><small style="color:#888;">rate=${item.rate||'—'} · pre-tax total=${item.total_amount||'—'} · vat=${item.vat_amount||'—'} · after-tax=${item.line_total||'—'} ${qtyMath}</small>` : ''}
+          ${item.rate || item.total_amount ? `<br><small style="color:#888;">rate=${item.rate||'—'} · pre-tax total=${item.total_amount||'—'} · discount=${item.discount||'—'} · vat=${item.vat_amount||'—'} · after-tax=${item.line_total||'—'} ${qtyMath}</small>` : ''}
         </span>
         <select name="item_${i}_${j}_ingredient_id" id="ing_${i}_${j}">
           ${ingOptions}
@@ -223,6 +223,7 @@
         <input type="hidden" name="item_${i}_${j}_raw_text" value="${item.raw_text.replace(/"/g, '&quot;')}">
         <input type="hidden" name="item_${i}_${j}_rate" value="${item.rate || ''}">
         <input type="hidden" name="item_${i}_${j}_total_amount" value="${item.total_amount || ''}">
+        <input type="hidden" name="item_${i}_${j}_discount" value="${item.discount || ''}">
         <input type="hidden" name="item_${i}_${j}_sd_rate" value="${item.sd_rate || ''}">
         <input type="hidden" name="item_${i}_${j}_sd_amount" value="${item.sd_amount || ''}">
         <input type="hidden" name="item_${i}_${j}_vat_rate" value="${item.vat_rate || ''}">

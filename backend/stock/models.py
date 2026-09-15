@@ -146,6 +146,23 @@ class StockInRecord(models.Model):
 
     class Meta:
         ordering = ["-stock_in_date", "-id"]
+        constraints = [
+            # Scoped to (outlet, invoice_number, stock_in_date) rather than just
+            # (outlet, invoice_number) — CP Bangladesh invoice numbers are NOT
+            # guaranteed unique over time (confirmed against real data: the same
+            # number recurred ~2 weeks apart across two genuinely different
+            # deliveries), so pairing it with the date is what actually
+            # distinguishes "same slip re-entered" from "supplier reused a number".
+            models.UniqueConstraint(
+                fields=["outlet", "invoice_number", "stock_in_date"],
+                condition=models.Q(status=StockInStatus.APPROVED) & ~models.Q(invoice_number=""),
+                name="uniq_approved_invoice_per_outlet_per_date",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.invoice_number = (self.invoice_number or "").strip()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"StockIn #{self.pk} — {self.stock_in_date} ({self.status})"
