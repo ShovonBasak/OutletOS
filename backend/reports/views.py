@@ -1224,6 +1224,20 @@ def _do_rebuild(outlet: Outlet) -> dict:
                 operating_day__date=day,
                 confirmed_qty__isnull=False,
             ).select_related("ingredient"):
+                # NOTE: this is an absolute overwrite, trusting confirmed_qty as the
+                # day's checkpoint. That's what makes a late-dated stock-in approved
+                # after this day's check was confirmed get silently discarded once
+                # the replay reaches this day (the 2026-09-11 incident) — but an
+                # additive alternative (RawStock.adjust(confirmed - system_carried))
+                # was tried and reverted: it fixes that case but uncovers *other*,
+                # unrelated day/date-attribution gaps elsewhere in this outlet's
+                # ledger history, which set_to's daily reset was silently masking,
+                # and flips a *different* set of ingredients negative instead.
+                # The real fix is keeping confirmed_qty always accurate at the
+                # moment a backdated stock-in is approved — see
+                # stock.services.reconcile_backdated_stock_in, called from
+                # StockInRecordViewSet.approve and historic_import.import_stock_in_slip.
+                # As long as that holds, trusting confirmed_qty here is correct.
                 RawStock.set_to(outlet, dsc.ingredient, dsc.confirmed_qty)
                 total_sets += 1
 
