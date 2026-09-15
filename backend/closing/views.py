@@ -218,24 +218,23 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
                 obj.available_pieces = ds.pieces_available if ds else 0
 
             # For direct-sale products (beverages/ready items), correct available_pieces
-            # and remains_pieces to reflect the full day including any mid-day stock-in,
-            # then sync RawStock to the true end-of-day balance.
+            # to reflect the full day including any mid-day stock-in, then sync RawStock
+            # to the true end-of-day balance.
             #
-            # If the count was taken BEFORE the delivery arrived (remains <= day_start):
-            #   available = day_start + stock_in  (total that passed through today)
-            #   remains   = staff_count + stock_in  (true end-of-day physical balance)
-            #   RawStock  = remains                 (delivery arrives on top of staff count)
-            #
-            # If the count was taken AFTER delivery (remains > day_start):
-            #   available = day_start + stock_in  (same formula)
-            #   remains   = staff_count           (delivery already in their count)
-            #   RawStock  = remains               (physical balance)
+            #   available = day_start + stock_in   (total that passed through today)
+            #   remains   = staff_count, as entered — a physical count taken AT closing
+            #               time already reflects any delivery that arrived during the
+            #               day, so it's never adjusted here. (A previous version tried
+            #               to guess whether the count predated the delivery by comparing
+            #               it to day_start_pieces — that guess breaks as soon as same-day
+            #               sales are >= the delivery size, which double-adds the delivery
+            #               and makes remains impossible to correct from the UI.)
+            #   RawStock  = remains                (physical balance)
             rawstock_updates = []  # (outlet, ingredient, qty) — applied after obj.save()
             if not product.requires_preparation:
                 from stock.models import (
                     StockInItem, StockInStatus, OperatingDay, DayStartStockCheck,
                 )
-                remains_from_form = Decimal(row.get("remains_pieces", 0))
                 op_day = OperatingDay.objects.filter(
                     outlet=closing.outlet, date=closing.closing_date
                 ).first()
@@ -260,10 +259,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
                             if day_start_check else 0
                         )
                         stock_in_pieces = int(today_stock_in / qty_per)
-                        count_after_delivery = int(remains_from_form) > day_start_pieces
                         obj.available_pieces = day_start_pieces + stock_in_pieces
-                        if not count_after_delivery:
-                            obj.remains_pieces = int(remains_from_form) + stock_in_pieces
                     rawstock_updates.append(
                         (closing.outlet, recipe.ingredient,
                          Decimal(obj.remains_pieces) * qty_per)
