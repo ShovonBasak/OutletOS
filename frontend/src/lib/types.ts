@@ -702,6 +702,9 @@ export interface AccountTransaction {
   entered_by: number;
   entered_by_name: string;
   note: string;
+  balance_before: string;
+  balance_after: string;
+  created_at: string;
 }
 
 export interface AccountTransfer {

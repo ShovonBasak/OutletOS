@@ -474,6 +474,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         - Sets OperatingDay back to IN_PROGRESS
         - Sets DailyClosing back to DRAFT
         """
+        from finance import services as finance_services
         from finance.models import AccountTransaction, SourceType
         from stock.models import DisplayStock, OperatingDay, OperatingDayStatus
 
@@ -482,10 +483,11 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             raise ValidationError("Closing is already in DRAFT — nothing to reopen.")
 
         # 1. Delete account transactions created by this closing
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type=SourceType.DAILY_CLOSING,
             source_id=closing.id,
-        ).delete()
+        ):
+            finance_services.void_transaction(t.id)
 
         # 2. Restore DisplayStock: add back what was deducted at close
         #    (available_pieces − remains_pieces was deducted; add it back)
@@ -511,20 +513,18 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
     @staticmethod
     def _record_account_transactions(closing, user):
         """Idempotently write SALES_COLLECTION transactions for each payment entry."""
+        from finance import services as finance_services
         from finance.models import AccountTransaction, SourceType, TransactionType
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type=SourceType.DAILY_CLOSING,
             source_id=closing.id,
-        ).delete()
+        ):
+            finance_services.void_transaction(t.id)
         for payment in closing.payments.select_related("account").filter(amount__gt=0):
-            AccountTransaction.objects.create(
-                account=payment.account,
-                transaction_type=TransactionType.SALES_COLLECTION,
-                amount=payment.amount,
-                date=closing.closing_date,
-                source_type=SourceType.DAILY_CLOSING,
-                source_id=closing.id,
-                entered_by=user,
+            finance_services.post_transaction(
+                account=payment.account, transaction_type=TransactionType.SALES_COLLECTION,
+                amount=payment.amount, date=closing.closing_date, entered_by=user,
+                source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
                 note=f"Day closing — {closing.closing_date}",
             )
 
