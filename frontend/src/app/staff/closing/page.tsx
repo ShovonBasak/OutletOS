@@ -37,6 +37,7 @@ function ClosingHub() {
   const [notFound, setNotFound] = useState(false);
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [recalcBusy, setRecalcBusy] = useState(false);
 
   const prevCtx = useRef({ outlet: 0, opDate: "", viewYesterday: false });
 
@@ -92,6 +93,29 @@ function ClosingHub() {
       setClosing(c);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Cash is a live-computed value server-side, but it's only re-saved into the
+  // cash PaymentEntry (what the payments screen shows once one exists) when
+  // the bKash/online-payment fields are touched. Editing online-sell or
+  // walk-in counts afterward doesn't trigger that — this re-posts the current
+  // payment entries to force the same recompute+resave on demand.
+  async function recalculate() {
+    if (!closing) return;
+    setRecalcBusy(true);
+    try {
+      const entries = closing.payments
+        .filter((p) => !p.is_primary_cash)
+        .map((p) => ({ account_id: p.account, amount: Number(p.amount) }));
+      const c = await api<DailyClosing>(`/daily-closings/${closing.id}/payments/`, {
+        method: "POST",
+        body: JSON.stringify({ entries }),
+      });
+      invalidateClosingCache(outlet, opDate);
+      setClosing(c);
+    } finally {
+      setRecalcBusy(false);
     }
   }
 
@@ -154,6 +178,29 @@ function ClosingHub() {
           </div>
           <span className="font-mono text-ink-soft">›</span>
         </Link>
+      )}
+
+      {!viewYesterday && closing.status !== "LOCKED" && (
+        <button
+          className="btn btn-ghost self-end flex items-center gap-1.5 !py-1 !px-2.5 text-[11px]"
+          disabled={recalcBusy}
+          onClick={recalculate}
+          title="Recompute cash from the latest online sell / payments"
+        >
+          <svg
+            className={`h-3.5 w-3.5 ${recalcBusy ? "animate-spin" : ""}`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 12a9 9 0 0 1 15.4-6.4M21 12a9 9 0 0 1-15.4 6.4" />
+            <path d="M18 3v4.5h-4.5M6 21v-4.5h4.5" />
+          </svg>
+          {recalcBusy ? "Recalculating…" : "Recalculate"}
+        </button>
       )}
 
       {(() => {
