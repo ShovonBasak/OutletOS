@@ -91,6 +91,17 @@ class StockInRecordSerializer(serializers.ModelSerializer):
     submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
     paid_from_account_name = serializers.SerializerMethodField()
     unresolved_count = serializers.SerializerMethodField()
+    # Explicit default (not just required=False) — invoice_number participates
+    # in a conditional UniqueConstraint, and DRF's auto-generated
+    # UniqueTogetherValidator forces participating fields to be present in
+    # `attrs` regardless of their own `required` flag. Without a default here,
+    # omitting invoice_number (the normal case: "+ New" creates a blank DRAFT,
+    # the invoice number is filled in later) fails with a spurious "This field
+    # is required" 400 that the frontend had no error handling to surface —
+    # this is what broke the New button for staff.
+    invoice_number = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
 
     class Meta:
         model = StockInRecord
