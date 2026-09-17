@@ -1382,8 +1382,16 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bundle-finished")
     def bundle_finished(self, request, pk=None):
-        """One-tap 'used the last of a bundle' — subtracts the pack size from the
-        last count. Body: {outlet, ingredient}."""
+        """One-tap 'used the last of a bundle' — subtracts the bundle size from
+        the last count. Body: {outlet, ingredient}.
+
+        Uses Ingredient.bundle_size, NOT PackDefinition.pieces_per_pack — those
+        are deliberately different numbers. pieces_per_pack is the stock-in
+        slip's pack-to-piece conversion factor; bundle_size is how many pieces
+        are in the physical bundle staff open and finish day to day. They often
+        differ (e.g. a slip reporting a case of 100 sachets directly as "100
+        pcs" gives pieces_per_pack=1 for correct stock-in math, while the
+        physical bundle is still 100 pieces)."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
         outlet = _outlet_obj(request.data.get("outlet") or request.user.outlet_id)
         prev = (
@@ -1391,14 +1399,46 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             .order_by("-checked_at")
             .first()
         )
-        pack = ingredient.active_pack()
-        bundle = pack.pieces_per_pack if pack else Decimal("0")
+        bundle = ingredient.bundle_size or Decimal("0")
         prev_qty = prev.counted_qty if prev else bundle
         counted = max(Decimal("0"), prev_qty - bundle)
         obj = self._record(
-            outlet, ingredient, counted, "Bundle finished (−1 pack)", request.user
+            outlet, ingredient, counted, "Bundle finished (−1 bundle)", request.user
         )
         return Response(self.get_serializer(obj).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="set-bundle-size")
+    def set_bundle_size(self, request):
+        """Staff-configurable bundle size for a PERIODIC_COUNT ingredient — how
+        many pieces make up one physical bundle, i.e. what 'bundle finished'
+        (− 1 bundle) subtracts. Body: {ingredient, bundle_size}.
+
+        This is Ingredient.bundle_size, a plain field with no price-versioning —
+        deliberately separate from PackDefinition.pieces_per_pack (the stock-in
+        slip's pack-to-piece conversion factor, admin-only via
+        PackDefinitionViewSet). Conflating the two would mean correcting a
+        bundle size here could silently change how future stock-in slips get
+        converted to base units.
+        """
+        ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
+        if ingredient.tracking_mode != TrackingMode.PERIODIC_COUNT:
+            raise ValidationError(
+                "Bundle size can only be set here for packaging/supply "
+                "(periodic-count) ingredients."
+            )
+        try:
+            bundle_size = Decimal(str(request.data["bundle_size"]))
+        except (KeyError, ValueError, TypeError):
+            raise ValidationError("bundle_size is required and must be a number.")
+        if bundle_size <= 0:
+            raise ValidationError("Bundle size must be greater than zero.")
+
+        ingredient.bundle_size = bundle_size
+        ingredient.save(update_fields=["bundle_size"])
+        return Response({
+            "ingredient": ingredient.id,
+            "bundle_size": str(ingredient.bundle_size),
+        }, status=201)
 
     @action(detail=False, methods=["get"], url_path="levels")
     def levels(self, request):
@@ -1428,7 +1468,6 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
         result = []
         for ing in ingredients:
             check = latest_by_ing.get(ing.id)
-            pack = ing.active_pack()
             if check:
                 # Add any stock-in received since the last physical count.
                 new_stock = stock_in_since(outlet, ing, since_dt=check.checked_at)
@@ -1448,7 +1487,7 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
                 "ingredient_display_name": alias.alias_text if alias else ing.name,
                 "ingredient_group": resolve_ingredient_group(ing, category_map),
                 "base_unit": ing.base_unit,
-                "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
+                "bundle_size": str(ing.bundle_size) if ing.bundle_size else None,
                 "current_qty": current_qty,
                 "cost_per_base_unit": str(cost_per_base_unit) if cost_per_base_unit is not None else None,
                 "source": source,

@@ -112,6 +112,15 @@ class Ingredient(models.Model):
         max_length=20, choices=IngredientGroup.choices, default=IngredientGroup.OTHER
     )
     is_active = models.BooleanField(default=True)
+    # How many base units make up one physical bundle/pack, for the "bundle
+    # finished" one-tap consumption shortcut on the staff Packaging screen
+    # (periodic-count ingredients only). Deliberately NOT the same value as
+    # PackDefinition.pieces_per_pack, which is the stock-in slip's pack-to-piece
+    # conversion factor — the two commonly differ. E.g. a supplier slip may
+    # report a case of 100 sauce sachets directly as "100 pcs" (unit_captured=
+    # PIECE), so pieces_per_pack is irrelevant to that stock-in's math — but the
+    # physical bundle staff open and finish during the day is still 100 pieces.
+    bundle_size = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
 
     class Meta:
         ordering = ["name"]

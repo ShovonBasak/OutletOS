@@ -197,8 +197,8 @@ export default function StockLevels() {
               const qty = Number(s.current_qty);
               const low = qty < 5;
               const zero = qty === 0;
-              const packs = s.pieces_per_pack
-                ? packBreakdown(s.current_qty, s.pieces_per_pack, s.base_unit)
+              const packs = s.bundle_size
+                ? packBreakdown(s.current_qty, s.bundle_size, s.base_unit)
                 : null;
               const isEstimated = s.source === "stock_in_derived";
               return (

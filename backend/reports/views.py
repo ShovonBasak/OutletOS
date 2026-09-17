@@ -712,9 +712,64 @@ def _product_remaining_stock(product: Product, outlet_id) -> int | None:
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def product_stock_detail(request):
+    """Per-ingredient breakdown behind a product's Sell-history "Stock" figure —
+    explains which ingredient is the bottleneck (e.g. a Burger's Bun ran low
+    while the Zinger Fillet didn't). Same "units still makeable" arithmetic as
+    _product_remaining_stock, just broken out per ingredient instead of
+    collapsed to the minimum.
+
+    ?outlet=1&product=<id>
+    """
+    outlet = request.query_params.get("outlet", "1")
+    product_id = request.query_params.get("product")
+    if not product_id:
+        return Response({"error": "product required"}, status=400)
+    try:
+        product = Product.objects.prefetch_related("recipes__ingredient").get(id=product_id)
+    except Product.DoesNotExist:
+        return Response({"error": "product not found"}, status=404)
+
+    recipes = list(product.recipes.select_related("ingredient").all())
+    ingredients = []
+    minimum = None
+    for r in recipes:
+        rs = RawStock.objects.filter(outlet_id=outlet, ingredient=r.ingredient).first()
+        qty = rs.quantity_available if rs else Decimal("0")
+        qty_per = r.quantity_per_unit or Decimal("1")
+        possible = int(qty / qty_per)
+        minimum = possible if minimum is None else min(minimum, possible)
+        pack = r.ingredient.active_pack()
+        ingredients.append({
+            "ingredient_id": r.ingredient_id,
+            "ingredient_name": r.ingredient.name,
+            "base_unit": r.ingredient.base_unit,
+            "quantity_available": str(qty),
+            "quantity_per_unit": str(qty_per),
+            "pieces_possible": possible,
+            "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
+        })
+    for ing in ingredients:
+        ing["is_bottleneck"] = minimum is not None and ing["pieces_possible"] == minimum
+
+    return Response({
+        "product_id": product.id,
+        "product_name": product.name,
+        "current_stock": minimum,
+        "ingredients": ingredients,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def sell_history(request):
     """
-    Date-wise sell quantities per product.
+    Date-wise sell quantities AND that day's available-to-sell stock, per
+    product — so a quiet day reads correctly: no/low stock that day (can't
+    blame demand) vs. stock was there and it just didn't sell (real low
+    demand). Lists every active product, including ones with zero sales in
+    the range (the extreme case of "out of stock the whole period" is
+    exactly what this is meant to surface, not hide).
     ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD (range capped at MAX_RANGE_DAYS)
     Returns { dates: [...], rows: [...], range_clamped: bool }
     """
@@ -727,55 +782,96 @@ def sell_history(request):
             daily_closing__closing_date__gte=start,
             daily_closing__closing_date__lte=end,
         )
-        .select_related("product", "daily_closing")
-        .order_by("daily_closing__closing_date")
+        .select_related("daily_closing")
     )
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
 
     # {product_id: {date_str: qty}}
     sales: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    product_meta: dict[int, dict] = {}
     dates_set: set[str] = set()
-
-    for line in lines:
-        pid = line.product_id
-        d = str(line.daily_closing.closing_date)
-        sales[pid][d] += line.quantity_sold
+    for row in lines.values("product_id", "quantity_sold", "daily_closing__closing_date"):
+        d = str(row["daily_closing__closing_date"])
+        sales[row["product_id"]][d] += row["quantity_sold"]
         dates_set.add(d)
-        if pid not in product_meta:
-            product_meta[pid] = {
-                "id": pid,
-                "name": line.product.name,
-                "category": line.product.category or "",
-            }
+
+    # {product_id: {date_str: available_pieces}} — that day's system snapshot
+    # of how much was ready to sell, from the closing itself.
+    counts = (
+        DailyClosingStockCount.objects
+        .filter(
+            daily_closing__closing_date__gte=start,
+            daily_closing__closing_date__lte=end,
+        )
+        .select_related("daily_closing")
+    )
+    if outlet:
+        counts = counts.filter(daily_closing__outlet_id=outlet)
+
+    available: dict[int, dict[str, int]] = defaultdict(dict)
+    for row in counts.values("product_id", "available_pieces", "daily_closing__closing_date"):
+        d = str(row["daily_closing__closing_date"])
+        available[row["product_id"]][d] = row["available_pieces"]
+        dates_set.add(d)
 
     sorted_dates = sorted(dates_set)
-    sorted_pids = sorted(product_meta, key=lambda p: product_meta[p]["name"])
 
-    # Bulk-fetch products for stock calc
-    products_qs = {
-        p.id: p for p in
-        Product.objects.prefetch_related("recipes__ingredient").filter(id__in=sorted_pids)
-    }
+    products = list(
+        Product.objects.filter(is_active=True)
+        .prefetch_related("recipes__ingredient")
+        .order_by("category", "name")
+    )
 
     rows = []
-    for pid in sorted_pids:
-        meta = product_meta[pid]
+    for product in products:
+        pid = product.id
         daily = {d: sales[pid].get(d, 0) for d in sorted_dates}
+        daily_stock = {d: available[pid].get(d) for d in sorted_dates}
         total = sum(daily.values())
-        product = products_qs.get(pid)
-        stock = _product_remaining_stock(product, outlet) if product and outlet else None
+        stock = _product_remaining_stock(product, outlet) if outlet else None
         rows.append({
-            "id": meta["id"],
-            "name": meta["name"],
-            "category": meta["category"],
+            "id": pid,
+            "name": product.name,
+            "category": product.category or "",
             "daily": daily,
+            "daily_stock": daily_stock,
             "total": total,
             "stock": stock,
         })
 
-    return Response({"dates": sorted_dates, "rows": rows, "range_clamped": range_clamped})
+    # Per-day open/close context — a short-staffed or late-opened day is
+    # another reason sales can be low that has nothing to do with demand.
+    # started_at is when staff began the day (closest proxy to "doors open");
+    # submitted_at is when the closing was wrapped up ("doors closed").
+    op_days = OperatingDay.objects.filter(date__gte=start, date__lte=end)
+    if outlet:
+        op_days = op_days.filter(outlet_id=outlet)
+    opened_map = {str(od.date): od.started_at for od in op_days}
+
+    closings_for_hours = DailyClosing.objects.filter(closing_date__gte=start, closing_date__lte=end)
+    if outlet:
+        closings_for_hours = closings_for_hours.filter(outlet_id=outlet)
+    closed_map = {str(c.closing_date): c.submitted_at for c in closings_for_hours}
+
+    date_hours = {}
+    for d in sorted_dates:
+        opened = opened_map.get(d)
+        closed = closed_map.get(d)
+        hours_open = None
+        if opened and closed and closed > opened:
+            hours_open = round((closed - opened).total_seconds() / 3600, 1)
+        date_hours[d] = {
+            "opened_at": opened.isoformat() if opened else None,
+            "closed_at": closed.isoformat() if closed else None,
+            "hours_open": hours_open,
+        }
+
+    return Response({
+        "dates": sorted_dates,
+        "rows": rows,
+        "date_hours": date_hours,
+        "range_clamped": range_clamped,
+    })
 
 
 @api_view(["GET"])

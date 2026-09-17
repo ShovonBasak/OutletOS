@@ -173,6 +173,47 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=False, methods=["get"], url_path="wastage-summary")
+    def wastage_summary(self, request):
+        """Aggregate binned wastage by product for a date range.
+
+        Query params: outlet, date_from, date_to (all optional).
+        Returns a list of {product_id, product_name, total_pieces} sorted by
+        total_pieces descending (worst offenders first). Quantity only — no
+        monetary value, since wastage isn't priced per-line the way a sale is,
+        and using today's selling price for a historical date would be wrong.
+        """
+        from django.db.models import Sum
+
+        outlet = request.query_params.get("outlet")
+        date_from = request.query_params.get("date_from")
+        date_to = request.query_params.get("date_to")
+
+        counts_qs = DailyClosingStockCount.objects.filter(wastage_pieces__gt=0)
+        if outlet:
+            counts_qs = counts_qs.filter(daily_closing__outlet_id=outlet)
+        if date_from:
+            counts_qs = counts_qs.filter(daily_closing__closing_date__gte=date_from)
+        if date_to:
+            counts_qs = counts_qs.filter(daily_closing__closing_date__lte=date_to)
+
+        by_product = (
+            counts_qs
+            .values("product__id", "product__name")
+            .annotate(total_pieces=Sum("wastage_pieces"))
+            .order_by("-total_pieces")
+        )
+
+        result = [
+            {
+                "product_id": row["product__id"],
+                "product_name": row["product__name"],
+                "total_pieces": row["total_pieces"] or 0,
+            }
+            for row in by_product
+        ]
+        return Response(result)
+
     def perform_create(self, serializer):
         closing = serializer.save(staff=self.request.user)
         # Link to today's OperatingDay so the gated flow knows closing has begun.

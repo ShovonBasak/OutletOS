@@ -1,3 +1,24 @@
+import { INGREDIENT_GROUPS } from "./types";
+
+/** Group items by product/ingredient category, in the canonical INGREDIENT_GROUPS
+ * order, so grouped views read consistently across the app. Categories with no
+ * items are skipped; any category not in the canonical list falls through to "Other". */
+export function groupByCategory<T>(
+  items: T[],
+  categoryOf: (item: T) => string
+): { key: string; icon: string; items: T[] }[] {
+  const byKey = new Map<string, T[]>();
+  for (const item of items) {
+    const cat = categoryOf(item);
+    const key = INGREDIENT_GROUPS.some((g) => g.key === cat) ? cat : "Other";
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(item);
+  }
+  return INGREDIENT_GROUPS
+    .map((g) => ({ ...g, items: byKey.get(g.key) ?? [] }))
+    .filter((g) => g.items.length > 0);
+}
+
 export function bdt(value: string | number | null | undefined): string {
   const n = Number(value ?? 0);
   return `৳ ${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -44,7 +65,8 @@ export function packBreakdown(
 ): string | null {
   const q = Number(qty);
   const p = Number(piecesPerPack);
-  if (!p || p <= 0 || !q || q < p) return null;
+  // p <= 1 means "1 piece per pack" — i.e. no real pack, sold/counted individually.
+  if (!p || p <= 1 || !q || q < p) return null;
   const fullPacks = Math.floor(q / p);
   if (fullPacks === 0) return null;
   // round remainder to avoid floating-point noise (e.g. 17.000000001)

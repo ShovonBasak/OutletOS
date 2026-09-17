@@ -19,6 +19,12 @@ interface ChannelSummaryItem {
   total_net: string;
 }
 
+interface WastageSummaryItem {
+  product_id: number;
+  product_name: string;
+  total_pieces: number;
+}
+
 function nDaysAgo(from: string, n: number): string {
   const [y, m, d] = from.split("-").map(Number);
   const date = new Date(y, m - 1, d - n);
@@ -36,6 +42,7 @@ export default function ClosingHistory() {
   const [closings, setClosings] = useState<DailyClosing[]>([]);
   const [count, setCount] = useState(0);
   const [channelSummary, setChannelSummary] = useState<ChannelSummaryItem[]>([]);
+  const [wastageSummary, setWastageSummary] = useState<WastageSummaryItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const prevCtx = useRef({ outlet: 0, dateFrom: "", dateTo: "", page: 0 });
@@ -63,8 +70,11 @@ export default function ClosingHistory() {
     const summaryCall = filterChanged
       ? api<ChannelSummaryItem[]>(`/daily-closings/channel-summary/?${rangeParams}`)
       : Promise.resolve(null);
+    const wastageCall = filterChanged
+      ? api<WastageSummaryItem[]>(`/daily-closings/wastage-summary/?${rangeParams}`)
+      : Promise.resolve(null);
 
-    Promise.allSettled([listCall, summaryCall]).then(([listRes, summaryRes]) => {
+    Promise.allSettled([listCall, summaryCall, wastageCall]).then(([listRes, summaryRes, wastageRes]) => {
       if (listRes.status === "fulfilled") {
         setClosings(listRes.value.results);
         setCount(listRes.value.count);
@@ -72,12 +82,16 @@ export default function ClosingHistory() {
       if (summaryRes.status === "fulfilled" && summaryRes.value !== null) {
         setChannelSummary(summaryRes.value);
       }
+      if (wastageRes.status === "fulfilled" && wastageRes.value !== null) {
+        setWastageSummary(wastageRes.value);
+      }
       setLoaded(true);
     });
   }, [user, outlet, dateFrom, dateTo, page]);
 
   const totalPages = Math.ceil(count / PAGE_SIZE);
   const totalNet = channelSummary.reduce((sum, c) => sum + Number(c.total_net), 0);
+  const totalWastagePieces = wastageSummary.reduce((sum, w) => sum + w.total_pieces, 0);
 
   function applyFilter(from: string, to: string) {
     setDateFrom(from);
@@ -152,6 +166,31 @@ export default function ClosingHistory() {
             <div className="flex items-center justify-between bg-[#f0ead8] px-4 py-2.5">
               <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-ink">Total</p>
               <p className="font-mono text-sm font-bold text-ink">{bdt(String(totalNet))}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wastage summary card */}
+      {wastageSummary.length > 0 && (
+        <div className="rounded border border-chili/30 bg-[#fffdf7]">
+          <div className="border-b border-chili/30 px-4 py-2.5">
+            <p className="font-mono text-[10px] uppercase tracking-wide text-chili-deep">
+              Wastage (binned)
+            </p>
+          </div>
+          <div className="divide-y divide-[#e8e0c8]">
+            {wastageSummary.map((w) => (
+              <div key={w.product_id} className="flex items-center justify-between px-4 py-2.5">
+                <p className="font-display text-sm font-semibold">{w.product_name}</p>
+                <p className="font-mono text-sm font-bold text-chili-deep">
+                  {w.total_pieces} pcs
+                </p>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-[#f0ead8] px-4 py-2.5">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-wide text-ink">Total</p>
+              <p className="font-mono text-sm font-bold text-chili-deep">{totalWastagePieces} pcs</p>
             </div>
           </div>
         </div>
