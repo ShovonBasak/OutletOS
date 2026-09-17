@@ -696,18 +696,38 @@ def dashboard_summary(request):
     })
 
 
-def _product_remaining_stock(product: Product, outlet_id) -> int | None:
-    """Units of product that can still be made from current RawStock."""
-    recipes = list(product.recipes.select_related("ingredient").all())
+def _product_remaining_stock(product: Product, outlet_id):
+    """Units of product that can still be made from current RawStock, plus
+    the bottleneck ingredient's own raw quantity/pack size — so callers can
+    show "5 makeable = 1 pack + 2 piece in stock" instead of a bare number.
+    Returns (minimum, pack_info); pack_info is
+    {"quantity_available": Decimal, "pieces_per_pack": Decimal|None, "base_unit": str}
+    for whichever ingredient is the limiting one, or (None, None) if the
+    product has no (non-packaging) recipe ingredients.
+    PERIODIC_COUNT ingredients (packaging/supplies — sticks, bags, sauce
+    sachets) are excluded: they're tracked separately via a coarse
+    consumption-ratio signal, not a per-unit blocker, per the data model."""
+    recipes = [
+        r for r in product.recipes.select_related("ingredient").all()
+        if r.ingredient.tracking_mode != TrackingMode.PERIODIC_COUNT
+    ]
     if not recipes:
-        return None
-    minimum = None
+        return None, None
+    availabilities = []
     for r in recipes:
         rs = RawStock.objects.filter(outlet_id=outlet_id, ingredient=r.ingredient).first()
         qty = rs.quantity_available if rs else Decimal("0")
         available = int(qty / r.quantity_per_unit) if r.quantity_per_unit else int(qty)
-        minimum = available if minimum is None else min(minimum, available)
-    return minimum
+        availabilities.append((available, qty, r.ingredient))
+    minimum = min(a for a, _, _ in availabilities)
+    _, bottleneck_qty, bottleneck_ing = next(a for a in availabilities if a[0] == minimum)
+    pack = bottleneck_ing.active_pack()
+    pack_info = {
+        "quantity_available": bottleneck_qty,
+        "pieces_per_pack": pack.pieces_per_pack if pack else None,
+        "base_unit": bottleneck_ing.base_unit,
+    }
+    return minimum, pack_info
 
 
 @api_view(["GET"])
@@ -726,7 +746,9 @@ def product_stock_detail(request):
     if not product_id:
         return Response({"error": "product required"}, status=400)
     try:
-        product = Product.objects.prefetch_related("recipes__ingredient").get(id=product_id)
+        product = Product.objects.prefetch_related(
+            "recipes__ingredient", "recipes__ingredient__aliases"
+        ).get(id=product_id)
     except Product.DoesNotExist:
         return Response({"error": "product not found"}, status=404)
 
@@ -738,19 +760,31 @@ def product_stock_detail(request):
         qty = rs.quantity_available if rs else Decimal("0")
         qty_per = r.quantity_per_unit or Decimal("1")
         possible = int(qty / qty_per)
-        minimum = possible if minimum is None else min(minimum, possible)
+        # PERIODIC_COUNT ingredients (packaging/supplies) are shown for
+        # context but never gate the bottleneck — they're tracked separately
+        # via a coarse consumption-ratio signal, not a per-unit blocker.
+        is_periodic = r.ingredient.tracking_mode == TrackingMode.PERIODIC_COUNT
+        if not is_periodic:
+            minimum = possible if minimum is None else min(minimum, possible)
         pack = r.ingredient.active_pack()
+        # Display name = the supplier-slip alias staff actually recognize
+        # (e.g. "Zinger Fillet" on the slip vs. the catalog's full name) —
+        # same resolution as everywhere else ingredient names surface.
+        alias = next((a for a in r.ingredient.aliases.all() if a.is_active), None)
         ingredients.append({
             "ingredient_id": r.ingredient_id,
-            "ingredient_name": r.ingredient.name,
+            "ingredient_name": alias.alias_text if alias else r.ingredient.name,
             "base_unit": r.ingredient.base_unit,
             "quantity_available": str(qty),
             "quantity_per_unit": str(qty_per),
             "pieces_possible": possible,
             "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
+            "is_periodic": is_periodic,
         })
     for ing in ingredients:
-        ing["is_bottleneck"] = minimum is not None and ing["pieces_possible"] == minimum
+        ing["is_bottleneck"] = (
+            not ing["is_periodic"] and minimum is not None and ing["pieces_possible"] == minimum
+        )
 
     return Response({
         "product_id": product.id,
@@ -764,12 +798,16 @@ def product_stock_detail(request):
 @permission_classes([IsAuthenticated])
 def sell_history(request):
     """
-    Date-wise sell quantities AND that day's available-to-sell stock, per
+    Date-wise sell quantities AND that day's raw-ingredient stock (day-start
+    reading plus anything approved-stock-in received that same day), per
     product — so a quiet day reads correctly: no/low stock that day (can't
     blame demand) vs. stock was there and it just didn't sell (real low
-    demand). Lists every active product, including ones with zero sales in
-    the range (the extreme case of "out of stock the whole period" is
-    exactly what this is meant to surface, not hide).
+    demand). Includes any active product with zero sales in the range as
+    long as it has SOME stock history that period (the extreme case of "out
+    of stock the whole period" is exactly what this is meant to surface, not
+    hide) — but skips products with neither sales nor any stock-in/day-start
+    reading at all, since those were never actually stocked or sold and just
+    clutter the list.
     ?outlet=1&start=YYYY-MM-DD&end=YYYY-MM-DD (range capped at MAX_RANGE_DAYS)
     Returns { dates: [...], rows: [...], range_clamped: bool }
     """
@@ -795,24 +833,45 @@ def sell_history(request):
         sales[row["product_id"]][d] += row["quantity_sold"]
         dates_set.add(d)
 
-    # {product_id: {date_str: available_pieces}} — that day's system snapshot
-    # of how much was ready to sell, from the closing itself.
-    counts = (
-        DailyClosingStockCount.objects
-        .filter(
-            daily_closing__closing_date__gte=start,
-            daily_closing__closing_date__lte=end,
-        )
-        .select_related("daily_closing")
+    # {date_str: {ingredient_id: confirmed_qty}} — raw ingredient stock at the
+    # START of each day, from the day-start check. Deliberately NOT
+    # DailyClosingStockCount.available_pieces: that figure is how much staff
+    # actually PREPARED that day, which is a staffing/time decision and can
+    # under-report what the raw ingredients on hand could really support.
+    day_start_checks = (
+        DayStartStockCheck.objects
+        .filter(operating_day__date__gte=start, operating_day__date__lte=end)
     )
     if outlet:
-        counts = counts.filter(daily_closing__outlet_id=outlet)
+        day_start_checks = day_start_checks.filter(operating_day__outlet_id=outlet)
 
-    available: dict[int, dict[str, int]] = defaultdict(dict)
-    for row in counts.values("product_id", "available_pieces", "daily_closing__closing_date"):
-        d = str(row["daily_closing__closing_date"])
-        available[row["product_id"]][d] = row["available_pieces"]
+    day_start_by_date: dict[str, dict[int, Decimal]] = defaultdict(dict)
+    for row in day_start_checks.values("operating_day__date", "ingredient_id", "confirmed_qty"):
+        d = str(row["operating_day__date"])
+        day_start_by_date[d][row["ingredient_id"]] = row["confirmed_qty"]
         dates_set.add(d)
+
+    # {date_str: {ingredient_id: qty}} — approved stock-in received DURING
+    # that day, added on top of the day-start reading. Without this, a
+    # delivery that arrives mid-day would make the day's raw-stock figure
+    # look artificially low next to what was actually sellable that day.
+    stock_in_items = (
+        StockInItem.objects
+        .filter(
+            stock_in_record__status=StockInStatus.APPROVED,
+            stock_in_record__stock_in_date__gte=start,
+            stock_in_record__stock_in_date__lte=end,
+            ingredient__isnull=False,
+        )
+        .select_related("pack_definition", "stock_in_record")
+    )
+    if outlet:
+        stock_in_items = stock_in_items.filter(stock_in_record__outlet_id=outlet)
+
+    stock_in_by_date: dict[str, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    for item in stock_in_items:
+        d = str(item.stock_in_record.stock_in_date)
+        stock_in_by_date[d][item.ingredient_id] += item.base_unit_quantity()
 
     sorted_dates = sorted(dates_set)
 
@@ -822,13 +881,50 @@ def sell_history(request):
         .order_by("category", "name")
     )
 
+    def day_start_stock_for(product, d):
+        """Units of `product` the raw ingredients on hand could make on date
+        `d` — day-start reading + anything approved-stock-in that same day —
+        at the bottleneck (lowest) ingredient, same rule as
+        _product_remaining_stock/product_stock_detail. None when any recipe
+        ingredient has no day-start reading for that date (unknown, not zero).
+        PERIODIC_COUNT ingredients (packaging/supplies) are excluded — they
+        never get a day-start check (that flow only covers RECIPE_LINKED
+        ingredients), so including one would make every date permanently
+        unknown for any product that uses one, even though the real
+        ingredient may be perfectly well tracked."""
+        recipes = [
+            r for r in product.recipes.all()
+            if r.ingredient.tracking_mode != TrackingMode.PERIODIC_COUNT
+        ]
+        if not recipes:
+            return None
+        raw_for_date = day_start_by_date.get(d)
+        if raw_for_date is None:
+            return None
+        stock_in_for_date = stock_in_by_date.get(d, {})
+        minimum = None
+        for r in recipes:
+            day_start_qty = raw_for_date.get(r.ingredient_id)
+            if day_start_qty is None:
+                return None
+            raw_qty = day_start_qty + stock_in_for_date.get(r.ingredient_id, Decimal("0"))
+            qty_per = r.quantity_per_unit or Decimal("1")
+            possible = int(raw_qty / qty_per)
+            minimum = possible if minimum is None else min(minimum, possible)
+        return minimum
+
     rows = []
     for product in products:
         pid = product.id
         daily = {d: sales[pid].get(d, 0) for d in sorted_dates}
-        daily_stock = {d: available[pid].get(d) for d in sorted_dates}
+        daily_stock = {d: day_start_stock_for(product, d) for d in sorted_dates}
         total = sum(daily.values())
-        stock = _product_remaining_stock(product, outlet) if outlet else None
+        # Skip products with no history at all in this range — no sales AND
+        # no day-start/stock-in reading on any date — rather than padding the
+        # list with items that were never actually stocked or sold.
+        if total == 0 and all(v is None for v in daily_stock.values()):
+            continue
+        stock, stock_pack_info = _product_remaining_stock(product, outlet) if outlet else (None, None)
         rows.append({
             "id": pid,
             "name": product.name,
@@ -837,6 +933,13 @@ def sell_history(request):
             "daily_stock": daily_stock,
             "total": total,
             "stock": stock,
+            "stock_pack": {
+                "quantity_available": str(stock_pack_info["quantity_available"]),
+                "pieces_per_pack": (
+                    str(stock_pack_info["pieces_per_pack"]) if stock_pack_info["pieces_per_pack"] else None
+                ),
+                "base_unit": stock_pack_info["base_unit"],
+            } if stock_pack_info else None,
         })
 
     # Per-day open/close context — a short-staffed or late-opened day is

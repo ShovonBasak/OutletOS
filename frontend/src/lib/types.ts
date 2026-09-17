@@ -969,12 +969,20 @@ export interface SellHistoryRow {
   name: string;
   category: string;
   daily: Record<string, number>;
-  /** That day's available-to-sell snapshot (from the closing itself) — null
-   * when there's no closing record for that date. Lets a quiet day be read
-   * correctly: no/low stock that day vs. stock was there and it just didn't sell. */
+  /** Units of this product the RAW INGREDIENT stock could make that day —
+   * day-start reading plus anything approved-stock-in received that same
+   * day — at the bottleneck ingredient (same rule as `stock`). NOT how many
+   * were actually prepared, which is a staffing/time decision that can
+   * under-report real supply. Null when there's no day-start reading for
+   * that date. Lets a quiet day be read correctly: no/low raw stock that day
+   * vs. stock was there and it just didn't sell. */
   daily_stock: Record<string, number | null>;
   total: number;
   stock: number | null;
+  /** Raw quantity/pack size of `stock`'s bottleneck ingredient — feed into
+   * packBreakdown() to show "1 pack + 2 piece" alongside the makeable-now
+   * number. Null when `stock` is null (no recipe ingredients to compute it). */
+  stock_pack: { quantity_available: string; pieces_per_pack: string | null; base_unit: string } | null;
 }
 
 /** How long the shop was open on a given date — opened_at is when staff
@@ -1004,6 +1012,10 @@ export interface ProductStockIngredient {
   quantity_per_unit: string;
   pieces_possible: number;
   pieces_per_pack: string | null;
+  /** Packaging/supply ingredient (bamboo sticks, sauce sachets, etc.) —
+   * shown for context but never the bottleneck; it's tracked separately via
+   * a coarse consumption-ratio signal, not a per-unit blocker. */
+  is_periodic: boolean;
   is_bottleneck: boolean;
 }
 
