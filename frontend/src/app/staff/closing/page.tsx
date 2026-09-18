@@ -11,6 +11,10 @@ import { useOperatingDay } from "@/lib/staffDay";
 import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, Paginated, Product } from "@/lib/types";
 
+interface CashBalanceInfo {
+  cash: { balance: string };
+}
+
 function yesterday(): string {
   const d = new Date();
   d.setDate(d.getDate() - 1);
@@ -38,10 +42,20 @@ function ClosingHub() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
   const [recalcBusy, setRecalcBusy] = useState(false);
+  // System cash balance as of right now. While the closing is still open
+  // (DRAFT/SUBMITTED) this does NOT yet include today's cash — that only
+  // posts once the closing locks — so "system cash + today's computed cash"
+  // is exactly what the physical drawer should total. Once LOCKED, today's
+  // cash has already posted into this same balance, so it's used as-is.
+  const [systemCashBalance, setSystemCashBalance] = useState<number | null>(null);
 
   const prevCtx = useRef({ outlet: 0, opDate: "", viewYesterday: false });
 
   async function refresh() {
+    api<CashBalanceInfo>("/cash/")
+      .then((info) => setSystemCashBalance(Number(info.cash.balance)))
+      .catch(() => setSystemCashBalance(null));
+
     if (viewYesterday) {
       const res = await api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${opDate}&expand=full`);
       if (res.results[0]) {
@@ -213,6 +227,15 @@ function ClosingHub() {
         const nonCashPayments = closing.payments.filter(
           (p) => !p.is_primary_cash && Number(p.amount) > 0
         );
+        // Once LOCKED, today's cash has already posted into systemCashBalance
+        // (don't add computed_cash again); before that, it hasn't yet, so add
+        // it to get what the drawer should total right now.
+        const drawerTotal =
+          systemCashBalance === null
+            ? null
+            : closing.status === "LOCKED"
+            ? systemCashBalance
+            : systemCashBalance + Number(closing.computed_cash);
         return (
           <div className="ticket flex flex-col gap-0">
             <div className="ticket-row">
@@ -239,9 +262,26 @@ function ClosingHub() {
             ))}
 
             <div className="ticket-row">
-              <span>Cash (computed)</span>
+              <span>Today&apos;s cash (computed)</span>
               <span className="qty">{bdt(closing.computed_cash)}</span>
             </div>
+
+            {drawerTotal !== null && (
+              <div className="mt-2.5 rounded-lg border border-leaf/40 bg-leaf/10 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[12px] font-semibold uppercase tracking-wide text-leaf-deep">
+                    💵 Cash currently in drawer
+                  </span>
+                  <span className="qty text-base font-bold text-leaf-deep">{bdt(drawerTotal)}</span>
+                </div>
+                {closing.status !== "LOCKED" && (
+                  <p className="mt-1 font-mono text-[10px] text-leaf-deep/70">
+                    = {bdt(systemCashBalance)} already in system + {bdt(closing.computed_cash)} today&apos;s cash.
+                    Count the drawer now and compare before submitting.
+                  </p>
+                )}
+              </div>
+            )}
 
             {closing.has_flag && (
               <p className="mt-2 font-mono text-[11px] text-chili-deep">
