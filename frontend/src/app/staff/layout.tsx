@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
@@ -21,8 +21,9 @@ const TABS = [
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const { loading } = useRequireRole("STAFF");
-  const { user } = useAuth();
+  const { user, actingAsStaff, exitStaffView } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const outlet = user?.outlet ?? 1;
   const [day, setDay] = useState<OperatingDay | null>(null);
   const [workDate, _setWorkDate] = useState(today());
@@ -91,6 +92,21 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           <Brand name={user?.outlet_name} />
           <UserMenu />
         </header>
+
+        {actingAsStaff && (
+          <div className="flex items-center justify-between gap-2 bg-gold px-4 py-1.5 font-mono text-[11px] font-semibold text-ink">
+            <span>👤 Acting as Staff — {user?.outlet_name ?? "Outlet"}</span>
+            <button
+              onClick={() => {
+                exitStaffView();
+                router.replace("/owner");
+              }}
+              className="underline decoration-dotted"
+            >
+              Exit
+            </button>
+          </div>
+        )}
 
         <main className="flex-1 overflow-y-auto p-4 pb-24">{children}</main>
 

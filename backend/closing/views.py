@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly, IsStaffOwnerOrAdmin
 from catalog.models import Product
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
@@ -38,6 +38,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         "payments__account",
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     # Slim prefetch for list — drops heavy stock_count product nesting; still
     # fetches sales_lines/channel_discounts/payments for the financial rollup

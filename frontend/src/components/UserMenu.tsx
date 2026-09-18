@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, saveUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
@@ -70,7 +71,8 @@ function Snackbar({ text, onDone }: { text: string; onDone: () => void }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function UserMenu() {
-  const { user, logout, setUser } = useAuth();
+  const { user, logout, setUser, isOwnerOrAdmin, actingAsStaff, enterStaffView } = useAuth();
+  const router = useRouter();
   const [sheet, setSheet] = useState<Sheet>("closed");
   const [toast, setToast] = useState<string | null>(null);
 
@@ -257,6 +259,24 @@ export function UserMenu() {
               </div>
               <span className="text-ink-soft/40">›</span>
             </button>
+
+            {isOwnerOrAdmin && !actingAsStaff && (
+              <button
+                onClick={() => {
+                  enterStaffView();
+                  close();
+                  router.push("/staff");
+                }}
+                className="flex items-center gap-4 px-5 py-4 text-left transition-colors active:bg-[#f5f0e8]"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gold/20 text-[18px]">👤</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-mono text-[13px] font-semibold text-ink">Staff view</p>
+                  <p className="font-mono text-[10px] text-ink-soft">Use staff screens to fix a mistake</p>
+                </div>
+                <span className="text-ink-soft/40">›</span>
+              </button>
+            )}
 
             <div className="mx-5 h-px bg-[#e8e0cc]" />
 

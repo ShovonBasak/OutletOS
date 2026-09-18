@@ -24,6 +24,23 @@ class IsOwnerOrAdmin(BasePermission):
         )
 
 
+class IsStaffOwnerOrAdmin(BasePermission):
+    """STAFF, OWNER, or ADMIN — the gated daily-flow endpoints (Day-Start,
+    Stock In, Prep, Closing). OWNER/ADMIN are included deliberately: the
+    "Staff view" toggle lets them use these same screens/endpoints to fix a
+    staff mistake, under their own identity (every actor field on these
+    models — started_by, submitted_by, logged_by, staff — just records
+    whoever is logged in, so this stays honestly attributed). Makes
+    intentional what was previously implicit (IsAuthenticated only)."""
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user and request.user.is_authenticated and (
+                request.user.is_staff_role or request.user.is_owner_or_admin
+            )
+        )
+
+
 class IsOwnerOrReadOnly(BasePermission):
     """Any authenticated user can read; only OWNER can write. Kept for backward-compat."""
 

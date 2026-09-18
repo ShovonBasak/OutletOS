@@ -3,6 +3,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api"
 const ACCESS_KEY = "cp_access";
 const REFRESH_KEY = "cp_refresh";
 const USER_KEY = "cp_user";
+// "Staff view" toggle — an Owner/Admin browsing /staff/* under their own
+// identity to fix a staff mistake. Purely a client-side lens: no new JWT,
+// no impersonation. See lib/auth.tsx useRequireRole for how it's consumed.
+const ACTING_ROLE_KEY = "cp_acting_role";
 
 export function getAccess(): string | null {
   if (typeof window === "undefined") return null;
@@ -19,6 +23,20 @@ export function clearSession() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(ACTING_ROLE_KEY);
+}
+
+export function getActingRole(): "STAFF" | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ACTING_ROLE_KEY) === "STAFF" ? "STAFF" : null;
+}
+
+export function enterStaffActingRole() {
+  localStorage.setItem(ACTING_ROLE_KEY, "STAFF");
+}
+
+export function exitStaffActingRole() {
+  localStorage.removeItem(ACTING_ROLE_KEY);
 }
 
 export function saveUser(user: unknown) {

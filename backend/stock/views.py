@@ -11,7 +11,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwnerOrAdmin
+from accounts.permissions import IsOwnerOrAdmin, IsStaffOwnerOrAdmin
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
 from .models import (
@@ -67,6 +67,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
     queryset = StockInRecord.objects.all()  # required by DRF router for basename detection
     serializer_class = StockInRecordSerializer
     pagination_class = StockInListPagination
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
         "items__ingredient", "items__pack_definition"
@@ -878,6 +879,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 class PreparationLogViewSet(viewsets.ModelViewSet):
     queryset = PreparationLog.objects.select_related("product", "outlet")
     serializer_class = PreparationLogSerializer
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -1112,6 +1114,7 @@ class OperatingDayViewSet(viewsets.ReadOnlyModelViewSet):
         "stock_checks__ingredient__aliases",
     )
     serializer_class = OperatingDaySerializer
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset()
