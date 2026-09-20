@@ -399,6 +399,8 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         APPROVED — all inside one transaction. Split out of `approve()` so the
         lock's scope is obvious: everything with real side effects happens
         inside it, and nothing after it needs the lock held."""
+        from django.db import transaction
+
         from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
 
         with transaction.atomic():
