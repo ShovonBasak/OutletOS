@@ -11,6 +11,10 @@ import { useOperatingDay } from "@/lib/staffDay";
 import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, Paginated, Product } from "@/lib/types";
 
+interface CashBalanceInfo {
+  cash: { balance: string };
+}
+
 function yesterday(): string {
   const d = new Date();
   d.setDate(d.getDate() - 1);
@@ -37,10 +41,22 @@ function ClosingHub() {
   const [notFound, setNotFound] = useState(false);
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [recalcBusy, setRecalcBusy] = useState(false);
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
+  // System cash balance as of right now. While the closing is still open
+  // (DRAFT/SUBMITTED) this does NOT yet include today's cash — that only
+  // posts once the closing locks — so "system cash + today's computed cash"
+  // is exactly what the physical drawer should total. Once LOCKED, today's
+  // cash has already posted into this same balance, so it's used as-is.
+  const [systemCashBalance, setSystemCashBalance] = useState<number | null>(null);
 
   const prevCtx = useRef({ outlet: 0, opDate: "", viewYesterday: false });
 
   async function refresh() {
+    api<CashBalanceInfo>("/cash/")
+      .then((info) => setSystemCashBalance(Number(info.cash.balance)))
+      .catch(() => setSystemCashBalance(null));
+
     if (viewYesterday) {
       const res = await api<Paginated<DailyClosing>>(`/daily-closings/?outlet=${outlet}&date=${opDate}&expand=full`);
       if (res.results[0]) {
@@ -90,8 +106,32 @@ function ClosingHub() {
       const c = await api<DailyClosing>(`/daily-closings/${closing!.id}/submit/`, { method: "POST" });
       invalidateClosingCache(outlet, opDate);
       setClosing(c);
+      setConfirmingSubmit(false);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Cash is a live-computed value server-side, but it's only re-saved into the
+  // cash PaymentEntry (what the payments screen shows once one exists) when
+  // the bKash/online-payment fields are touched. Editing online-sell or
+  // walk-in counts afterward doesn't trigger that — this re-posts the current
+  // payment entries to force the same recompute+resave on demand.
+  async function recalculate() {
+    if (!closing) return;
+    setRecalcBusy(true);
+    try {
+      const entries = closing.payments
+        .filter((p) => !p.is_primary_cash)
+        .map((p) => ({ account_id: p.account, amount: Number(p.amount) }));
+      const c = await api<DailyClosing>(`/daily-closings/${closing.id}/payments/`, {
+        method: "POST",
+        body: JSON.stringify({ entries }),
+      });
+      invalidateClosingCache(outlet, opDate);
+      setClosing(c);
+    } finally {
+      setRecalcBusy(false);
     }
   }
 
@@ -156,6 +196,29 @@ function ClosingHub() {
         </Link>
       )}
 
+      {!viewYesterday && closing.status !== "LOCKED" && (
+        <button
+          className="btn btn-ghost self-end flex items-center gap-1.5 !py-1 !px-2.5 text-[11px]"
+          disabled={recalcBusy}
+          onClick={recalculate}
+          title="Recompute cash from the latest online sell / payments"
+        >
+          <svg
+            className={`h-3.5 w-3.5 ${recalcBusy ? "animate-spin" : ""}`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M3 12a9 9 0 0 1 15.4-6.4M21 12a9 9 0 0 1-15.4 6.4" />
+            <path d="M18 3v4.5h-4.5M6 21v-4.5h4.5" />
+          </svg>
+          {recalcBusy ? "Recalculating…" : "Recalculate"}
+        </button>
+      )}
+
       {(() => {
         const onlineLines = closing.sales_lines.filter((l) => l.source === "STAFF_ENTRY");
         const onlineSell = onlineLines.reduce((s, l) => s + Number(l.gross_amount), 0);
@@ -166,6 +229,15 @@ function ClosingHub() {
         const nonCashPayments = closing.payments.filter(
           (p) => !p.is_primary_cash && Number(p.amount) > 0
         );
+        // Once LOCKED, today's cash has already posted into systemCashBalance
+        // (don't add computed_cash again); before that, it hasn't yet, so add
+        // it to get what the drawer should total right now.
+        const drawerTotal =
+          systemCashBalance === null
+            ? null
+            : closing.status === "LOCKED"
+            ? systemCashBalance
+            : systemCashBalance + Number(closing.computed_cash);
         return (
           <div className="ticket flex flex-col gap-0">
             <div className="ticket-row">
@@ -192,9 +264,26 @@ function ClosingHub() {
             ))}
 
             <div className="ticket-row">
-              <span>Cash (computed)</span>
+              <span>Today&apos;s cash (computed)</span>
               <span className="qty">{bdt(closing.computed_cash)}</span>
             </div>
+
+            {drawerTotal !== null && (
+              <div className="mt-2.5 rounded-lg border border-leaf/40 bg-leaf/10 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[12px] font-semibold uppercase tracking-wide text-leaf-deep">
+                    💵 Cash currently in drawer
+                  </span>
+                  <span className="qty text-base font-bold text-leaf-deep">{bdt(drawerTotal)}</span>
+                </div>
+                {closing.status !== "LOCKED" && (
+                  <p className="mt-1 font-mono text-[10px] text-leaf-deep/70">
+                    = {bdt(systemCashBalance)} already in system + {bdt(closing.computed_cash)} today&apos;s cash.
+                    Count the drawer now and compare before submitting.
+                  </p>
+                )}
+              </div>
+            )}
 
             {closing.has_flag && (
               <p className="mt-2 font-mono text-[11px] text-chili-deep">
@@ -206,9 +295,49 @@ function ClosingHub() {
       })()}
 
       {!viewYesterday && closing.status === "DRAFT" && (
-        <button className="btn btn-primary" disabled={busy} onClick={submit}>
-          {busy ? "Submitting…" : "Submit closing"}
+        <button className="btn btn-primary" onClick={() => setConfirmingSubmit(true)}>
+          Submit closing
         </button>
+      )}
+
+      {/* Confirm-submit dialog — a mistaken tap on "Submit closing" shouldn't
+          be able to lock the day; this forces a deliberate second action. */}
+      {confirmingSubmit && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]"
+            onClick={() => !busy && setConfirmingSubmit(false)}
+          />
+          <div
+            className="fixed bottom-0 left-0 z-50 w-full rounded-t-3xl bg-paper shadow-2xl"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="h-1 w-10 rounded-full bg-ink-soft/20" />
+            </div>
+            <div className="flex flex-col gap-3 px-5 pb-6 pt-2">
+              <p className="font-display text-lg font-bold text-chili-deep">
+                Submit and lock today&apos;s closing?
+              </p>
+              <p className="font-mono text-[11px] leading-relaxed text-ink-soft">
+                Once submitted, today&apos;s sales and cash post to the books and can&apos;t be easily undone.
+                Make sure the drawer count above matches before continuing.
+              </p>
+              <div className="mt-1 flex gap-2">
+                <button
+                  className="btn btn-ghost flex-1"
+                  disabled={busy}
+                  onClick={() => setConfirmingSubmit(false)}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary flex-1" disabled={busy} onClick={submit}>
+                  {busy ? "Submitting…" : "Yes, submit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
       {!viewYesterday && closing.status === "SUBMITTED" && (
         <p className="font-mono text-xs text-gold-deep">Submitted — awaiting owner review (flagged).</p>

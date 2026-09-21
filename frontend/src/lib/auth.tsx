@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   clearSession, getStoredUser, getAccess,
   getSelectedOrgId, getSelectedOrgName, setSelectedOrgId,
+  enterStaffActingRole, exitStaffActingRole, getActingRole,
 } from "./api";
 import type { Role, User } from "./types";
 
@@ -20,6 +21,12 @@ interface AuthState {
   selectedOrgId: number | null;
   selectedOrgName: string | null;
   selectOrg: (id: number | null, name?: string | null) => void;
+  /** Set when an Owner/Admin has toggled into "Staff view" — see enterStaffView. */
+  actingAsStaff: boolean;
+  /** Owner/Admin only: switch into /staff/* under their own identity, to fix a
+   * staff mistake. No new session/JWT — same login, just a UI-level lens. */
+  enterStaffView: () => void;
+  exitStaffView: () => void;
   setUser: (user: User | null) => void;
   logout: () => void;
 }
@@ -33,6 +40,9 @@ const AuthContext = createContext<AuthState>({
   selectedOrgId: null,
   selectedOrgName: null,
   selectOrg: () => {},
+  actingAsStaff: false,
+  enterStaffView: () => {},
+  exitStaffView: () => {},
   setUser: () => {},
   logout: () => {},
 });
@@ -42,11 +52,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [selectedOrgId, setSelectedOrgIdState] = useState<number | null>(null);
   const [selectedOrgName, setSelectedOrgNameState] = useState<string | null>(null);
+  const [actingAsStaff, setActingAsStaff] = useState(false);
 
   useEffect(() => {
     setUser(getStoredUser<User>());
     setSelectedOrgIdState(getSelectedOrgId());
     setSelectedOrgNameState(getSelectedOrgName());
+    setActingAsStaff(getActingRole() === "STAFF");
     setLoading(false);
   }, []);
 
@@ -54,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearSession();
     setSelectedOrgId(null);
     setUser(null);
+    setActingAsStaff(false);
     window.location.href = "/login";
   };
 
@@ -61,6 +74,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSelectedOrgId(id, name);
     setSelectedOrgIdState(id);
     setSelectedOrgNameState(name);
+  };
+
+  const enterStaffView = () => {
+    enterStaffActingRole();
+    setActingAsStaff(true);
+  };
+
+  const exitStaffView = () => {
+    exitStaffActingRole();
+    setActingAsStaff(false);
   };
 
   const isAdmin = user?.role === "ADMIN";
@@ -71,7 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user, loading, isAdmin, isOwnerOrAdmin, isPlatformAdmin,
-        selectedOrgId, selectedOrgName, selectOrg, setUser, logout,
+        selectedOrgId, selectedOrgName, selectOrg,
+        actingAsStaff: actingAsStaff && isOwnerOrAdmin,
+        enterStaffView, exitStaffView,
+        setUser, logout,
       }}
     >
       {children}
@@ -85,9 +111,11 @@ function ownerOrAdminRedirect(role: Role | undefined): string {
   return role === "OWNER" || role === "ADMIN" ? "/owner" : "/staff";
 }
 
-/** Guard a page to one or more roles; redirects to /login if unauthenticated. */
+/** Guard a page to one or more roles; redirects to /login if unauthenticated.
+ * An Owner/Admin who has toggled "Staff view" on is additionally allowed
+ * through any guard that accepts STAFF — see AuthProvider.enterStaffView. */
 export function useRequireRole(role: Role | Role[]) {
-  const { user, loading, isAdmin, isOwnerOrAdmin } = useAuth();
+  const { user, loading, isAdmin, isOwnerOrAdmin, actingAsStaff } = useAuth();
   const router = useRouter();
   const allowed = Array.isArray(role) ? role : [role];
 
@@ -95,10 +123,11 @@ export function useRequireRole(role: Role | Role[]) {
     if (loading) return;
     if (!getAccess() || !user) {
       router.replace("/login");
-    } else if (!allowed.includes(user.role)) {
-      router.replace(ownerOrAdminRedirect(user.role));
+    } else {
+      const ok = allowed.includes(user.role) || (allowed.includes("STAFF") && actingAsStaff);
+      if (!ok) router.replace(ownerOrAdminRedirect(user.role));
     }
-  }, [user, loading, router]);
+  }, [user, loading, actingAsStaff, router]);
 
-  return { user, loading, isAdmin, isOwnerOrAdmin };
+  return { user, loading, isAdmin, isOwnerOrAdmin, actingAsStaff };
 }

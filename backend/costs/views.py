@@ -44,29 +44,29 @@ class ExpenseViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         self._create_account_transaction(expense)
 
     def perform_update(self, serializer):
-        old = self.get_object()
         expense = serializer.save()
-        # Remove old transaction and recreate if account changed
+        # Void the old transaction and repost — the amount/account/date may
+        # have changed, so the whole chain from that point needs redoing.
+        from finance import services
         from finance.models import AccountTransaction
-        AccountTransaction.objects.filter(source_type="EXPENSE", source_id=expense.id).delete()
+        for t in AccountTransaction.objects.filter(source_type="EXPENSE", source_id=expense.id):
+            services.void_transaction(t.id)
         self._create_account_transaction(expense)
 
     def perform_destroy(self, instance):
+        from finance import services
         from finance.models import AccountTransaction
-        AccountTransaction.objects.filter(source_type="EXPENSE", source_id=instance.id).delete()
+        for t in AccountTransaction.objects.filter(source_type="EXPENSE", source_id=instance.id):
+            services.void_transaction(t.id)
         instance.delete()
 
     def _create_account_transaction(self, expense):
         if not expense.paid_from_account_id:
             return
-        from finance.models import AccountTransaction
-        AccountTransaction.objects.create(
-            account=expense.paid_from_account,
-            transaction_type="EXPENSE_PAYMENT",
-            amount=-expense.amount,
-            date=expense.date,
-            source_type="EXPENSE",
-            source_id=expense.id,
-            entered_by=expense.entered_by,
+        from finance import services
+        services.post_transaction(
+            account=expense.paid_from_account, transaction_type="EXPENSE_PAYMENT",
+            amount=-expense.amount, date=expense.date, entered_by=expense.entered_by,
+            source_type="EXPENSE", source_id=expense.id,
             note=expense.description or f"{expense.category.name}",
         )

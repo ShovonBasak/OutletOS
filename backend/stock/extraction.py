@@ -12,6 +12,7 @@ class ExtractedLine:
     unit_captured: str = "PACK"
     rate: float | None = None
     total_amount: float | None = None
+    discount: float | None = None
     sd_rate: float | None = None
     sd_amount: float | None = None
     vat_rate: float | None = None

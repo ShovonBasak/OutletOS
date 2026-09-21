@@ -249,7 +249,7 @@ export default function StockSummaryScreen() {
                   qty={Number(r.current_qty)}
                   unit={r.base_unit}
                   dim={Number(r.current_qty) <= 0}
-                  piecesPerPack={r.pieces_per_pack ? Number(r.pieces_per_pack) : null}
+                  piecesPerPack={r.bundle_size ? Number(r.bundle_size) : null}
                 />
               )),
           ]}

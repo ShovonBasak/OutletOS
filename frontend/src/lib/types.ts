@@ -206,6 +206,7 @@ export interface DayStartStockCheck {
   system_carried_qty: string;
   confirmed_qty: string;
   discrepancy_qty: string;
+  pieces_per_pack: string | null;
   discrepancy_reason: DiscrepancyReason;
   note: string;
 }
@@ -398,7 +399,9 @@ export interface PackagingLevel {
   ingredient_display_name: string;
   ingredient_group: string;
   base_unit: string;
-  pieces_per_pack: string | null;
+  // How many pieces make up one physical bundle — independent of stock-in's
+  // PackDefinition.pieces_per_pack. See Ingredient.bundle_size on the backend.
+  bundle_size: string | null;
   current_qty: string;
   cost_per_base_unit: string | null;
   source: "counted" | "counted_plus_stock_in" | "stock_in_derived";
@@ -714,6 +717,9 @@ export interface AccountTransaction {
   entered_by: number;
   entered_by_name: string;
   note: string;
+  balance_before: string;
+  balance_after: string;
+  created_at: string;
 }
 
 export interface AccountTransfer {
@@ -965,4 +971,69 @@ export interface Paginated<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+}
+
+/** One product's daily-sold history + current makeable stock, from
+ * /reports/sell-history/. `stock` = units still makeable from current raw
+ * ingredient stock (null when the product has no recipe rows to compute it). */
+export interface SellHistoryRow {
+  id: number;
+  name: string;
+  category: string;
+  daily: Record<string, number>;
+  /** Units of this product the RAW INGREDIENT stock could make that day —
+   * day-start reading plus anything approved-stock-in received that same
+   * day — at the bottleneck ingredient (same rule as `stock`). NOT how many
+   * were actually prepared, which is a staffing/time decision that can
+   * under-report real supply. Null when there's no day-start reading for
+   * that date. Lets a quiet day be read correctly: no/low raw stock that day
+   * vs. stock was there and it just didn't sell. */
+  daily_stock: Record<string, number | null>;
+  total: number;
+  stock: number | null;
+  /** Raw quantity/pack size of `stock`'s bottleneck ingredient — feed into
+   * packBreakdown() to show "1 pack + 2 piece" alongside the makeable-now
+   * number. Null when `stock` is null (no recipe ingredients to compute it). */
+  stock_pack: { quantity_available: string; pieces_per_pack: string | null; base_unit: string } | null;
+}
+
+/** How long the shop was open on a given date — opened_at is when staff
+ * started the day, closed_at is when the closing was submitted; hours_open
+ * is null if either is missing (day not yet closed) or the day is still open. */
+export interface DateHours {
+  opened_at: string | null;
+  closed_at: string | null;
+  hours_open: number | null;
+}
+
+export interface SellHistoryResponse {
+  dates: string[];
+  rows: SellHistoryRow[];
+  date_hours: Record<string, DateHours>;
+  range_clamped: boolean;
+}
+
+/** Per-ingredient breakdown behind a SellHistoryRow's `stock` figure, from
+ * /reports/product-stock-detail/ — explains which ingredient is the
+ * bottleneck when a multi-ingredient product's stock is low. */
+export interface ProductStockIngredient {
+  ingredient_id: number;
+  ingredient_name: string;
+  base_unit: string;
+  quantity_available: string;
+  quantity_per_unit: string;
+  pieces_possible: number;
+  pieces_per_pack: string | null;
+  /** Packaging/supply ingredient (bamboo sticks, sauce sachets, etc.) —
+   * shown for context but never the bottleneck; it's tracked separately via
+   * a coarse consumption-ratio signal, not a per-unit blocker. */
+  is_periodic: boolean;
+  is_bottleneck: boolean;
+}
+
+export interface ProductStockDetail {
+  product_id: number;
+  product_name: string;
+  current_stock: number | null;
+  ingredients: ProductStockIngredient[];
 }

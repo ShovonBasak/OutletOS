@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
-from .models import DailyClosingSalesLine, LineSource
+from .models import DailyClosingSalesLine, DailyClosingStockCount, LineSource
 
 
 def _walk_in_channel():
@@ -22,16 +22,27 @@ def recompute_closing(closing):
 
     walk_in = _walk_in_channel()
 
+    # Fetch stock counts fresh, once, bypassing whatever prefetch cache `closing`
+    # may be carrying. `closing` is typically fetched via a queryset that
+    # prefetches `stock_counts` at the START of the request (see
+    # DailyClosingViewSet.queryset) — if a caller (e.g. the stock-count action)
+    # mutates and saves an individual DailyClosingStockCount row and THEN calls
+    # this function in the same request, `closing.stock_counts.all()` would
+    # transparently return that stale prefetched cache instead of hitting the
+    # DB, silently recomputing (and re-persisting) the flag and the walk-in
+    # revenue line from the pre-save values.
+    counts = list(
+        DailyClosingStockCount.objects.filter(daily_closing=closing).select_related("product")
+    )
+
     # For DRAFT closings, keep available_pieces in sync with DisplayStock for prep
     # products. Non-prep products have their available_pieces set by the stock-count
     # step (day-start + stock-in formula) and their DisplayStock is set to `remains`
     # by _initialize_direct_stock — touching those would corrupt the formula.
     if closing.status == ClosingStatus.DRAFT:
-        for count in (
-            closing.stock_counts
-            .select_related("product")
-            .filter(product__requires_preparation=True)
-        ):
+        for count in counts:
+            if not count.product.requires_preparation:
+                continue
             ds = DisplayStock.objects.filter(
                 outlet=closing.outlet, product=count.product
             ).first()
@@ -49,7 +60,7 @@ def recompute_closing(closing):
         app_sold[line.product_id] += line.quantity_sold
 
     # Update each stock count's app_channel_sold + flag.
-    for count in closing.stock_counts.all():
+    for count in counts:
         count.app_channel_sold = app_sold.get(count.product_id, 0)
         count.recompute_flag()
         count.save(update_fields=["app_channel_sold", "flag"])
@@ -61,7 +72,7 @@ def recompute_closing(closing):
     closing.sales_lines.filter(
         channel=walk_in, source=LineSource.SYSTEM_DERIVED
     ).delete()
-    for count in closing.stock_counts.select_related("product"):
+    for count in counts:
         qty = count.derived_walkin_sold
         if qty <= 0:
             continue

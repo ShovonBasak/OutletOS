@@ -281,7 +281,10 @@ export default function StaffHome() {
         </Link>
       )}
 
-      {/* Quick action tiles — always visible */}
+      {/* Quick action tiles — always visible. Stock summary and Packaging are
+          read-only views of current stock, not steps in the gated daily flow,
+          so they stay reachable regardless of where the day is at (including
+          after closing, or before the next day has been started). */}
       <div className="tilegrid">
         <Link href="/staff/closing/history" className="tile">
           <span className="n">≡</span>
@@ -291,16 +294,20 @@ export default function StaffHome() {
           <span className="n">🛢</span>
           <span className="l">Log oil change</span>
         </Link>
+        <Link href="/staff/closing/stock" className="tile">
+          <span className="n">▦</span>
+          <span className="l">Stock summary</span>
+        </Link>
+        <Link href="/staff/packaging" className="tile">
+          <span className="n">▦</span>
+          <span className="l">Packaging &amp; supplies</span>
+        </Link>
+        <Link href="/staff/sell-history" className="tile">
+          <span className="n">📈</span>
+          <span className="l">Sell history</span>
+        </Link>
         {(status === "IN_PROGRESS" || status === "CLOSED") && (
           <>
-            <Link href="/staff/closing/stock" className="tile">
-              <span className="n">▦</span>
-              <span className="l">Stock summary</span>
-            </Link>
-            <Link href="/staff/packaging" className="tile">
-              <span className="n">▦</span>
-              <span className="l">Packaging &amp; supplies</span>
-            </Link>
             <Link href="/staff/expense" className="tile">
               <span className="n">+</span>
               <span className="l">Add expense</span>

@@ -192,6 +192,7 @@ export default function StockInPage() {
   const [draft, setDraft] = useState<StockInRecord | null>(null);
   const [lines, setLines] = useState<EditLine[]>([]);
   const [accountId, setAccountId] = useState("");
+  const [invoiceNo, setInvoiceNo] = useState("");
   const [busy, setBusy] = useState<string>("");
   const [msg, setMsg] = useState("");
 
@@ -270,6 +271,16 @@ export default function StockInPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet]);
 
+  // The account picker and invoice number are their own local state (so
+  // staff can freely edit them before saving) — sync from the server record
+  // whenever one loads (resuming a draft, or after "Auto-read from slip"
+  // fills them in), so a later save doesn't silently overwrite the
+  // auto-populated value with whatever the fields still held from before.
+  function syncAccountFromRecord(record: StockInRecord) {
+    if (record.paid_from_account) setAccountId(String(record.paid_from_account));
+    setInvoiceNo(record.invoice_number ?? "");
+  }
+
   async function startOrResume() {
     setMsg("");
     const existing = records.find((r) => r.status === "DRAFT");
@@ -279,6 +290,7 @@ export default function StockInPage() {
         const full = await api<StockInRecord>(`/stock-in/${existing.id}/`);
         setDraft(full);
         setLines(toEditLines(full.items ?? []));
+        syncAccountFromRecord(full);
       } finally {
         setBusy("");
       }
@@ -292,6 +304,7 @@ export default function StockInPage() {
       });
       setDraft(rec);
       setLines([]);
+      setInvoiceNo("");
     } finally {
       setBusy("");
     }
@@ -327,6 +340,7 @@ export default function StockInPage() {
       );
       setDraft(rec);
       setLines(toEditLines(rec.items ?? []));
+      syncAccountFromRecord(rec);
       const unresolved = (rec.items ?? []).filter((i) => i.ingredient == null).length;
       setMsg(
         rec.extracted_count > 0
@@ -451,6 +465,11 @@ export default function StockInPage() {
       }, 0),
     [lines]
   );
+  // Compared against the slip's own printed total (when extracted) so a
+  // missing/duplicated/misread line surfaces before submission.
+  const slipTotal = draft?.slip_grand_total ? parseFloat(draft.slip_grand_total) : null;
+  const draftTotalDiff = slipTotal != null && !isNaN(slipTotal) ? draftTotal - slipTotal : null;
+  const draftTotalMismatch = draftTotalDiff != null && Math.abs(draftTotalDiff) >= 1;
 
   async function persist(): Promise<StockInRecord | null> {
     if (!draft) return null;
@@ -512,6 +531,7 @@ export default function StockInPage() {
         outlet,
         stock_in_date: draft.stock_in_date,
         paid_from_account: accountId ? Number(accountId) : null,
+        invoice_number: invoiceNo.trim(),
         items,
       }),
     });
@@ -604,6 +624,18 @@ export default function StockInPage() {
                 {busy === "extract" ? "Reading…" : "Auto-read from slip"}
               </button>
             </div>
+          </div>
+
+          {/* Invoice number — auto-filled by "Auto-read from slip", editable to correct */}
+          <div className="flex flex-col gap-1">
+            <span className="field-label">Invoice no.</span>
+            <input
+              type="text"
+              className="field-input"
+              placeholder="e.g. INV-2024-001"
+              value={invoiceNo}
+              onChange={(e) => setInvoiceNo(e.target.value)}
+            />
           </div>
 
           {/* Payment account */}
@@ -735,6 +767,13 @@ export default function StockInPage() {
               <span className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Total (this stock-in)</span>
               <span className="font-mono text-sm font-bold text-ink">৳{draftTotal.toFixed(2)}</span>
             </div>
+          )}
+
+          {draftTotalMismatch && (
+            <p className="rounded border border-chili bg-[#fdece1] px-2 py-1.5 font-mono text-[11px] font-semibold text-chili-deep">
+              ⚠ Line totals add up to ৳{draftTotal.toFixed(2)}, but the slip total is ৳{slipTotal!.toFixed(2)}
+              {" "}(off by ৳{Math.abs(draftTotalDiff!).toFixed(2)}) — check for a missing, duplicated, or misread line.
+            </p>
           )}
 
           <div className="flex gap-2">

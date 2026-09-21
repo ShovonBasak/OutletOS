@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, shortDate, today } from "@/lib/format";
@@ -320,9 +321,10 @@ export default function AccountsPage() {
                 {group.map((a) => {
                   const bal = Number(a.current_balance);
                   return (
-                    <div
+                    <Link
                       key={a.id}
-                      className={`rounded-lg border-2 px-4 py-3 flex flex-col gap-1 ${ACCOUNT_TYPE_COLOR[a.account_type] ?? "border-[#d8cdb0]"}`}
+                      href={`/owner/accounts/${a.id}`}
+                      className={`rounded-lg border-2 px-4 py-3 flex flex-col gap-1 hover:brightness-95 transition ${ACCOUNT_TYPE_COLOR[a.account_type] ?? "border-[#d8cdb0]"}`}
                     >
                       <div className="flex items-center gap-2">
                         <span className="font-display text-[15px] font-bold text-ink">{a.name}</span>
@@ -341,7 +343,7 @@ export default function AccountsPage() {
                       <div className="font-mono text-[10px] text-ink-soft">
                         Opening {bdt(a.opening_balance)} · from {shortDate(a.opening_balance_date)}
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -410,7 +412,11 @@ export default function AccountsPage() {
                   const bal = Number(a.current_balance);
                   return (
                     <tr key={a.id}>
-                      <td className="font-semibold">{a.name}</td>
+                      <td className="font-semibold">
+                        <Link href={`/owner/accounts/${a.id}`} className="hover:underline">
+                          {a.name}
+                        </Link>
+                      </td>
                       <td className="text-ink-soft capitalize">{a.account_type_display}</td>
                       <td className="text-right font-mono">{bdt(a.opening_balance)}</td>
                       <td className={`text-right font-mono font-bold ${BALANCE_COLOR(bal)}`}>
@@ -472,6 +478,8 @@ export default function AccountsPage() {
                   <th>Account</th>
                   <th>Type</th>
                   <th className="text-right">Amount</th>
+                  <th className="text-right">Before</th>
+                  <th className="text-right">After</th>
                   <th>Note</th>
                   {isAdmin && <th></th>}
                 </tr>
@@ -496,6 +504,12 @@ export default function AccountsPage() {
                         amt >= 0 ? "text-leaf-deep" : "text-chili-deep"
                       }`}>
                         {amt >= 0 ? "+" : ""}{bdt(amt)}
+                      </td>
+                      <td className={`text-right font-mono ${BALANCE_COLOR(Number(t.balance_before))}`}>
+                        {bdt(t.balance_before)}
+                      </td>
+                      <td className={`text-right font-mono font-semibold ${BALANCE_COLOR(Number(t.balance_after))}`}>
+                        {bdt(t.balance_after)}
                       </td>
                       <td className="text-ink-soft text-xs">{t.note || "—"}</td>
                       {isAdmin && (
@@ -524,7 +538,7 @@ export default function AccountsPage() {
                 })}
                 {transactions.length === 0 && (
                   <tr>
-                    <td colSpan={isAdmin ? 6 : 5} className="text-ink-soft">No transactions in this period.</td>
+                    <td colSpan={isAdmin ? 8 : 7} className="text-ink-soft">No transactions in this period.</td>
                   </tr>
                 )}
               </tbody>

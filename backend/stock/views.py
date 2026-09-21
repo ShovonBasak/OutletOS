@@ -12,7 +12,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.mixins import OrgScopedQuerySetMixin
-from accounts.permissions import IsOwnerOrAdmin
+from accounts.permissions import IsOwnerOrAdmin, IsStaffOwnerOrAdmin
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
@@ -52,6 +52,8 @@ from .services import (
     carry_forward_candidates,
     consume_for_preparation,
     get_or_create_today,
+    merge_duplicate_stock_in_lines,
+    reconcile_backdated_stock_in,
     restock_from_preparation,
     stock_in_since,
 )
@@ -68,6 +70,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = StockInRecordSerializer
     pagination_class = StockInListPagination
     org_lookup = "outlet__organization"
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
         "items__ingredient", "items__pack_definition"
@@ -108,9 +111,17 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             )
         # Staff's list is keyed to when a record was created, not the (often
         # corrected) invoice date — a just-uploaded stock-in always surfaces
-        # at the top regardless of what stock_in_date says.
-        if self.request.query_params.get("sort") == "created":
+        # at the top regardless of what stock_in_date says. Deliberately NOT
+        # updated_at here: an owner correcting an older record's date shouldn't
+        # reshuffle where staff finds the record they just submitted.
+        sort_param = self.request.query_params.get("sort")
+        if sort_param == "created":
             return qs.order_by("-created_at", "-id")
+        # Owner's list: whatever was most recently created OR edited — a late
+        # slip entered today, or an older record the owner just corrected —
+        # always surfaces at the top, regardless of what stock_in_date says.
+        if sort_param == "updated":
+            return qs.order_by("-updated_at", "-id")
         return qs.order_by("-stock_in_date", "-created_at")
 
     def get_serializer_class(self):
@@ -152,7 +163,9 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         if not image:
             raise ValidationError("No slip_image file provided.")
         record.slip_image = image
-        record.save(update_fields=["slip_image"])
+        # auto_now doesn't fire unless it's in update_fields — Django only
+        # writes/touches the columns explicitly listed.
+        record.save(update_fields=["slip_image", "updated_at"])
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"])
@@ -199,9 +212,42 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         # Update StockInRecord header fields from the extracted slip data.
         record_update_fields = []
         invoice_number = result.get("invoice_number")
-        if invoice_number and not record.invoice_number:
+        if invoice_number:
+            # Always take the freshly-read value — re-running "Auto-read from
+            # slip" (e.g. after replacing a blurry photo) is an explicit ask
+            # to re-read the invoice number, not just fill it in once.
             record.invoice_number = str(invoice_number).strip()
             record_update_fields.append("invoice_number")
+
+        # Auto-select the paying account from the detected supplier — CP
+        # Bangladesh deliveries go on the CP supplier-credit account;
+        # anything else (or an unreadable letterhead) defaults to Shop Cash.
+        # Only when nothing's already chosen — never overrides a manual pick.
+        if not record.paid_from_account_id:
+            from finance.models import FinancialAccount
+
+            import re
+
+            supplier_name = result.get("supplier_name") or ""
+            # Strip punctuation first — the real letterhead is usually
+            # "C.P Bangladesh" / "C.P. Bangladesh", and "cp" wouldn't match
+            # against "c.p bangladesh" as a plain substring.
+            is_cp = "cp" in re.sub(r"[^a-z0-9]", "", supplier_name.lower())
+            org_id = record.outlet.organization_id
+            account = None
+            if is_cp:
+                account = FinancialAccount.objects.filter(
+                    organization_id=org_id, account_type="SUPPLIER_CREDIT",
+                    is_active=True, name__icontains="CP",
+                ).first()
+            if not account:
+                account = FinancialAccount.objects.filter(
+                    organization_id=org_id, is_primary_cash=True, is_active=True,
+                ).first()
+            if account:
+                record.paid_from_account = account
+                record_update_fields.append("paid_from_account")
+
         slip_date = result.get("date")
         if slip_date:
             from datetime import date as _date
@@ -221,10 +267,13 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 setattr(record, field, val)
                 record_update_fields.append(field)
         if record_update_fields:
-            record.save(update_fields=record_update_fields)
+            # auto_now doesn't fire unless it's in update_fields.
+            record.save(update_fields=record_update_fields + ["updated_at"])
+
+        raw_items, merge_warnings = merge_duplicate_stock_in_lines(result.get("items", []))
 
         lines: list[ExtractedLine] = []
-        for item in result.get("items", []):
+        for item in raw_items:
             matched_name = item.get("matched_ingredient")
             ingredient_id = None
             pack_definition_id = None
@@ -243,6 +292,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 unit_captured=item.get("unit", "PACK"),
                 rate=item.get("rate"),
                 total_amount=item.get("total_amount"),
+                discount=item.get("discount"),
                 sd_rate=item.get("sd_rate"),
                 sd_amount=item.get("sd_amount"),
                 vat_rate=item.get("vat_rate"),
@@ -253,6 +303,13 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
         record.items.filter(source=LineSource.SLIP_EXTRACTED).delete()
         for line in lines:
+            # Noise filter: a resolved line with no usable quantity and no raw
+            # text is virtually always an OCR misread of a header/blank row,
+            # not a real delivery line.
+            if (line.ingredient_id is not None
+                    and not (line.extracted_quantity or 0) > 0
+                    and not line.raw_text.strip()):
+                continue
             StockInItem.objects.create(
                 stock_in_record=record,
                 ingredient_id=line.ingredient_id,
@@ -264,6 +321,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 confirmed_quantity=line.extracted_quantity or Decimal("0"),
                 rate=_dec(line.rate),
                 total_amount=_dec(line.total_amount),
+                discount=_dec(line.discount),
                 sd_rate=_dec(line.sd_rate),
                 sd_amount=_dec(line.sd_amount),
                 vat_rate=_dec(line.vat_rate),
@@ -274,6 +332,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         record = self.get_queryset().get(pk=record.pk)
         data = self.get_serializer(record).data
         data["extracted_count"] = len(lines)
+        data["merge_warnings"] = merge_warnings
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="resolve-line")
@@ -342,6 +401,11 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         record = self.get_object()
         if record.status != StockInStatus.DRAFT:
             raise ValidationError("Only DRAFT records can be submitted.")
+        if record.stock_in_date > timezone.localdate():
+            raise ValidationError(
+                f"Stock-in date {record.stock_in_date} is in the future — likely a "
+                "date entry/OCR mistake. Correct it before submitting."
+            )
         unresolved = record.unresolved_lines
         if unresolved:
             raise ValidationError(
@@ -379,8 +443,79 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         if not new_date:
             raise ValidationError("stock_in_date is required.")
         record.stock_in_date = new_date
-        record.save(update_fields=["stock_in_date"])
+        # auto_now doesn't fire unless it's in update_fields — and this
+        # correction is exactly the kind of edit that should bump the record
+        # to the top of the owner's "latest touched" list.
+        record.save(update_fields=["stock_in_date", "updated_at"])
         return Response(self.get_serializer(record).data)
+
+    def _lock_and_transition_to_approved(self, record, request):
+        """Locks the row, re-validates, adjusts RawStock, and flips PENDING →
+        APPROVED — all inside one transaction. Split out of `approve()` so the
+        lock's scope is obvious: everything with real side effects happens
+        inside it, and nothing after it needs the lock held."""
+        from django.db import transaction
+
+        from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
+
+        with transaction.atomic():
+            record = StockInRecord.objects.select_for_update().get(pk=record.pk)
+
+            # Re-check inside the lock: two near-simultaneous approve requests
+            # (double-click, a retried request) can both pass an earlier,
+            # unlocked status check before either commits — both would then run
+            # the RawStock-adjustment loop below and double-count the delivery.
+            if record.status != StockInStatus.PENDING:
+                raise ValidationError("Only PENDING records can be approved.")
+
+            # Scoped to (outlet, invoice_number, stock_in_date) — CP Bangladesh
+            # invoice numbers recur across genuinely different deliveries (seen
+            # in real data, ~2 weeks apart), so invoice_number alone isn't a
+            # reliable duplicate signal; pairing it with the date is.
+            duplicate = StockInRecord.objects.filter(
+                outlet=record.outlet,
+                invoice_number=record.invoice_number,
+                stock_in_date=record.stock_in_date,
+                status=StockInStatus.APPROVED,
+            ).exclude(pk=record.pk).exclude(invoice_number="").first()
+            if record.invoice_number and duplicate:
+                raise ValidationError(
+                    f"Invoice '{record.invoice_number}' dated {record.stock_in_date} is "
+                    f"already approved as stock-in #{duplicate.pk}. If this is genuinely "
+                    "a different delivery, correct the invoice number or date first."
+                )
+
+            account_id = request.data.get("paid_from_account")
+            if account_id is not None:
+                from finance.models import FinancialAccount
+                try:
+                    record.paid_from_account = FinancialAccount.objects.get(pk=account_id) if account_id else None
+                except FinancialAccount.DoesNotExist:
+                    raise ValidationError("Invalid account.")
+
+            for item in record.items.select_related("ingredient", "pack_definition"):
+                if not item.ingredient_id:
+                    continue
+                if item.ingredient.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
+                    continue  # ONE_TIME: cost audit only; PERIODIC_COUNT: tracked via periodic checks
+                RawStock.adjust(record.outlet, item.ingredient, item.base_unit_quantity())
+
+                if (item.pack_definition_id
+                        and item.unit_captured == UnitCaptured.PACK
+                        and item.confirmed_quantity):
+                    cost = _effective_cost_per_pack(
+                        item.unit_price, item.line_total, item.confirmed_quantity
+                    )
+                    if cost:
+                        update_pack_definition_cost(
+                            item.pack_definition_id, cost, record.stock_in_date
+                        )
+
+            record.status = StockInStatus.APPROVED
+            record.reviewed_by = request.user
+            record.reviewed_at = timezone.now()
+            record.save()
+        return record
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def approve(self, request, pk=None):
@@ -390,44 +525,33 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         from the slip so that future COGS calculations use the current purchase cost.
         Accepts optional paid_from_account in request body to override the account.
         """
-        from .historic_import import _effective_cost_per_pack, update_pack_definition_cost
-        from finance.models import AccountTransaction, FinancialAccount
+        from django.db import IntegrityError, transaction
+        from finance import services as finance_services
         from decimal import Decimal
 
         record = self.get_object()
-        if record.status != StockInStatus.PENDING:
-            raise ValidationError("Only PENDING records can be approved.")
+        try:
+            record = self._lock_and_transition_to_approved(record, request)
+        except IntegrityError:
+            # Belt-and-suspenders: the row lock above protects against
+            # re-approving the SAME record twice, but not two DIFFERENT records
+            # that both carry the same invoice number approved in the same
+            # instant — uniq_approved_invoice_per_outlet is the actual backstop
+            # for that race, and lands here as an IntegrityError.
+            raise ValidationError(
+                "This invoice number is already approved for this outlet "
+                "(a concurrent approval won the race) — refresh and check."
+            )
 
-        # Allow owner to override or set the payment account at approval time.
-        account_id = request.data.get("paid_from_account")
-        if account_id is not None:
+        # Outside the lock: cascades a correction to any already-confirmed later
+        # day's Day-Start Stock Check / RawStock / closing when this slip is dated
+        # for an earlier day (the "late slip" pattern) — a no-op otherwise.
+        for w in reconcile_backdated_stock_in(record):
             try:
-                record.paid_from_account = FinancialAccount.objects.get(pk=account_id) if account_id else None
-            except FinancialAccount.DoesNotExist:
-                raise ValidationError("Invalid account.")
-
-        for item in record.items.select_related("ingredient", "pack_definition"):
-            if not item.ingredient_id:
-                continue
-            if item.ingredient.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
-                continue  # ONE_TIME: cost audit only; PERIODIC_COUNT: tracked via periodic checks
-            RawStock.adjust(record.outlet, item.ingredient, item.base_unit_quantity())
-
-            if (item.pack_definition_id
-                    and item.unit_captured == UnitCaptured.PACK
-                    and item.confirmed_quantity):
-                cost = _effective_cost_per_pack(
-                    item.unit_price, item.line_total, item.confirmed_quantity
-                )
-                if cost:
-                    update_pack_definition_cost(
-                        item.pack_definition_id, cost, record.stock_in_date
-                    )
-
-        record.status = StockInStatus.APPROVED
-        record.reviewed_by = request.user
-        record.reviewed_at = timezone.now()
-        record.save()
+                from accounts.push import send_push_to_owners
+                send_push_to_owners(title="Stock-in needs review", body=w, url="/owner/stock-in")
+            except Exception:
+                pass
 
         # Deduct from the payment account if one is set.
         if record.paid_from_account_id:
@@ -438,14 +562,10 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 )
             )
             if total > 0:
-                AccountTransaction.objects.create(
-                    account=record.paid_from_account,
-                    transaction_type="SUPPLIER_ORDER_DEDUCTION",
-                    amount=-total,
-                    date=record.stock_in_date,
-                    source_type="STOCK_IN_RECORD",
-                    source_id=record.id,
-                    entered_by=request.user,
+                finance_services.post_transaction(
+                    account=record.paid_from_account, transaction_type="SUPPLIER_ORDER_DEDUCTION",
+                    amount=-total, date=record.stock_in_date, entered_by=request.user,
+                    source_type="STOCK_IN_RECORD", source_id=record.id,
                     note=f"Stock-in {record.invoice_number or f'#{record.id}'} approved",
                 )
 
@@ -617,7 +737,8 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             record.slip_image = slip_image
             update_fields.append("slip_image")
         if update_fields:
-            record.save(update_fields=update_fields)
+            # auto_now doesn't fire unless it's in update_fields.
+            record.save(update_fields=update_fields + ["updated_at"])
 
         excel_file = request.FILES.get("excel_file")
         if not excel_file:
@@ -817,6 +938,7 @@ class PreparationLogViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = PreparationLog.objects.select_related("product", "outlet")
     serializer_class = PreparationLogSerializer
     org_lookup = "outlet__organization"
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -1063,6 +1185,7 @@ class OperatingDayViewSet(OrgScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet)
     )
     serializer_class = OperatingDaySerializer
     org_lookup = "outlet__organization"
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1334,8 +1457,16 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bundle-finished")
     def bundle_finished(self, request, pk=None):
-        """One-tap 'used the last of a bundle' — subtracts the pack size from the
-        last count. Body: {outlet, ingredient}."""
+        """One-tap 'used the last of a bundle' — subtracts the bundle size from
+        the last count. Body: {outlet, ingredient}.
+
+        Uses Ingredient.bundle_size, NOT PackDefinition.pieces_per_pack — those
+        are deliberately different numbers. pieces_per_pack is the stock-in
+        slip's pack-to-piece conversion factor; bundle_size is how many pieces
+        are in the physical bundle staff open and finish day to day. They often
+        differ (e.g. a slip reporting a case of 100 sachets directly as "100
+        pcs" gives pieces_per_pack=1 for correct stock-in math, while the
+        physical bundle is still 100 pieces)."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
         outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
         prev = (
@@ -1343,14 +1474,46 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             .order_by("-checked_at")
             .first()
         )
-        pack = ingredient.active_pack()
-        bundle = pack.pieces_per_pack if pack else Decimal("0")
+        bundle = ingredient.bundle_size or Decimal("0")
         prev_qty = prev.counted_qty if prev else bundle
         counted = max(Decimal("0"), prev_qty - bundle)
         obj = self._record(
-            outlet, ingredient, counted, "Bundle finished (−1 pack)", request.user
+            outlet, ingredient, counted, "Bundle finished (−1 bundle)", request.user
         )
         return Response(self.get_serializer(obj).data, status=201)
+
+    @action(detail=False, methods=["post"], url_path="set-bundle-size")
+    def set_bundle_size(self, request):
+        """Staff-configurable bundle size for a PERIODIC_COUNT ingredient — how
+        many pieces make up one physical bundle, i.e. what 'bundle finished'
+        (− 1 bundle) subtracts. Body: {ingredient, bundle_size}.
+
+        This is Ingredient.bundle_size, a plain field with no price-versioning —
+        deliberately separate from PackDefinition.pieces_per_pack (the stock-in
+        slip's pack-to-piece conversion factor, admin-only via
+        PackDefinitionViewSet). Conflating the two would mean correcting a
+        bundle size here could silently change how future stock-in slips get
+        converted to base units.
+        """
+        ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
+        if ingredient.tracking_mode != TrackingMode.PERIODIC_COUNT:
+            raise ValidationError(
+                "Bundle size can only be set here for packaging/supply "
+                "(periodic-count) ingredients."
+            )
+        try:
+            bundle_size = Decimal(str(request.data["bundle_size"]))
+        except (KeyError, ValueError, TypeError):
+            raise ValidationError("bundle_size is required and must be a number.")
+        if bundle_size <= 0:
+            raise ValidationError("Bundle size must be greater than zero.")
+
+        ingredient.bundle_size = bundle_size
+        ingredient.save(update_fields=["bundle_size"])
+        return Response({
+            "ingredient": ingredient.id,
+            "bundle_size": str(ingredient.bundle_size),
+        }, status=201)
 
     @action(detail=False, methods=["get"], url_path="levels")
     def levels(self, request):
@@ -1379,7 +1542,6 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         result = []
         for ing in ingredients:
             check = latest_by_ing.get(ing.id)
-            pack = ing.active_pack()
             if check:
                 # Add any stock-in received since the last physical count.
                 new_stock = stock_in_since(outlet, ing, since_dt=check.checked_at)
@@ -1399,7 +1561,7 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 "ingredient_display_name": alias.alias_text if alias else ing.name,
                 "ingredient_group": resolve_ingredient_group(ing, category_map),
                 "base_unit": ing.base_unit,
-                "pieces_per_pack": str(pack.pieces_per_pack) if pack else None,
+                "bundle_size": str(ing.bundle_size) if ing.bundle_size else None,
                 "current_qty": current_qty,
                 "cost_per_base_unit": str(cost_per_base_unit) if cost_per_base_unit is not None else None,
                 "source": source,

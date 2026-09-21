@@ -91,6 +91,17 @@ class StockInRecordSerializer(serializers.ModelSerializer):
     submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
     paid_from_account_name = serializers.SerializerMethodField()
     unresolved_count = serializers.SerializerMethodField()
+    # Explicit default (not just required=False) — invoice_number participates
+    # in a conditional UniqueConstraint, and DRF's auto-generated
+    # UniqueTogetherValidator forces participating fields to be present in
+    # `attrs` regardless of their own `required` flag. Without a default here,
+    # omitting invoice_number (the normal case: "+ New" creates a blank DRAFT,
+    # the invoice number is filled in later) fails with a spurious "This field
+    # is required" 400 that the frontend had no error handling to surface —
+    # this is what broke the New button for staff.
+    invoice_number = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default=""
+    )
 
     class Meta:
         model = StockInRecord
@@ -252,15 +263,31 @@ class DisplayStockPrepSerializer(serializers.ModelSerializer):
 class DayStartStockCheckSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
     ingredient_display_name = serializers.SerializerMethodField()
-    ingredient_group = serializers.CharField(source="ingredient.group", read_only=True)
+    ingredient_group = serializers.SerializerMethodField()
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
     discrepancy_qty = serializers.DecimalField(
         max_digits=12, decimal_places=3, read_only=True
     )
+    pieces_per_pack = serializers.SerializerMethodField()
 
     def get_ingredient_display_name(self, obj):
         alias = next((a for a in obj.ingredient.aliases.all() if a.is_active), None)
         return alias.alias_text if alias else obj.ingredient.name
+
+    def get_pieces_per_pack(self, obj):
+        pack = obj.ingredient.active_pack()
+        return str(pack.pieces_per_pack) if pack else None
+
+    def get_ingredient_group(self, obj):
+        # NOT ingredient.group (a static field that defaults to "Other" and isn't
+        # kept up to date) — derive it from the mapped menu item(s), same as
+        # RawStockSerializer, so this agrees with every other "raw ingredients by
+        # group" view in the app (Stock summary, closing history, owner day view).
+        from catalog.utils import build_ingredient_category_map, resolve_ingredient_group
+        category_map = self.context.get("ingredient_category_map")
+        if category_map is None:
+            category_map = build_ingredient_category_map()
+        return resolve_ingredient_group(obj.ingredient, category_map)
 
     class Meta:
         model = DayStartStockCheck
@@ -268,7 +295,7 @@ class DayStartStockCheckSerializer(serializers.ModelSerializer):
             "id", "operating_day", "ingredient", "ingredient_name",
             "ingredient_display_name", "ingredient_group", "base_unit",
             "system_carried_qty", "confirmed_qty", "discrepancy_qty",
-            "discrepancy_reason", "note",
+            "pieces_per_pack", "discrepancy_reason", "note",
         ]
 
 

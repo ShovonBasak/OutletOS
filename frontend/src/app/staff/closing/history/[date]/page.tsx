@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { bdt, shortDate } from "@/lib/format";
+import { bdt, groupByCategory, packBreakdown, shortDate } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
 import type { DailyClosing, DayStartStockCheck, OperatingDay, Paginated, Product, RawStock } from "@/lib/types";
 
@@ -79,11 +79,6 @@ export default function ClosingDetail() {
     .filter((sc) => sc.requires_preparation && sc.remains_pieces > 0)
     .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.remains_pieces * (priceMap[sc.product] ?? 0) }));
   const remainsTotal = remainsRows.reduce((s, r) => s + r.total, 0);
-
-  const readyStockRows = closing.stock_counts
-    .filter((sc) => !sc.requires_preparation && sc.remains_pieces > 0)
-    .map((sc) => ({ ...sc, price: priceMap[sc.product] ?? 0, total: sc.remains_pieces * (priceMap[sc.product] ?? 0) }));
-  const readyStockTotal = readyStockRows.reduce((s, r) => s + r.total, 0);
 
   const wastageRows = closing.stock_counts
     .filter((sc) => sc.wastage_pieces > 0)
@@ -202,26 +197,15 @@ export default function ClosingDetail() {
         </Section>
       )}
 
-      {/* End-of-day stock: ready products (beverages, add-ons) */}
-      {readyStockRows.length > 0 && (
-        <Section title="End-of-day stock (ready products)">
-          <p className="mb-2 font-mono text-[10px] text-ink-soft">
-            Unsold beverages & ready items remaining at close
-          </p>
-          {readyStockRows.map((r) => (
-            <div key={r.id} className="ticket-row font-mono text-[11px]">
-              <span>{r.product_name} <span className="text-ink-soft">× {r.remains_pieces} @ {bdt(r.price)}</span></span>
-              <span className="num">{bdt(r.total)}</span>
-            </div>
-          ))}
-          <Divider />
-          <Row label="Ready stock total" value={bdt(readyStockTotal)} bold />
-        </Section>
-      )}
-
-      {/* End-of-day raw ingredient stock */}
+      {/* End-of-day raw ingredient stock — also covers beverages/ready items:
+          the "Beverages" group isn't excluded from this list (see the
+          rawChecks/rawStock filters above), so a separate "ready products"
+          breakdown would just repeat the same figures under a second heading. */}
       {(rawChecks.length > 0 || rawStock.length > 0) && (() => {
         const useChecks = rawChecks.length > 0;
+        const groups = useChecks
+          ? groupByCategory(rawChecks, (c) => c.ingredient_group)
+          : groupByCategory(rawStock, (r) => r.ingredient_group);
         return (
           <Section title="End-of-day stock (raw ingredients)">
             {!useChecks && (
@@ -229,33 +213,35 @@ export default function ClosingDetail() {
                 Next day not started — showing current balance
               </p>
             )}
-            {useChecks
-              ? rawChecks
+            {groups.map((group, gi) => (
+              <div key={group.key}>
+                {gi > 0 && <Divider />}
+                <p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wide text-ink-soft">
+                  {group.icon} {group.key}
+                </p>
+                {[...group.items]
                   .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
-                  .map((c) => (
-                    <div key={c.id} className="ticket-row font-mono text-[11px]">
-                      <span>{c.ingredient_display_name}</span>
-                      <span className="num">
-                        {Number(c.system_carried_qty) % 1 === 0
-                          ? Number(c.system_carried_qty)
-                          : Number(c.system_carried_qty).toFixed(2)}{" "}
-                        <span className="text-ink-soft">{c.base_unit}</span>
-                      </span>
-                    </div>
-                  ))
-              : rawStock
-                  .sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name))
-                  .map((r) => (
-                    <div key={r.id} className="ticket-row font-mono text-[11px]">
-                      <span>{r.ingredient_display_name}</span>
-                      <span className="num">
-                        {Number(r.quantity_available) % 1 === 0
-                          ? Number(r.quantity_available)
-                          : Number(r.quantity_available).toFixed(2)}{" "}
-                        <span className="text-ink-soft">{r.base_unit}</span>
-                      </span>
-                    </div>
-                  ))}
+                  .map((item) => {
+                    const qty = "system_carried_qty" in item ? item.system_carried_qty : item.quantity_available;
+                    const n = Number(qty);
+                    const packs = packBreakdown(qty, item.pieces_per_pack, item.base_unit);
+                    return (
+                      <div key={item.id} className="ticket-row items-start font-mono text-[11px]">
+                        <span>{item.ingredient_display_name}</span>
+                        <span className="text-right">
+                          <span className="num">
+                            {n % 1 === 0 ? n : n.toFixed(2)}{" "}
+                            <span className="text-ink-soft">{item.base_unit}</span>
+                          </span>
+                          {packs && (
+                            <span className="block text-[9px] text-ink-soft/60">= {packs}</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+              </div>
+            ))}
           </Section>
         );
       })()}

@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from accounts.mixins import OrgScopedQuerySetMixin
-from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly, IsStaffOwnerOrAdmin
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Product
 from sales.models import SalesChannel
@@ -41,6 +41,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
     org_lookup = "outlet__organization"
+    permission_classes = [IsStaffOwnerOrAdmin]
 
     # Slim prefetch for list — drops heavy stock_count product nesting; still
     # fetches sales_lines/channel_discounts/payments for the financial rollup
@@ -181,6 +182,47 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=False, methods=["get"], url_path="wastage-summary")
+    def wastage_summary(self, request):
+        """Aggregate binned wastage by product for a date range.
+
+        Query params: outlet, date_from, date_to (all optional).
+        Returns a list of {product_id, product_name, total_pieces} sorted by
+        total_pieces descending (worst offenders first). Quantity only — no
+        monetary value, since wastage isn't priced per-line the way a sale is,
+        and using today's selling price for a historical date would be wrong.
+        """
+        from django.db.models import Sum
+
+        outlet = request.query_params.get("outlet")
+        date_from = request.query_params.get("date_from")
+        date_to = request.query_params.get("date_to")
+
+        counts_qs = DailyClosingStockCount.objects.filter(wastage_pieces__gt=0)
+        if outlet:
+            counts_qs = counts_qs.filter(daily_closing__outlet_id=outlet)
+        if date_from:
+            counts_qs = counts_qs.filter(daily_closing__closing_date__gte=date_from)
+        if date_to:
+            counts_qs = counts_qs.filter(daily_closing__closing_date__lte=date_to)
+
+        by_product = (
+            counts_qs
+            .values("product__id", "product__name")
+            .annotate(total_pieces=Sum("wastage_pieces"))
+            .order_by("-total_pieces")
+        )
+
+        result = [
+            {
+                "product_id": row["product__id"],
+                "product_name": row["product__name"],
+                "total_pieces": row["total_pieces"] or 0,
+            }
+            for row in by_product
+        ]
+        return Response(result)
+
     def perform_create(self, serializer):
         outlet = serializer.validated_data.get("outlet")
         user = self.request.user
@@ -230,24 +272,23 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                 obj.available_pieces = ds.pieces_available if ds else 0
 
             # For direct-sale products (beverages/ready items), correct available_pieces
-            # and remains_pieces to reflect the full day including any mid-day stock-in,
-            # then sync RawStock to the true end-of-day balance.
+            # to reflect the full day including any mid-day stock-in, then sync RawStock
+            # to the true end-of-day balance.
             #
-            # If the count was taken BEFORE the delivery arrived (remains <= day_start):
-            #   available = day_start + stock_in  (total that passed through today)
-            #   remains   = staff_count + stock_in  (true end-of-day physical balance)
-            #   RawStock  = remains                 (delivery arrives on top of staff count)
-            #
-            # If the count was taken AFTER delivery (remains > day_start):
-            #   available = day_start + stock_in  (same formula)
-            #   remains   = staff_count           (delivery already in their count)
-            #   RawStock  = remains               (physical balance)
+            #   available = day_start + stock_in   (total that passed through today)
+            #   remains   = staff_count, as entered — a physical count taken AT closing
+            #               time already reflects any delivery that arrived during the
+            #               day, so it's never adjusted here. (A previous version tried
+            #               to guess whether the count predated the delivery by comparing
+            #               it to day_start_pieces — that guess breaks as soon as same-day
+            #               sales are >= the delivery size, which double-adds the delivery
+            #               and makes remains impossible to correct from the UI.)
+            #   RawStock  = remains                (physical balance)
             rawstock_updates = []  # (outlet, ingredient, qty) — applied after obj.save()
             if not product.requires_preparation:
                 from stock.models import (
                     StockInItem, StockInStatus, OperatingDay, DayStartStockCheck,
                 )
-                remains_from_form = Decimal(row.get("remains_pieces", 0))
                 op_day = OperatingDay.objects.filter(
                     outlet=closing.outlet, date=closing.closing_date
                 ).first()
@@ -272,10 +313,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
                             if day_start_check else 0
                         )
                         stock_in_pieces = int(today_stock_in / qty_per)
-                        count_after_delivery = int(remains_from_form) > day_start_pieces
                         obj.available_pieces = day_start_pieces + stock_in_pieces
-                        if not count_after_delivery:
-                            obj.remains_pieces = int(remains_from_form) + stock_in_pieces
                     rawstock_updates.append(
                         (closing.outlet, recipe.ingredient,
                          Decimal(obj.remains_pieces) * qty_per)
@@ -463,18 +501,49 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             closing.status = ClosingStatus.LOCKED
             self._close_operating_day(closing)
         closing.save()
+        self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def lock(self, request, pk=None):
-        """Owner reviews a flagged closing and locks it."""
+        """Owner reviews a flagged closing and locks it.
+
+        A SUBMITTED (flagged) closing stays editable — see _guard_editable —
+        so counts/online-sell (and therefore computed_cash) can still change
+        between submit and this lock. Re-sync the cash PaymentEntry from the
+        live figure first, or _record_account_transactions would post
+        whatever stale amount was last saved (e.g. from an earlier visit to
+        the Payments screen), silently under/over-crediting the cash account."""
         closing = self.get_object()
         closing.status = ClosingStatus.LOCKED
         closing.save()
         self._close_operating_day(closing)
+        self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
+
+    def _sync_cash_payment_entry(self, closing):
+        """Set the primary-cash PaymentEntry to the CURRENT computed_cash right
+        before it's posted to the ledger. Without this, submit()/lock() would
+        post whatever amount the cash PaymentEntry last held — stale if staff
+        edited counts/online-sell after their last visit to the Payments step
+        (or never visited it at all) — silently corrupting the account's
+        running balance by the gap between what was shown and what posted."""
+        from finance.models import FinancialAccount
+
+        primary_cash = (
+            FinancialAccount.objects.filter(is_primary_cash=True).first()
+            or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
+        )
+        if not primary_cash:
+            return
+        closing_fresh = self.get_queryset().get(pk=closing.pk)
+        cash_obj, _ = PaymentEntry.objects.get_or_create(
+            daily_closing=closing_fresh, account=primary_cash
+        )
+        cash_obj.amount = closing_fresh.computed_cash
+        cash_obj.save()
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdmin], url_path="reopen")
     def reopen(self, request, pk=None):
@@ -486,6 +555,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         - Sets OperatingDay back to IN_PROGRESS
         - Sets DailyClosing back to DRAFT
         """
+        from finance import services as finance_services
         from finance.models import AccountTransaction, SourceType
         from stock.models import DisplayStock, OperatingDay, OperatingDayStatus
 
@@ -494,10 +564,11 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             raise ValidationError("Closing is already in DRAFT — nothing to reopen.")
 
         # 1. Delete account transactions created by this closing
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type=SourceType.DAILY_CLOSING,
             source_id=closing.id,
-        ).delete()
+        ):
+            finance_services.void_transaction(t.id)
 
         # 2. Restore DisplayStock: add back what was deducted at close
         #    (available_pieces − remains_pieces was deducted; add it back)
@@ -523,20 +594,18 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     @staticmethod
     def _record_account_transactions(closing, user):
         """Idempotently write SALES_COLLECTION transactions for each payment entry."""
+        from finance import services as finance_services
         from finance.models import AccountTransaction, SourceType, TransactionType
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type=SourceType.DAILY_CLOSING,
             source_id=closing.id,
-        ).delete()
+        ):
+            finance_services.void_transaction(t.id)
         for payment in closing.payments.select_related("account").filter(amount__gt=0):
-            AccountTransaction.objects.create(
-                account=payment.account,
-                transaction_type=TransactionType.SALES_COLLECTION,
-                amount=payment.amount,
-                date=closing.closing_date,
-                source_type=SourceType.DAILY_CLOSING,
-                source_id=closing.id,
-                entered_by=user,
+            finance_services.post_transaction(
+                account=payment.account, transaction_type=TransactionType.SALES_COLLECTION,
+                amount=payment.amount, date=closing.closing_date, entered_by=user,
+                source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
                 note=f"Day closing — {closing.closing_date}",
             )
 

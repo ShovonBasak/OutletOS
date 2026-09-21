@@ -36,26 +36,26 @@ class OtherIncomeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         income = serializer.save()
+        from finance import services
         from finance.models import AccountTransaction
-        AccountTransaction.objects.filter(source_type="OTHER_INCOME", source_id=income.id).delete()
+        for t in AccountTransaction.objects.filter(source_type="OTHER_INCOME", source_id=income.id):
+            services.void_transaction(t.id)
         self._create_account_transaction(income)
 
     def perform_destroy(self, instance):
+        from finance import services
         from finance.models import AccountTransaction
-        AccountTransaction.objects.filter(source_type="OTHER_INCOME", source_id=instance.id).delete()
+        for t in AccountTransaction.objects.filter(source_type="OTHER_INCOME", source_id=instance.id):
+            services.void_transaction(t.id)
         instance.delete()
 
     def _create_account_transaction(self, income):
         if not income.received_into_account_id:
             return
-        from finance.models import AccountTransaction
-        AccountTransaction.objects.create(
-            account=income.received_into_account,
-            transaction_type="OTHER_INCOME",
-            amount=income.amount,
-            date=income.date,
-            source_type="OTHER_INCOME",
-            source_id=income.id,
-            entered_by=income.entered_by,
+        from finance import services
+        services.post_transaction(
+            account=income.received_into_account, transaction_type="OTHER_INCOME",
+            amount=income.amount, date=income.date, entered_by=income.entered_by,
+            source_type="OTHER_INCOME", source_id=income.id,
             note=income.description or income.category.name,
         )

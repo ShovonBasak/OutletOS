@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models import Sum
+from django.utils import timezone
 
 from catalog.models import Outlet
 
@@ -40,8 +40,13 @@ class FinancialAccount(models.Model):
 
     @property
     def current_balance(self):
-        txn_sum = self.transactions.aggregate(total=Sum("amount"))["total"] or 0
-        return self.opening_balance + txn_sum
+        """The ledger's last posted balance — not a live re-sum. Every posting
+        path (finance.services) maintains balance_before/after on each
+        AccountTransaction, so the latest row's balance_after IS the current
+        balance. If this ever looks wrong, rebuild_account_balances() is the
+        self-healing repair (also exposed as the owner's "Recalculate" action)."""
+        latest = self.transactions.order_by("-date", "-id").first()
+        return latest.balance_after if latest else self.opening_balance
 
 
 class AccountRoleAccess(models.Model):
@@ -102,6 +107,18 @@ class AccountTransaction(models.Model):
         "accounts.User", on_delete=models.PROTECT, related_name="account_transactions"
     )
     note = models.TextField(blank=True)
+    # Running-balance snapshot, maintained exclusively by finance.services
+    # (post_transaction / void_transaction / rebuild_account_balances) — never
+    # set directly. Computed in LEDGER ORDER (date, id) ascending, which is
+    # distinct from Meta.ordering below (display order, newest first): date is
+    # freely backdatable, so `id` — assigned once at insertion, never changes —
+    # is what disambiguates same-day rows for balance math.
+    balance_before = models.DecimalField(max_digits=14, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    # Real insertion timestamp (audit/display only — plays no role in balance
+    # math, which uses `date` + `id`). For rows backfilled by the 0006 data
+    # migration this is only a best-effort approximation (date at midnight).
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
 
     class Meta:
         ordering = ["-date", "-id"]

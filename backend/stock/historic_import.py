@@ -29,7 +29,7 @@ from .models import (
     StockInStatus,
     UnitCaptured,
 )
-from .services import consume_for_preparation
+from .services import consume_for_preparation, reconcile_backdated_stock_in
 
 
 def _decimal_or_none(val) -> Decimal | None:
@@ -112,8 +112,30 @@ def import_stock_in_slip(
 
     slip_totals (optional): {"subtotal", "discount_total", "vat_total", "grand_total"} — stored on the record.
 
-    Returns (record, warnings) where warnings lists unresolved lines.
+    Raises ValueError if invoice_number is non-blank and already APPROVED for
+    this outlet on the same slip_date — a re-imported slip (same invoice
+    photographed/imported twice) would otherwise double-count the delivery.
+    Scoped to (outlet, invoice_number, date) rather than invoice_number alone:
+    CP Bangladesh invoice numbers recur across genuinely different deliveries
+    (confirmed in real data, ~2 weeks apart), so the number by itself isn't a
+    reliable duplicate signal.
+
+    Returns (record, warnings) where warnings lists unresolved lines and any
+    later-day reconciliation that needs manual review.
     """
+    invoice_number = (invoice_number or "").strip()
+    if invoice_number:
+        duplicate = StockInRecord.objects.filter(
+            outlet=outlet, invoice_number=invoice_number, stock_in_date=slip_date,
+            status=StockInStatus.APPROVED,
+        ).first()
+        if duplicate:
+            raise ValueError(
+                f"Invoice '{invoice_number}' dated {slip_date} is already approved "
+                f"as stock-in #{duplicate.pk} — skipped to avoid double-counting "
+                f"this delivery."
+            )
+
     totals = slip_totals or {}
     record = StockInRecord.objects.create(
         outlet=outlet,
@@ -194,6 +216,12 @@ def import_stock_in_slip(
                 f"Unresolved line '{item.get('raw_text', '')}' — no ingredient mapped; "
                 "RawStock not updated for this line."
             )
+
+    # Cascades a correction to any already-confirmed later day's Day-Start Stock
+    # Check / RawStock / closing when this slip is dated earlier than a day the
+    # app already ran through — a no-op for a normal historic backfill where
+    # nothing later has been confirmed yet.
+    warnings.extend(reconcile_backdated_stock_in(record))
 
     return record, warnings
 

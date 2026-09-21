@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 const TILES = [
+  { href: "/owner/reports", icon: "📊", label: "Reports" },
+  { href: "/owner/analyst", icon: "📦", label: "Order planner" },
   { href: "/owner/accounts", icon: "⇌", label: "Accounts" },
   { href: "/owner/expenses", icon: "৳", label: "Expenses" },
   { href: "/owner/other-income", icon: "+৳", label: "Other income" },

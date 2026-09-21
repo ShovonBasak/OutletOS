@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
 from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
 from accounts.scoping import resolve_organization_id
+from . import services
 from .models import (
     FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
     CapitalTransaction, AccountBalanceCheck,
@@ -63,12 +64,28 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
             ).exclude(pk=account.pk).update(is_primary_cash=False)
         return super().partial_update(request, *args, **kwargs)
 
+    def perform_update(self, serializer):
+        old = self.get_object()
+        old_ob, old_obd = old.opening_balance, old.opening_balance_date
+        account = serializer.save()
+        if account.opening_balance != old_ob or account.opening_balance_date != old_obd:
+            # Every existing transaction's balance_before/after was computed
+            # against the OLD opening_balance — the whole chain needs redoing.
+            services.rebuild_account_balances(account.id)
+
     @action(detail=False, methods=["get"], permission_classes=[IsOwnerOrAdmin])
     def summary(self, request):
         """All active accounts with current balances — owner dashboard."""
         accounts = self.scope_queryset(FinancialAccount.objects.filter(is_active=True))
         data = FinancialAccountSerializer(accounts, many=True).data
         return Response(data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin], url_path="recompute-balances")
+    def recompute_balances(self, request, pk=None):
+        """Owner/admin self-service repair — full replay from opening_balance.
+        Idempotent; safe to run any time. Returns how many rows actually changed."""
+        result = services.rebuild_account_balances(pk)
+        return Response(result)
 
 
 class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
@@ -99,7 +116,16 @@ class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(entered_by=self.request.user, source_type="MANUAL")
+        v = serializer.validated_data
+        txn = services.post_transaction(
+            account=v["account"], transaction_type=v["transaction_type"], amount=v["amount"],
+            date=v["date"], entered_by=self.request.user, source_type="MANUAL",
+            source_id=v.get("source_id"), note=v.get("note", ""),
+        )
+        serializer.instance = txn
+
+    def perform_destroy(self, instance):
+        services.void_transaction(instance.id)
 
 
 class AccountTransferViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
@@ -119,31 +145,19 @@ class AccountTransferViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         transfer = serializer.save(entered_by=self.request.user)
-        AccountTransaction.objects.create(
-            account=transfer.from_account,
-            transaction_type="TRANSFER_OUT",
-            amount=-transfer.amount,
-            date=transfer.date,
-            source_type="ACCOUNT_TRANSFER",
-            source_id=transfer.id,
-            entered_by=self.request.user,
-            note=transfer.note or f"Transfer to {transfer.to_account.name}",
-        )
-        AccountTransaction.objects.create(
-            account=transfer.to_account,
-            transaction_type="TRANSFER_IN",
-            amount=transfer.amount,
-            date=transfer.date,
-            source_type="ACCOUNT_TRANSFER",
-            source_id=transfer.id,
-            entered_by=self.request.user,
-            note=transfer.note or f"Transfer from {transfer.from_account.name}",
+        services.post_transfer_pair(
+            from_account=transfer.from_account, to_account=transfer.to_account,
+            amount=transfer.amount, date=transfer.date, entered_by=self.request.user,
+            source_type="ACCOUNT_TRANSFER", source_id=transfer.id,
+            note_out=transfer.note or f"Transfer to {transfer.to_account.name}",
+            note_in=transfer.note or f"Transfer from {transfer.from_account.name}",
         )
 
     def perform_destroy(self, instance):
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type="ACCOUNT_TRANSFER", source_id=instance.id
-        ).delete()
+        ):
+            services.void_transaction(t.id)
         instance.delete()
 
 
@@ -166,21 +180,17 @@ class CapitalTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         cap = serializer.save(entered_by=self.request.user)
         signed_amount = cap.amount if cap.direction == "INJECTION" else -cap.amount
         txn_type = "CAPITAL_INJECTION" if cap.direction == "INJECTION" else "OWNER_WITHDRAWAL"
-        AccountTransaction.objects.create(
-            account=cap.account,
-            transaction_type=txn_type,
-            amount=signed_amount,
-            date=cap.date,
-            source_type="CAPITAL_TRANSACTION",
-            source_id=cap.id,
-            entered_by=self.request.user,
+        services.post_transaction(
+            account=cap.account, transaction_type=txn_type, amount=signed_amount, date=cap.date,
+            entered_by=self.request.user, source_type="CAPITAL_TRANSACTION", source_id=cap.id,
             note=cap.note or cap.get_direction_display(),
         )
 
     def perform_destroy(self, instance):
-        AccountTransaction.objects.filter(
+        for t in AccountTransaction.objects.filter(
             source_type="CAPITAL_TRANSACTION", source_id=instance.id
-        ).delete()
+        ):
+            services.void_transaction(t.id)
         instance.delete()
 
 
@@ -191,28 +201,32 @@ class AccountBalanceCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     org_lookup = "account__organization"
 
     def perform_create(self, serializer):
+        from django.db import transaction as db_transaction
+
         account = serializer.validated_data["account"]
-        system_balance = account.current_balance
         actual_balance = serializer.validated_data["actual_balance"]
-        discrepancy = actual_balance - system_balance
 
-        check = serializer.save(
-            checked_by=self.request.user,
-            system_balance=system_balance,
-            discrepancy=discrepancy,
-        )
+        # Lock before reading current_balance — otherwise a concurrent posting
+        # between this read and the eventual ADJUSTMENT write could make the
+        # computed discrepancy wrong (a classic read-then-write race).
+        with db_transaction.atomic():
+            locked = FinancialAccount.objects.select_for_update().get(pk=account.pk)
+            system_balance = locked.current_balance
+            discrepancy = actual_balance - system_balance
 
-        if discrepancy != 0:
-            AccountTransaction.objects.create(
-                account=account,
-                transaction_type="ADJUSTMENT",
-                amount=discrepancy,
-                date=check.checked_at.date(),
-                source_type="ACCOUNT_BALANCE_CHECK",
-                source_id=check.id,
-                entered_by=self.request.user,
-                note=f"Balance reconciliation: {check.get_reason_display() or 'Adjustment'}",
+            check = serializer.save(
+                checked_by=self.request.user,
+                system_balance=system_balance,
+                discrepancy=discrepancy,
             )
+
+            if discrepancy != 0:
+                services.post_transaction(
+                    account=locked, transaction_type="ADJUSTMENT", amount=discrepancy,
+                    date=check.checked_at.date(), entered_by=self.request.user,
+                    source_type="ACCOUNT_BALANCE_CHECK", source_id=check.id,
+                    note=f"Balance reconciliation: {check.get_reason_display() or 'Adjustment'}",
+                )
 
 
 class StaffCashView(APIView):
@@ -249,6 +263,8 @@ class StaffCashView(APIView):
         })
 
     def post(self, request):
+        from django.db import transaction as db_transaction
+
         cash = self._cash_account(request)
         if not cash:
             return Response({"error": "No primary cash account configured."}, status=404)
@@ -265,9 +281,6 @@ class StaffCashView(APIView):
         if amount <= 0:
             return Response({"error": "Amount must be greater than zero."}, status=400)
 
-        if amount > cash.current_balance:
-            return Response({"error": "Transfer amount exceeds available cash balance."}, status=400)
-
         try:
             to_account = FinancialAccount.objects.get(
                 pk=to_id, organization_id=resolve_organization_id(request), is_active=True
@@ -282,38 +295,26 @@ class StaffCashView(APIView):
         transfer_date = now().date()
         transfer_note = note or f"Transfer to {to_account.name}"
 
-        transfer = AccountTransfer.objects.create(
-            from_account=cash,
-            to_account=to_account,
-            amount=amount,
-            date=transfer_date,
-            note=transfer_note,
-            entered_by=request.user,
-        )
-        AccountTransaction.objects.create(
-            account=cash,
-            transaction_type="TRANSFER_OUT",
-            amount=-amount,
-            date=transfer_date,
-            source_type="ACCOUNT_TRANSFER",
-            source_id=transfer.id,
-            entered_by=request.user,
-            note=transfer_note,
-        )
-        AccountTransaction.objects.create(
-            account=to_account,
-            transaction_type="TRANSFER_IN",
-            amount=amount,
-            date=transfer_date,
-            source_type="ACCOUNT_TRANSFER",
-            source_id=transfer.id,
-            entered_by=request.user,
-            note=f"Transfer from {cash.name}",
-        )
+        # Lock cash before checking the balance — otherwise two concurrent
+        # transfers can both pass this check before either commits (TOCTOU).
+        with db_transaction.atomic():
+            locked_cash = FinancialAccount.objects.select_for_update().get(pk=cash.pk)
+            if amount > locked_cash.current_balance:
+                return Response({"error": "Transfer amount exceeds available cash balance."}, status=400)
+
+            transfer = AccountTransfer.objects.create(
+                from_account=locked_cash, to_account=to_account, amount=amount,
+                date=transfer_date, note=transfer_note, entered_by=request.user,
+            )
+            services.post_transfer_pair(
+                from_account=locked_cash, to_account=to_account, amount=amount, date=transfer_date,
+                entered_by=request.user, source_type="ACCOUNT_TRANSFER", source_id=transfer.id,
+                note_out=transfer_note, note_in=f"Transfer from {cash.name}",
+            )
 
         return Response({
             "detail": "Transfer recorded.",
-            "new_cash_balance": str(cash.current_balance),
+            "new_cash_balance": str(locked_cash.current_balance),
         })
 
 
@@ -368,6 +369,8 @@ class StaffCashHistoryView(APIView):
                 "transaction_type_display": type_display.get(t.transaction_type, t.transaction_type),
                 "amount": str(t.amount),
                 "date": str(t.date),
+                "balance_before": str(t.balance_before),
+                "balance_after": str(t.balance_after),
                 "source_type": t.source_type,
                 "note": t.note,
                 "category_name": expense_cats.get(t.source_id) if t.source_type == "EXPENSE" else None,

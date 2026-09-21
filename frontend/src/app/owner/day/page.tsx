@@ -786,7 +786,7 @@ async function enableNotifications() {
                           {supplyItems.map((s) => {
                             const qty = Number(s.current_qty);
                             const cost = Number(s.cost_per_base_unit ?? 0);
-                            const pks = packLabel(qty, s.pieces_per_pack);
+                            const pks = packLabel(qty, s.bundle_size);
                             const zero = qty === 0;
                             const low = qty < 5;
                             return (

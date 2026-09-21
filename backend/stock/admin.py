@@ -15,6 +15,7 @@ from catalog.ai_extraction import (
 )
 
 from .historic_import import import_stock_in_slip, import_prep_log_slip
+from .services import merge_duplicate_stock_in_lines
 from .models import (
     DayStartStockCheck,
     DisplayStock,
@@ -65,7 +66,8 @@ def _excel_parse_rows(rows):
     col_qty        = find(header, "quantity", "qty")
     col_unit       = find(header, "unit", exclude=["per unit", "vat", "sd", "rate"])
     col_rate       = find(header, "per unit rate", "unit rate", ["rate"], exclude=["vat", "sd", "total", "per unit"])
-    col_total_amt  = find(header, "total amount", exclude=["vat", "tax", "incl"])
+    col_total_amt  = find(header, "total amount", exclude=["vat", "tax", "incl", "discount"])
+    col_discount   = find(header, "discount")
     col_sd_rate    = find(header, ["sd", "rate"])
     col_sd_amt     = find(header, ["sd", "amount"])
     col_vat_rate   = find(header, ["vat", "rate"], ["tax", "rate"])
@@ -157,6 +159,7 @@ def _excel_parse_rows(rows):
 
         rate       = _s(_cell(row, col_rate))
         total_amt  = _s(_cell(row, col_total_amt))
+        discount   = _s(_cell(row, col_discount))
         sd_rate    = _s(_cell(row, col_sd_rate))
         sd_amt     = _s(_cell(row, col_sd_amt))
         vat_rate   = _s(_cell(row, col_vat_rate))
@@ -181,6 +184,7 @@ def _excel_parse_rows(rows):
             "unit_price":              unit_price,
             "rate":                    rate,
             "total_amount":            total_amt,
+            "discount":                discount,
             "sd_rate":                 sd_rate,
             "sd_amount":               sd_amt,
             "vat_rate":                vat_rate,
@@ -469,8 +473,12 @@ class StockInRecordAdmin(admin.ModelAdmin):
                     "The slip has been added with empty fields; please fill in manually.",
                 )
 
+            deduped_items, merge_warnings = merge_duplicate_stock_in_lines(parsed.get("items", []))
+            for w in merge_warnings:
+                messages.warning(request, f"{f.name}: {w}")
+
             items = []
-            for it in parsed.get("items", []):
+            for it in deduped_items:
                 matched_name = it.get("matched_ingredient") or ""
                 ing_id, pack_id = _resolve_ingredient(matched_name)
                 qty_val = it.get("quantity")
@@ -488,6 +496,7 @@ class StockInRecordAdmin(admin.ModelAdmin):
                     "unit_price":              str(unit_price_val or ""),
                     "rate":                    str(it.get("rate") or ""),
                     "total_amount":            str(it.get("total_amount") or ""),
+                    "discount":                str(it.get("discount") or ""),
                     "sd_rate":                 str(it.get("sd_rate") or ""),
                     "sd_amount":               str(it.get("sd_amount") or ""),
                     "vat_rate":                str(it.get("vat_rate") or ""),
@@ -609,6 +618,7 @@ class StockInRecordAdmin(admin.ModelAdmin):
                     "unit_price":         request.POST.get(f"item_{i}_{j}_unit_price") or None,
                     "rate":               request.POST.get(f"item_{i}_{j}_rate") or None,
                     "total_amount":       request.POST.get(f"item_{i}_{j}_total_amount") or None,
+                    "discount":           request.POST.get(f"item_{i}_{j}_discount") or None,
                     "sd_rate":            request.POST.get(f"item_{i}_{j}_sd_rate") or None,
                     "sd_amount":          request.POST.get(f"item_{i}_{j}_sd_amount") or None,
                     "vat_rate":           request.POST.get(f"item_{i}_{j}_vat_rate") or None,
@@ -619,10 +629,14 @@ class StockInRecordAdmin(admin.ModelAdmin):
             if not items:
                 continue
 
-            record, warnings = import_stock_in_slip(
-                outlet, slip_date, items, request.user,
-                slip_totals=slip_totals, invoice_number=invoice_number,
-            )
+            try:
+                record, warnings = import_stock_in_slip(
+                    outlet, slip_date, items, request.user,
+                    slip_totals=slip_totals, invoice_number=invoice_number,
+                )
+            except ValueError as exc:
+                messages.error(request, f"Slip {i + 1}: {exc}")
+                continue
             total_records += 1
             total_warnings.extend(warnings)
 
