@@ -107,9 +107,17 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             )
         # Staff's list is keyed to when a record was created, not the (often
         # corrected) invoice date — a just-uploaded stock-in always surfaces
-        # at the top regardless of what stock_in_date says.
-        if self.request.query_params.get("sort") == "created":
+        # at the top regardless of what stock_in_date says. Deliberately NOT
+        # updated_at here: an owner correcting an older record's date shouldn't
+        # reshuffle where staff finds the record they just submitted.
+        sort_param = self.request.query_params.get("sort")
+        if sort_param == "created":
             return qs.order_by("-created_at", "-id")
+        # Owner's list: whatever was most recently created OR edited — a late
+        # slip entered today, or an older record the owner just corrected —
+        # always surfaces at the top, regardless of what stock_in_date says.
+        if sort_param == "updated":
+            return qs.order_by("-updated_at", "-id")
         return qs.order_by("-stock_in_date", "-created_at")
 
     def get_serializer_class(self):
@@ -147,7 +155,9 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         if not image:
             raise ValidationError("No slip_image file provided.")
         record.slip_image = image
-        record.save(update_fields=["slip_image"])
+        # auto_now doesn't fire unless it's in update_fields — Django only
+        # writes/touches the columns explicitly listed.
+        record.save(update_fields=["slip_image", "updated_at"])
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"])
@@ -194,9 +204,40 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         # Update StockInRecord header fields from the extracted slip data.
         record_update_fields = []
         invoice_number = result.get("invoice_number")
-        if invoice_number and not record.invoice_number:
+        if invoice_number:
+            # Always take the freshly-read value — re-running "Auto-read from
+            # slip" (e.g. after replacing a blurry photo) is an explicit ask
+            # to re-read the invoice number, not just fill it in once.
             record.invoice_number = str(invoice_number).strip()
             record_update_fields.append("invoice_number")
+
+        # Auto-select the paying account from the detected supplier — CP
+        # Bangladesh deliveries go on the CP supplier-credit account;
+        # anything else (or an unreadable letterhead) defaults to Shop Cash.
+        # Only when nothing's already chosen — never overrides a manual pick.
+        if not record.paid_from_account_id:
+            from finance.models import FinancialAccount
+
+            import re
+
+            supplier_name = result.get("supplier_name") or ""
+            # Strip punctuation first — the real letterhead is usually
+            # "C.P Bangladesh" / "C.P. Bangladesh", and "cp" wouldn't match
+            # against "c.p bangladesh" as a plain substring.
+            is_cp = "cp" in re.sub(r"[^a-z0-9]", "", supplier_name.lower())
+            account = None
+            if is_cp:
+                account = FinancialAccount.objects.filter(
+                    account_type="SUPPLIER_CREDIT", is_active=True, name__icontains="CP"
+                ).first()
+            if not account:
+                account = FinancialAccount.objects.filter(
+                    is_primary_cash=True, is_active=True
+                ).first()
+            if account:
+                record.paid_from_account = account
+                record_update_fields.append("paid_from_account")
+
         slip_date = result.get("date")
         if slip_date:
             from datetime import date as _date
@@ -216,7 +257,8 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 setattr(record, field, val)
                 record_update_fields.append(field)
         if record_update_fields:
-            record.save(update_fields=record_update_fields)
+            # auto_now doesn't fire unless it's in update_fields.
+            record.save(update_fields=record_update_fields + ["updated_at"])
 
         raw_items, merge_warnings = merge_duplicate_stock_in_lines(result.get("items", []))
 
@@ -391,7 +433,10 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         if not new_date:
             raise ValidationError("stock_in_date is required.")
         record.stock_in_date = new_date
-        record.save(update_fields=["stock_in_date"])
+        # auto_now doesn't fire unless it's in update_fields — and this
+        # correction is exactly the kind of edit that should bump the record
+        # to the top of the owner's "latest touched" list.
+        record.save(update_fields=["stock_in_date", "updated_at"])
         return Response(self.get_serializer(record).data)
 
     def _lock_and_transition_to_approved(self, record, request):
@@ -682,7 +727,8 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
             record.slip_image = slip_image
             update_fields.append("slip_image")
         if update_fields:
-            record.save(update_fields=update_fields)
+            # auto_now doesn't fire unless it's in update_fields.
+            record.save(update_fields=update_fields + ["updated_at"])
 
         excel_file = request.FILES.get("excel_file")
         if not excel_file:

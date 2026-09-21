@@ -326,6 +326,11 @@ _HISTORIC_STOCKIN_SCHEMA = {
             "nullable": True,
             "description": "Invoice/challan number exactly as printed (e.g. 'INV-001/6419/0826'), or null if not found.",
         },
+        "supplier_name": {
+            "type": "string",
+            "nullable": True,
+            "description": "Supplier/vendor company name from the slip's letterhead or 'Sold By' line (e.g. 'C.P Bangladesh Co., Ltd.'), or null if not found.",
+        },
         "date": {
             "type": "string",
             "nullable": True,
@@ -426,6 +431,8 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
         "You read a photographed supplier tax invoice / delivery slip and extract structured data.\n\n"
         "INVOICE HEADER:\n"
         "- invoice_number: the invoice/challan reference exactly as printed (e.g. 'INV-001/6419/0826'); null if absent\n"
+        "- supplier_name: the supplier/vendor company name from the letterhead or 'Sold By'/'Supplier' "
+        "line at the top of the slip (e.g. 'C.P Bangladesh Co., Ltd.'); null if absent\n"
         "- date: invoice/delivery date, converted to ISO YYYY-MM-DD; null if absent. "
         "IMPORTANT — dates printed on these slips use DAY-MONTH-YEAR order (DD-MM-YYYY or "
         "DD/MM/YYYY), NOT month-day-year. For example '03-04-2026' printed on the slip means "
@@ -463,6 +470,7 @@ def extract_historic_stock_in_vision(images: list[bytes], known_names: list[str]
         "Read the attached tax invoice / delivery slip and extract all structured data.\n\n"
         "Return:\n"
         "1. Invoice number/reference (exactly as printed, or null)\n"
+        "1b. Supplier/vendor company name from the letterhead (or null)\n"
         "2. Invoice/delivery date as ISO YYYY-MM-DD — remember the slip prints dates as "
         "DD-MM-YYYY (day before month), so convert accordingly rather than assuming "
         "month-first; or null\n"

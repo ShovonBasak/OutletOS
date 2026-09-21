@@ -4,319 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiDownload } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { today } from "@/lib/format";
-import { Stamp } from "@/components/Stamp";
-import AccountPicker from "@/components/AccountPicker";
+import { StockInInvoiceRow } from "@/components/StockInInvoiceRow";
 import type { FinancialAccount, IngredientGroup, IngredientSummary, Paginated, StockInRecord, StockInItem } from "@/lib/types";
-
-// ── helpers ─────────────────────────────────────────────────────────────────
-
-function fullDate(iso: string): string {
-  const d = iso.length === 10 ? new Date(`${iso}T12:00:00`) : new Date(iso);
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function sourceLabel(r: StockInRecord, detail: StockInRecord | null): string {
-  const items = detail?.items ?? r.items;
-  if (r.source_summary && !items) return r.source_summary;
-  if (items) {
-    const hasSlip = items.some((i) => i.source === "SLIP_EXTRACTED");
-    const hasManual = items.some((i) => i.source === "MANUAL");
-    if (hasSlip && hasManual) return "Slip + manual";
-    if (hasSlip) return "Slip";
-    return "Manual";
-  }
-  return r.source_summary ?? "Manual";
-}
-
-function fmt(val: string | null | undefined, decimals = 2): string {
-  if (val == null || val === "") return "—";
-  const n = parseFloat(val);
-  return isNaN(n) ? "—" : n.toFixed(decimals);
-}
-
-function fmtQty(val: string | null | undefined): string {
-  if (val == null || val === "") return "—";
-  const n = parseFloat(val);
-  return isNaN(n) ? "—" : String(Number(n));
-}
-
-// ── item detail table (inside expanded invoice card) ─────────────────────────
-
-function ItemTable({ items }: { items: StockInItem[] }) {
-  const hasTax = items.some((i) => i.vat_rate || i.sd_rate);
-
-  return (
-    <div className="mt-2 overflow-x-auto border-t border-[#d8cdb0]">
-      <table className="w-full min-w-[520px] border-collapse font-mono text-[11px]">
-        <thead>
-          <tr className="border-b border-[#d8cdb0] text-[10px] uppercase tracking-wide text-ink-soft">
-            <th className="py-1.5 pr-3 text-left">Ingredient</th>
-            <th className="py-1.5 pr-3 text-right">Qty</th>
-            <th className="py-1.5 pr-3 text-right">Rate</th>
-            {hasTax && (
-              <>
-                <th className="py-1.5 pr-3 text-right">SD%</th>
-                <th className="py-1.5 pr-3 text-right">SD ৳</th>
-                <th className="py-1.5 pr-3 text-right">VAT%</th>
-                <th className="py-1.5 pr-3 text-right">VAT ৳</th>
-              </>
-            )}
-            <th className="py-1.5 pr-3 text-right">Total</th>
-            <th className="py-1.5 text-right">Unit (after tax)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, i) => (
-            <tr
-              key={item.id ?? i}
-              className="border-b border-dotted border-[#e8e0cc] last:border-0"
-            >
-              <td className="py-1.5 pr-3 font-medium text-ink">
-                {item.ingredient_name ?? item.raw_extracted_text ?? "—"}
-                {item.is_unrecognized && (
-                  <span className="ml-1 text-chili">(unrecognized)</span>
-                )}
-              </td>
-              <td className="py-1.5 pr-3 text-right">
-                {fmtQty(item.confirmed_quantity)}
-                {item.base_unit && (
-                  <span className="ml-0.5 text-ink-soft">{item.base_unit}</span>
-                )}
-              </td>
-              <td className="py-1.5 pr-3 text-right">
-                {item.rate ? `৳${fmt(item.rate)}` : "—"}
-              </td>
-              {hasTax && (
-                <>
-                  <td className="py-1.5 pr-3 text-right text-ink-soft">
-                    {item.sd_rate ? `${fmt(item.sd_rate)}%` : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right text-ink-soft">
-                    {item.sd_amount ? `৳${fmt(item.sd_amount)}` : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right text-ink-soft">
-                    {item.vat_rate ? `${fmt(item.vat_rate)}%` : "—"}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right text-ink-soft">
-                    {item.vat_amount ? `৳${fmt(item.vat_amount)}` : "—"}
-                  </td>
-                </>
-              )}
-              <td className="py-1.5 pr-3 text-right font-semibold">
-                {item.line_total ? `৳${fmt(item.line_total)}` : "—"}
-              </td>
-              <td className="py-1.5 text-right text-ink-soft">
-                {item.unit_price ? `৳${fmt(item.unit_price, 4)}` : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ── collapsible invoice card (history list) ──────────────────────────────────
-
-function InvoiceRow({
-  r,
-  busy,
-  accounts,
-  onAct,
-  onResume,
-  onEditDate,
-}: {
-  r: StockInRecord;
-  busy: boolean;
-  accounts: FinancialAccount[];
-  onAct: (id: number, action: "approve" | "reject" | "delete", accountId?: number | null) => void;
-  onResume?: (detail: StockInRecord) => void;
-  onEditDate?: (id: number, newDate: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [detail, setDetail] = useState<StockInRecord | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-
-  const primaryId = accounts.find((a) => a.is_primary_cash)?.id ?? accounts[0]?.id;
-  const [approvalAccount, setApprovalAccount] = useState(
-    r.paid_from_account ? String(r.paid_from_account) : (primaryId ? String(primaryId) : "")
-  );
-  const [dateEdit, setDateEdit] = useState(r.stock_in_date);
-  useEffect(() => { setDateEdit(r.stock_in_date); }, [r.stock_in_date]);
-  const invoiceLabel = r.invoice_number
-    ? r.invoice_number
-    : `#SI-${String(r.id).padStart(4, "0")}`;
-
-  const grandTotal = r.slip_grand_total ?? null;
-  const totalLabel = grandTotal && parseFloat(grandTotal) > 0 ? `৳${parseFloat(grandTotal).toFixed(2)}` : null;
-
-  async function handleOpen() {
-    const next = !open;
-    setOpen(next);
-    if (next && !detail) {
-      setLoadingDetail(true);
-      try {
-        const full = await api<StockInRecord>(`/stock-in/${r.id}/`);
-        setDetail(full);
-      } finally {
-        setLoadingDetail(false);
-      }
-    }
-  }
-
-  const items = detail?.items;
-
-  return (
-    <div className="rounded border border-[#d8cdb0] bg-paper">
-      <button
-        className="w-full px-4 pt-3 pb-2.5 text-left"
-        onClick={handleOpen}
-      >
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="min-w-0">
-            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft mb-0.5">Invoice</p>
-            <p className="font-display text-sm font-bold text-ink truncate">{invoiceLabel}</p>
-          </div>
-          <Stamp status={r.status} flat />
-        </div>
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-1">
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Date</p>
-            <p className="font-mono text-[11px] text-ink">{fullDate(r.stock_in_date)}</p>
-          </div>
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Source</p>
-            <p className="font-mono text-[11px] text-ink">{sourceLabel(r, detail)}</p>
-          </div>
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Submitted by</p>
-            <p className="font-mono text-[11px] text-ink">{r.submitted_by_name}</p>
-          </div>
-          {totalLabel && (
-            <div>
-              <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Total (after tax)</p>
-              <p className="font-mono text-[12px] font-semibold text-ink">{totalLabel}</p>
-            </div>
-          )}
-          <span className="ml-auto font-mono text-[10px] text-ink-soft">
-            {open ? "▴ less" : "▾ details"}
-          </span>
-        </div>
-      </button>
-
-      {open && (
-        <div className="px-3 pb-3">
-          {loadingDetail ? (
-            <p className="py-2 font-mono text-[11px] text-ink-soft">Loading…</p>
-          ) : !items || items.length === 0 ? (
-            <p className="py-2 font-mono text-[11px] text-ink-soft">No items on this record.</p>
-          ) : (
-            <ItemTable items={items} />
-          )}
-
-          {r.slip_image && (
-            <div className="mt-3">
-              <p className="mb-1.5 font-mono text-[9px] uppercase tracking-wide text-ink-soft">Delivery slip</p>
-              <a href={r.slip_image} target="_blank" rel="noopener noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={r.slip_image}
-                  alt="Delivery slip"
-                  className="max-h-64 w-full rounded border border-[#d8cdb0] object-contain bg-[#faf7ee] cursor-zoom-in"
-                />
-                <p className="mt-1 font-mono text-[10px] text-leaf-deep underline">Open full size ↗</p>
-              </a>
-            </div>
-          )}
-
-          {r.status === "PENDING" && (
-            <div className="mt-3 flex flex-col gap-2">
-              <div className="flex flex-col gap-1">
-                <span className="font-mono text-[10px] uppercase text-ink-soft">
-                  Invoice date {dateEdit !== r.stock_in_date && <span className="text-chili-deep">(unsaved)</span>}
-                </span>
-                <p className="font-mono text-[9px] text-ink-soft/70">
-                  Slip OCR sometimes misreads this — correct it before approving.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    className="field-input flex-1"
-                    value={dateEdit}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => setDateEdit(e.target.value)}
-                  />
-                  <button
-                    className="btn btn-ghost !px-3 !py-1.5 font-mono text-[11px] shrink-0"
-                    disabled={busy || dateEdit === r.stock_in_date || !dateEdit}
-                    onClick={(e) => { e.stopPropagation(); onEditDate?.(r.id, dateEdit); }}
-                  >
-                    Save date
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="font-mono text-[10px] uppercase text-ink-soft">Paid from account</span>
-                <AccountPicker
-                  accounts={accounts.filter((a) => a.is_active)}
-                  value={approvalAccount}
-                  onChange={setApprovalAccount}
-                  showBalance
-                  placeholder="— not specified —"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="rounded-sm bg-leaf px-3 py-1 font-mono text-[11px] uppercase text-white disabled:opacity-50"
-                  disabled={busy}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAct(r.id, "approve", approvalAccount ? Number(approvalAccount) : null);
-                  }}
-                >
-                  Approve
-                </button>
-                <button
-                  className="rounded-sm border border-chili px-3 py-1 font-mono text-[11px] uppercase text-chili-deep disabled:opacity-50"
-                  disabled={busy}
-                  onClick={(e) => { e.stopPropagation(); onAct(r.id, "reject"); }}
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          )}
-          {r.status === "DRAFT" && (
-            <div className="mt-3 flex items-center gap-4">
-              {onResume && (
-                <button
-                  className="font-mono text-[11px] text-leaf-deep underline"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (detail) {
-                      onResume(detail);
-                    } else {
-                      api<StockInRecord>(`/stock-in/${r.id}/`).then(onResume);
-                    }
-                  }}
-                >
-                  Edit &amp; submit →
-                </button>
-              )}
-              <button
-                className="font-mono text-[10px] text-chili underline disabled:opacity-50"
-                disabled={busy}
-                onClick={(e) => { e.stopPropagation(); onAct(r.id, "delete"); }}
-              >
-                Delete draft
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── draft line type ───────────────────────────────────────────────────────────
 
@@ -419,7 +108,9 @@ export default function StockInApprovals() {
   }
 
   async function loadRecords(p = page) {
-    const params = new URLSearchParams({ page: String(p), page_size: String(PAGE_SIZE) });
+    // Latest created-or-edited first — a late slip entered today, or an
+    // older record just corrected, always surfaces at the top.
+    const params = new URLSearchParams({ page: String(p), page_size: String(PAGE_SIZE), sort: "updated" });
     if (status) params.set("status", status);
     if (search) params.set("search", search);
     const recs = await api<Paginated<StockInRecord>>(`/stock-in/?${params}`);
@@ -686,6 +377,11 @@ export default function StockInApprovals() {
     const v = parseFloat(l.line_total);
     return s + (isNaN(v) ? 0 : v);
   }, 0);
+  // Compared against the slip's own printed total (when extracted) so a
+  // missing/duplicated/misread line surfaces before submission.
+  const slipTotal = draft?.slip_grand_total ? parseFloat(draft.slip_grand_total) : null;
+  const draftTotalDiff = slipTotal != null && !isNaN(slipTotal) ? draftTotal - slipTotal : null;
+  const draftTotalMismatch = draftTotalDiff != null && Math.abs(draftTotalDiff) >= 1;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1005,6 +701,13 @@ export default function StockInApprovals() {
             </div>
           )}
 
+          {draftTotalMismatch && (
+            <p className="rounded border border-chili bg-[#fdece1] px-2 py-1.5 font-mono text-[11px] font-semibold text-chili-deep">
+              ⚠ Line totals add up to ৳{draftTotal.toFixed(2)}, but the slip total is ৳{slipTotal!.toFixed(2)}
+              {" "}(off by ৳{Math.abs(draftTotalDiff!).toFixed(2)}) — check for a missing, duplicated, or misread line.
+            </p>
+          )}
+
           {draftMsg && <p className="font-mono text-[11px] text-ink-soft">{draftMsg}</p>}
 
           <button
@@ -1046,7 +749,7 @@ export default function StockInApprovals() {
 
       <div className="flex flex-col gap-2">
         {records.map((r) => (
-          <InvoiceRow
+          <StockInInvoiceRow
             key={r.id}
             r={r}
             busy={actBusy === r.id}

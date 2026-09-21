@@ -42,6 +42,7 @@ function ClosingHub() {
   const [totalProducts, setTotalProducts] = useState(0);
   const [busy, setBusy] = useState(false);
   const [recalcBusy, setRecalcBusy] = useState(false);
+  const [confirmingSubmit, setConfirmingSubmit] = useState(false);
   // System cash balance as of right now. While the closing is still open
   // (DRAFT/SUBMITTED) this does NOT yet include today's cash — that only
   // posts once the closing locks — so "system cash + today's computed cash"
@@ -105,6 +106,7 @@ function ClosingHub() {
       const c = await api<DailyClosing>(`/daily-closings/${closing!.id}/submit/`, { method: "POST" });
       invalidateClosingCache(outlet, opDate);
       setClosing(c);
+      setConfirmingSubmit(false);
     } finally {
       setBusy(false);
     }
@@ -293,9 +295,49 @@ function ClosingHub() {
       })()}
 
       {!viewYesterday && closing.status === "DRAFT" && (
-        <button className="btn btn-primary" disabled={busy} onClick={submit}>
-          {busy ? "Submitting…" : "Submit closing"}
+        <button className="btn btn-primary" onClick={() => setConfirmingSubmit(true)}>
+          Submit closing
         </button>
+      )}
+
+      {/* Confirm-submit dialog — a mistaken tap on "Submit closing" shouldn't
+          be able to lock the day; this forces a deliberate second action. */}
+      {confirmingSubmit && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]"
+            onClick={() => !busy && setConfirmingSubmit(false)}
+          />
+          <div
+            className="fixed bottom-0 left-0 z-50 w-full rounded-t-3xl bg-paper shadow-2xl"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="h-1 w-10 rounded-full bg-ink-soft/20" />
+            </div>
+            <div className="flex flex-col gap-3 px-5 pb-6 pt-2">
+              <p className="font-display text-lg font-bold text-chili-deep">
+                Submit and lock today&apos;s closing?
+              </p>
+              <p className="font-mono text-[11px] leading-relaxed text-ink-soft">
+                Once submitted, today&apos;s sales and cash post to the books and can&apos;t be easily undone.
+                Make sure the drawer count above matches before continuing.
+              </p>
+              <div className="mt-1 flex gap-2">
+                <button
+                  className="btn btn-ghost flex-1"
+                  disabled={busy}
+                  onClick={() => setConfirmingSubmit(false)}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary flex-1" disabled={busy} onClick={submit}>
+                  {busy ? "Submitting…" : "Yes, submit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
       {!viewYesterday && closing.status === "SUBMITTED" && (
         <p className="font-mono text-xs text-gold-deep">Submitted — awaiting owner review (flagged).</p>

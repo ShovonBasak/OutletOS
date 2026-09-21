@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { shortDate } from "@/lib/format";
-import type { DailyClosing, Paginated, StockInRecord } from "@/lib/types";
+import { StockInInvoiceRow } from "@/components/StockInInvoiceRow";
+import type { DailyClosing, FinancialAccount, Paginated, StockInRecord } from "@/lib/types";
 
 export default function ApprovalsHub() {
   const [pendingStockIns, setPendingStockIns] = useState<StockInRecord[]>([]);
+  const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [reviewClosings, setReviewClosings] = useState<DailyClosing[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -21,12 +23,33 @@ export default function ApprovalsHub() {
   }
   useEffect(() => {
     refresh();
+    api<Paginated<FinancialAccount>>("/financial-accounts/").then((acc) => setAccounts(acc.results));
   }, []);
 
-  async function actStockIn(id: number, action: "approve" | "reject") {
+  async function actStockIn(id: number, action: "approve" | "reject" | "delete", accountId?: number | null) {
     setBusy(`si-${id}`);
     try {
-      await api(`/stock-in/${id}/${action}/`, { method: "POST" });
+      if (action === "approve") {
+        await api(`/stock-in/${id}/approve/`, {
+          method: "POST",
+          body: JSON.stringify({ paid_from_account: accountId ?? null }),
+        });
+      } else {
+        await api(`/stock-in/${id}/${action}/`, { method: "POST" });
+      }
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function editStockInDate(id: number, newDate: string) {
+    setBusy(`si-${id}`);
+    try {
+      await api(`/stock-in/${id}/set-date/`, {
+        method: "PATCH",
+        body: JSON.stringify({ stock_in_date: newDate }),
+      });
       await refresh();
     } finally {
       setBusy(null);
@@ -64,23 +87,15 @@ export default function ApprovalsHub() {
       )}
 
       {pendingStockIns.map((r) => (
-        <div key={`si-${r.id}`} className="queue-item">
-          <div className="qtop">
-            <span>Stock in #SI-{String(r.id).padStart(4, "0")}</span>
-            <span className="stamp stamp-pending rotate-0">Pending</span>
-          </div>
-          <div className="qmeta">
-            {r.item_count ?? r.items?.length ?? 0} line(s) · {shortDate(r.stock_in_date)} · by {r.submitted_by_name}
-          </div>
-          <div className="qbtns">
-            <button className="approve" disabled={busy === `si-${r.id}`} onClick={() => actStockIn(r.id, "approve")}>
-              Approve
-            </button>
-            <button className="reject" disabled={busy === `si-${r.id}`} onClick={() => actStockIn(r.id, "reject")}>
-              Reject
-            </button>
-          </div>
-        </div>
+        <StockInInvoiceRow
+          key={`si-${r.id}`}
+          r={r}
+          busy={busy === `si-${r.id}`}
+          accounts={accounts}
+          onAct={actStockIn}
+          onEditDate={editStockInDate}
+          alwaysShowActions
+        />
       ))}
 
       {reviewClosings.map((c) => (

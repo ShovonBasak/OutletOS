@@ -143,6 +143,10 @@ class StockInRecord(models.Model):
         related_name="stock_ins",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Bumped on every save (invoice number/date correction, item edits, status
+    # change, etc.) — used so the Owner's list can surface "what was just
+    # touched" regardless of what stock_in_date the slip itself carries.
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-stock_in_date", "-id"]
