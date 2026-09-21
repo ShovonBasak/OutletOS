@@ -489,18 +489,49 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
             closing.status = ClosingStatus.LOCKED
             self._close_operating_day(closing)
         closing.save()
+        self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
     def lock(self, request, pk=None):
-        """Owner reviews a flagged closing and locks it."""
+        """Owner reviews a flagged closing and locks it.
+
+        A SUBMITTED (flagged) closing stays editable — see _guard_editable —
+        so counts/online-sell (and therefore computed_cash) can still change
+        between submit and this lock. Re-sync the cash PaymentEntry from the
+        live figure first, or _record_account_transactions would post
+        whatever stale amount was last saved (e.g. from an earlier visit to
+        the Payments screen), silently under/over-crediting the cash account."""
         closing = self.get_object()
         closing.status = ClosingStatus.LOCKED
         closing.save()
         self._close_operating_day(closing)
+        self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
+
+    def _sync_cash_payment_entry(self, closing):
+        """Set the primary-cash PaymentEntry to the CURRENT computed_cash right
+        before it's posted to the ledger. Without this, submit()/lock() would
+        post whatever amount the cash PaymentEntry last held — stale if staff
+        edited counts/online-sell after their last visit to the Payments step
+        (or never visited it at all) — silently corrupting the account's
+        running balance by the gap between what was shown and what posted."""
+        from finance.models import FinancialAccount
+
+        primary_cash = (
+            FinancialAccount.objects.filter(is_primary_cash=True).first()
+            or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
+        )
+        if not primary_cash:
+            return
+        closing_fresh = self.get_queryset().get(pk=closing.pk)
+        cash_obj, _ = PaymentEntry.objects.get_or_create(
+            daily_closing=closing_fresh, account=primary_cash
+        )
+        cash_obj.amount = closing_fresh.computed_cash
+        cash_obj.save()
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdmin], url_path="reopen")
     def reopen(self, request, pk=None):
