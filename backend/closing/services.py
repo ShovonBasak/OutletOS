@@ -118,9 +118,15 @@ def sync_cash_payment_entry(closing):
 def record_account_transactions(closing, user):
     """Idempotently (re-)write SALES_COLLECTION transactions for each payment
     entry on this closing — voids whatever was posted before and re-posts from
-    the current PaymentEntry amounts. Safe to call any number of times, e.g.
-    once at submit/lock and again whenever a later correction changes the
-    day's numbers (see reports.views.correct_sells)."""
+    the current PaymentEntry amounts. Safe to call any number of times while
+    the day is still being finalized (submit() re-running before the owner's
+    lock(), or lock() itself re-syncing a flagged day) — at that point nothing
+    has been reported as "settled" yet, so silently replacing the entry is
+    just finishing a draft, not rewriting history.
+
+    NOT used for post-lock corrections (see post_cash_correction below) — once
+    a day is closed and time has passed, a later fix should never silently
+    overwrite what was originally posted."""
     from finance import services as finance_services
     from finance.models import AccountTransaction, SourceType, TransactionType
 
@@ -135,3 +141,50 @@ def record_account_transactions(closing, user):
             source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
             note=f"Day closing — {closing.closing_date}",
         )
+
+
+def post_cash_correction(closing, user, note=""):
+    """Reconcile the primary-cash account after a POST-LOCK correction (e.g.
+    reports.views.correct_sells fixing a wrong sale on an already-closed day)
+    — without rewriting what was originally posted.
+
+    Unlike record_account_transactions, this never voids the original
+    SALES_COLLECTION entry. It posts one standalone ADJUSTMENT transaction for
+    just the delta, dated TODAY (not the closing date — the cash wasn't
+    actually adjusted in the drawer back then, it's a paper correction made
+    now), so the ledger reads as real bookkeeping: "Feb 10 closing: ৳500" and
+    "Feb 12: sell correction −৳100" as two distinct, dated entries that net to
+    the same corrected balance — never a single silently-edited ৳400.
+
+    Returns the AccountTransaction posted, or None if there was nothing to
+    correct (delta == 0, or no primary-cash account configured)."""
+    from django.utils import timezone
+    from finance import services as finance_services
+    from finance.models import FinancialAccount, SourceType, TransactionType
+
+    primary_cash = (
+        FinancialAccount.objects.filter(is_primary_cash=True).first()
+        or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
+    )
+    if not primary_cash:
+        return None
+
+    closing_fresh = DailyClosing.objects.get(pk=closing.pk)
+    cash_obj, _ = PaymentEntry.objects.get_or_create(
+        daily_closing=closing_fresh, account=primary_cash
+    )
+    old_amount = cash_obj.amount
+    new_amount = closing_fresh.computed_cash
+    delta = new_amount - old_amount
+
+    cash_obj.amount = new_amount
+    cash_obj.save()
+
+    if delta == 0:
+        return None
+    return finance_services.post_transaction(
+        account=primary_cash, transaction_type=TransactionType.ADJUSTMENT,
+        amount=delta, date=timezone.localdate(), entered_by=user,
+        source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
+        note=note or f"Sell correction for {closing.closing_date} closing",
+    )

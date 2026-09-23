@@ -15,9 +15,11 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
+from django.utils import timezone
+
 from catalog.models import Ingredient, Outlet, Product, ProductPrice, Recipe, TrackingMode
 from closing.models import DailyClosing, DailyClosingSalesLine, LineSource
-from finance.models import FinancialAccount
+from finance.models import AccountTransaction, FinancialAccount, SourceType, TransactionType
 from stock.models import RawStock
 from sales.models import SalesChannel, SettlementType
 
@@ -136,3 +138,71 @@ class CorrectSellsCashStockTests(APITestCase):
         self.closing.refresh_from_db()
         line = DailyClosingSalesLine.objects.get(daily_closing=self.closing, product=self.product)
         self.assertEqual(line.quantity_sold, 8)
+
+    def test_cash_fix_posts_separate_dated_adjustment_not_a_rewrite(self):
+        """The actual ask: never silently edit the original settled entry —
+        post a standalone, today-dated correction instead, so both remain
+        visible in the account's history."""
+        txns_before = list(
+            AccountTransaction.objects.filter(
+                source_type=SourceType.DAILY_CLOSING, source_id=self.closing.id, account=self.cash,
+            )
+        )
+        self.assertEqual(len(txns_before), 1)
+        original = txns_before[0]
+        self.assertEqual(original.transaction_type, TransactionType.SALES_COLLECTION)
+        self.assertEqual(original.amount, Decimal("500.00"))
+        self.assertEqual(original.date, self.closing_date)
+
+        resp = self._correct()
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        # The original entry is untouched — same id, same amount, same date.
+        original.refresh_from_db()
+        self.assertEqual(original.amount, Decimal("500.00"))
+        self.assertEqual(original.date, self.closing_date)
+
+        # A new, separate ADJUSTMENT entry covers just the delta, dated today.
+        txns_after = list(
+            AccountTransaction.objects.filter(
+                source_type=SourceType.DAILY_CLOSING, source_id=self.closing.id, account=self.cash,
+            ).order_by("id")
+        )
+        self.assertEqual(len(txns_after), 2)
+        self.assertEqual(txns_after[0].id, original.id)
+        correction = txns_after[1]
+        self.assertEqual(correction.transaction_type, TransactionType.ADJUSTMENT)
+        self.assertEqual(correction.amount, Decimal("-100.00"))
+        self.assertEqual(correction.date, timezone.localdate())
+        self.assertIn("Rice", correction.note)
+
+        # Net effect still lands on the correct final balance.
+        self.cash.refresh_from_db()
+        self.assertEqual(self.cash.current_balance, Decimal("10400.00"))
+
+    def test_day_overview_sales_section_reflects_correction(self):
+        """Owner -> Day View's Sales section must not keep showing the
+        pre-correction quantity — it used to read DailyClosingStockCount
+        fields correct_sells never touches, instead of the sales lines it
+        actually edits."""
+        before = self.owner_client.get(
+            f"/api/reports/day-overview/?outlet={self.outlet.id}&date={self.closing_date}"
+        )
+        self.assertEqual(before.status_code, 200, before.data)
+        row = before.data["closing"]["sales_by_product"][0]
+        self.assertEqual(row["product_name"], "Rice")
+        self.assertEqual(row["total_sold"], 10)
+        self.assertEqual(row["walkin_sold"], 10)
+        self.assertEqual(Decimal(row["revenue"]), Decimal("500.00"))
+
+        resp = self._correct()
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        after = self.owner_client.get(
+            f"/api/reports/day-overview/?outlet={self.outlet.id}&date={self.closing_date}"
+        )
+        self.assertEqual(after.status_code, 200, after.data)
+        row = after.data["closing"]["sales_by_product"][0]
+        self.assertEqual(row["total_sold"], 8)
+        self.assertEqual(row["walkin_sold"], 8)
+        self.assertEqual(Decimal(row["revenue"]), Decimal("400.00"))

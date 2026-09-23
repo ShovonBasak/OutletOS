@@ -133,6 +133,30 @@ def _bulk_active_prices(product_ids, as_of):
     return result
 
 
+def _sales_by_product(sales_lines):
+    """Aggregate a list of DailyClosingSalesLine rows into
+    {product_id: {product_name, product_category, walkin_sold, online_sold, revenue}}.
+
+    Sourced from the sales lines themselves (not DailyClosingStockCount's
+    derived_walkin_sold/app_channel_sold) so it always agrees with whatever a
+    sell correction most recently wrote — see the day_overview caller."""
+    result: dict = {}
+    for line in sales_lines:
+        agg = result.setdefault(line.product_id, {
+            "product_name": line.product.name,
+            "product_category": line.product.category,
+            "walkin_sold": 0,
+            "online_sold": 0,
+            "revenue": Decimal("0"),
+        })
+        if line.channel.is_walk_in:
+            agg["walkin_sold"] += line.quantity_sold
+        else:
+            agg["online_sold"] += line.quantity_sold
+        agg["revenue"] += line.gross_amount
+    return result
+
+
 def _cost_at_date(ingredient_id, on_date, pack_history):
     """Cost per base unit for an ingredient on a specific date, from the
     pre-loaded pack_history dict. Returns 0 if no matching pack found."""
@@ -1275,14 +1299,19 @@ def correct_sells(request):
 
         # The sales-line edits above only change what computed_cash WOULD
         # report if recalculated — they don't touch money already posted to
-        # the ledger when this day was submitted/locked. Re-sync that too,
+        # the ledger when this day was submitted/locked. Reconcile that too,
         # unless the caller explicitly opted out (e.g. because only the stock
-        # side needed fixing, or vice versa).
+        # side needed fixing, or vice versa). Posts a standalone ADJUSTMENT
+        # entry for the delta rather than rewriting the original SALES_
+        # COLLECTION entry — see closing.services.post_cash_correction.
         cash_resynced = fix_cash and bool(applied) and daily_closing.status != ClosingStatus.DRAFT
         if cash_resynced:
             from closing import services as closing_services
-            closing_services.sync_cash_payment_entry(daily_closing)
-            closing_services.record_account_transactions(daily_closing, request.user)
+            note = "Sell correction for {} — {}".format(
+                daily_closing.closing_date,
+                ", ".join(f"{a['product']} {a['old_qty']}→{a['new_qty']}" for a in applied),
+            )
+            closing_services.post_cash_correction(daily_closing, request.user, note)
 
     return Response({"ok": True, "applied": applied, "cash_resynced": cash_resynced})
 
@@ -1663,7 +1692,7 @@ def day_overview(request):
             "stock_counts__product",
             Prefetch(
                 "sales_lines",
-                queryset=DailyClosingSalesLine.objects.select_related("channel"),
+                queryset=DailyClosingSalesLine.objects.select_related("channel", "product"),
             ),
             "channel_discounts",
             Prefetch(
@@ -1957,21 +1986,27 @@ def day_overview(request):
                     Decimal("0"),
                 ).quantize(Decimal("0.01"))
             ),
+            # Built from sales_lines (DailyClosingSalesLine), NOT
+            # DailyClosingStockCount.derived_walkin_sold/app_channel_sold —
+            # those only get re-derived by recompute_closing() (staff
+            # counts/online-sell steps), which reports.views.correct_sells
+            # deliberately does not call when fixing an already-locked day
+            # (see its docstring). Sourcing this from the same sales_lines_list
+            # that total_sale/computed_cash above already use keeps this
+            # section from ever going stale relative to a sell correction.
             "sales_by_product": sorted(
                 [
                     {
-                        "product_name": sc.product.name,
-                        "product_category": sc.product.category,
-                        "walkin_sold": max(sc.derived_walkin_sold, 0),
-                        "online_sold": sc.app_channel_sold,
-                        "total_sold": max(sc.derived_walkin_sold, 0) + sc.app_channel_sold,
-                        "selling_price": str(_price(sc)),
-                        "revenue": str(
-                            (_price(sc) * (max(sc.derived_walkin_sold, 0) + sc.app_channel_sold)).quantize(Decimal("0.01"))
-                        ),
+                        "product_name": agg["product_name"],
+                        "product_category": agg["product_category"],
+                        "walkin_sold": agg["walkin_sold"],
+                        "online_sold": agg["online_sold"],
+                        "total_sold": agg["walkin_sold"] + agg["online_sold"],
+                        "selling_price": str(price_map.get(product_id, Decimal("0"))),
+                        "revenue": str(agg["revenue"].quantize(Decimal("0.01"))),
                     }
-                    for sc in stock_counts_list
-                    if max(sc.derived_walkin_sold, 0) + sc.app_channel_sold > 0
+                    for product_id, agg in _sales_by_product(sales_lines_list).items()
+                    if agg["walkin_sold"] + agg["online_sold"] > 0
                 ],
                 key=lambda x: (x["product_category"], x["product_name"]),
             ),
