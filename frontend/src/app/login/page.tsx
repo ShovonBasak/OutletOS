@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { login } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -64,6 +65,9 @@ export default function LoginPage() {
             <button className="btn btn-primary" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </button>
+            <Link href="/apply" className="text-center font-mono text-[11px] text-ink-soft underline">
+              New restaurant? Apply here →
+            </Link>
             {process.env.NODE_ENV === "development" && (
               <div className="rounded border border-dashed border-ink-soft/50 p-3 font-mono text-[11px] text-ink-soft">
                 <p className="mb-1.5 font-semibold">Demo logins</p>

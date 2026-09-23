@@ -11,6 +11,7 @@ import type {
   AccountTransaction,
   AccountTransfer,
   CapitalTransaction,
+  Outlet,
   Paginated,
 } from "@/lib/types";
 
@@ -85,6 +86,9 @@ export default function AccountsPage() {
   const [accSaving, setAccSaving] = useState(false);
   const [accError, setAccError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  // The account form has no per-account outlet picker (single-outlet
+  // assumption) — this is just the caller's own outlet, not a hardcoded id.
+  const [outletId, setOutletId] = useState<number | null>(null);
 
   function startEdit(a: FinancialAccount) {
     setEditingAccount(a);
@@ -108,6 +112,7 @@ export default function AccountsPage() {
 
   async function saveAccount() {
     if (!newAccName.trim()) { setAccError("Account name is required."); return; }
+    if (!editingAccount && !outletId) { setAccError("No outlet found for your organization yet."); return; }
     setAccSaving(true); setAccError(null);
     try {
       const body = {
@@ -116,7 +121,7 @@ export default function AccountsPage() {
         provider: newAccProvider.trim(),
         opening_balance: newAccOpening || "0",
         opening_balance_date: newAccOpeningDate,
-        outlet: 1,
+        outlet: outletId,
       };
       if (editingAccount) {
         await api(`/financial-accounts/${editingAccount.id}/`, { method: "PATCH", body: JSON.stringify(body) });
@@ -206,6 +211,7 @@ export default function AccountsPage() {
 
   useEffect(() => {
     loadAccounts();
+    api<Paginated<Outlet>>("/outlets/").then((d) => setOutletId(d.results[0]?.id ?? null));
   }, []);
 
   useEffect(() => {

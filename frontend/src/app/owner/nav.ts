@@ -77,10 +77,8 @@ export const OWNER_NAV: NavGroup[] = [
       { href: "/owner/organizations",                    label: "Organizations" },
     ],
   },
-  // Setup group — Admin only
   {
     group: "Setup",
-    adminOnly: true,
     items: [
       { href: "/owner/setup/extract",      label: "Extract ingredients" },
       { href: "/owner/setup/import-menu",  label: "Import menu" },

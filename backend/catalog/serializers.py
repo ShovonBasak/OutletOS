@@ -14,6 +14,7 @@ from .models import (
     Recipe,
     RecipeProductComponent,
     SupplierProductAlias,
+    TenantApplication,
 )
 
 
@@ -22,14 +23,41 @@ class OrganizationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Organization
-        fields = ["id", "name", "slug", "address", "is_active", "created_at", "outlet_count"]
-        read_only_fields = ["created_at"]
+        fields = [
+            "id", "name", "slug", "address", "is_active", "created_at",
+            "outlet_count", "onboarding_completed_at",
+        ]
+        read_only_fields = ["created_at", "onboarding_completed_at"]
 
 
 class OutletSerializer(serializers.ModelSerializer):
     class Meta:
         model = Outlet
         fields = ["id", "name", "address", "is_active", "allow_staff_date_selection"]
+
+
+class TenantApplicationSubmitSerializer(serializers.Serializer):
+    """Public-facing: what a prospective owner submits. Never exposes/accepts
+    password_hash directly — the raw password is hashed once in the view and
+    never stored or returned."""
+
+    org_name = serializers.CharField(max_length=120)
+    owner_name = serializers.CharField(max_length=120)
+    owner_phone = serializers.CharField(max_length=20)
+    owner_password = serializers.CharField(write_only=True, min_length=8)
+
+
+class TenantApplicationSerializer(serializers.ModelSerializer):
+    reviewed_by_name = serializers.CharField(source="reviewed_by.name", read_only=True, default=None)
+
+    class Meta:
+        model = TenantApplication
+        fields = [
+            "id", "org_name", "owner_name", "owner_phone", "status",
+            "submitted_at", "reviewed_by", "reviewed_by_name", "reviewed_at",
+            "rejection_reason", "created_organization",
+        ]
+        read_only_fields = fields
 
 
 class ComboComponentSerializer(serializers.ModelSerializer):
@@ -91,8 +119,13 @@ class IngredientSerializer(serializers.ModelSerializer):
         model = Ingredient
         fields = [
             "id", "name", "base_unit", "tracking_mode", "group", "is_active",
-            "active_pack", "aliases",
+            "active_pack", "aliases", "bundle_size",
         ]
+        # bundle_size is written exclusively via
+        # PeriodicStockCheckViewSet.set_bundle_size — it enforces
+        # tracking_mode == PERIODIC_COUNT and bundle_size > 0, which a plain
+        # PATCH here would bypass.
+        read_only_fields = ["bundle_size"]
 
     def get_active_pack(self, obj):
         pack = obj.active_pack()

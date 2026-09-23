@@ -11,6 +11,25 @@ export interface User {
   phone: string;
   is_active: boolean;
   avatar_url: string | null;
+  /** False until the owner finishes the first-login onboarding wizard.
+   * Always true for ADMIN (no organization of their own). */
+  organization_onboarding_complete: boolean;
+}
+
+export type TenantApplicationStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface TenantApplication {
+  id: number;
+  org_name: string;
+  owner_name: string;
+  owner_phone: string;
+  status: TenantApplicationStatus;
+  submitted_at: string;
+  reviewed_by: number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string;
+  created_organization: number | null;
 }
 
 export interface Outlet {
@@ -29,6 +48,7 @@ export interface Organization {
   is_active: boolean;
   created_at: string;
   outlet_count: number;
+  onboarding_completed_at: string | null;
 }
 
 export type ProductType = "SINGLE" | "COMBO";
@@ -63,6 +83,9 @@ export interface Ingredient {
   is_active: boolean;
   active_pack: PackDefinition | null;
   aliases: SupplierProductAlias[];
+  /** PERIODIC_COUNT only — pieces per physical bundle. Read-only here; write via
+   * POST /periodic-stock-checks/set-bundle-size/. */
+  bundle_size: string | null;
 }
 
 /** Slim ingredient shape returned by GET /ingredients/?slim=1.

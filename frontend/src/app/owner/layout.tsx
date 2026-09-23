@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
@@ -19,6 +19,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
   const { loading, isAdmin } = useRequireRole(["OWNER", "ADMIN"]);
   const { user, logout, isPlatformAdmin, selectedOrgId, selectedOrgName, selectOrg } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
 
   const nav = navFor(isAdmin);
 
@@ -29,7 +30,21 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     if (active) setOpen((prev) => new Set(prev).add(active));
   }, [pathname]);
 
-  if (loading) {
+  // First-login gate: an Owner whose organization hasn't finished the
+  // onboarding wizard is routed there before reaching anything else. ADMIN
+  // (platform admin, no organization of their own) is never gated.
+  const needsOnboarding =
+    !loading && !isAdmin && !!user && !user.organization_onboarding_complete;
+  const onOnboardingFlow =
+    pathname.startsWith("/owner/onboarding") || pathname.startsWith("/owner/setup");
+
+  useEffect(() => {
+    if (needsOnboarding && !onOnboardingFlow) {
+      router.replace("/owner/onboarding");
+    }
+  }, [needsOnboarding, onOnboardingFlow, router]);
+
+  if (loading || (needsOnboarding && !onOnboardingFlow)) {
     return (
       <div className="flex min-h-screen items-center justify-center font-mono text-sm text-ink-soft">
         Loading…

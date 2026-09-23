@@ -9,13 +9,21 @@ class UserSerializer(serializers.ModelSerializer):
     outlet_name = serializers.CharField(source="outlet.name", read_only=True, default=None)
     organization_name = serializers.CharField(source="organization.name", read_only=True, default=None)
     avatar_url = serializers.SerializerMethodField()
+    # Drives the owner onboarding-wizard redirect in the frontend layout guard.
+    # ADMIN has no organization and is never gated, hence the True default.
+    organization_onboarding_complete = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             "id", "name", "role", "outlet", "outlet_name", "organization", "organization_name",
-            "phone", "is_active", "password", "avatar_url",
+            "phone", "is_active", "password", "avatar_url", "organization_onboarding_complete",
         ]
+
+    def get_organization_onboarding_complete(self, obj):
+        if not obj.organization_id:
+            return True
+        return obj.organization.onboarding_completed_at is not None
 
     def get_avatar_url(self, obj):
         if not obj.avatar:

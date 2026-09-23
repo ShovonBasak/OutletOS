@@ -41,6 +41,7 @@ interface EditDraft {
   group: IngredientGroup;
   pieces_per_pack: string;
   cost_per_pack: string;
+  bundle_size: string;
 }
 
 function toRow(c: ExtractCandidate): Row {
@@ -66,8 +67,9 @@ export default function ExtractIngredients() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [showManual, setShowManual] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED", group: "OTHER", pieces_per_pack: "", cost_per_pack: "" });
+  const [editDraft, setEditDraft] = useState<EditDraft>({ name: "", base_unit: "", tracking_mode: "RECIPE_LINKED", group: "OTHER", pieces_per_pack: "", cost_per_pack: "", bundle_size: "" });
   const [editOrigPack, setEditOrigPack] = useState<{ pieces_per_pack: string; cost_per_pack: string }>({ pieces_per_pack: "", cost_per_pack: "" });
+  const [editOrigBundleSize, setEditOrigBundleSize] = useState("");
   const [editAliasId, setEditAliasId] = useState<number | null>(null);
   const [editAliasText, setEditAliasText] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -139,6 +141,7 @@ export default function ExtractIngredients() {
     const origPieces = ing.active_pack?.pieces_per_pack ?? "";
     const origCost   = ing.active_pack?.cost_per_pack   ?? "";
     const firstAlias = ing.aliases[0];
+    const origBundleSize = ing.bundle_size ?? "";
     setEditDraft({
       name: ing.name,
       base_unit: ing.base_unit,
@@ -146,8 +149,10 @@ export default function ExtractIngredients() {
       group: ing.group,
       pieces_per_pack: origPieces,
       cost_per_pack: origCost,
+      bundle_size: origBundleSize,
     });
     setEditOrigPack({ pieces_per_pack: origPieces, cost_per_pack: origCost });
+    setEditOrigBundleSize(origBundleSize);
     setEditAliasId(firstAlias?.id ?? null);
     setEditAliasText(firstAlias?.alias_text ?? "");
   }
@@ -179,6 +184,20 @@ export default function ExtractIngredients() {
             cost_per_pack: editDraft.cost_per_pack || "0",
             effective_from: today(),
           }),
+        });
+      }
+
+      // Bundle size only applies to periodic-count ingredients, and is
+      // validated (>0, PERIODIC_COUNT-only) by the dedicated endpoint below —
+      // not writable through the plain PATCH above.
+      if (
+        editDraft.tracking_mode === "PERIODIC_COUNT" &&
+        editDraft.bundle_size.trim() &&
+        editDraft.bundle_size !== editOrigBundleSize
+      ) {
+        await api("/periodic-stock-checks/set-bundle-size/", {
+          method: "POST",
+          body: JSON.stringify({ ingredient: editId, bundle_size: editDraft.bundle_size }),
         });
       }
 
@@ -429,6 +448,7 @@ export default function ExtractIngredients() {
               <th>Alias (display name)</th>
               <th>Qty / pack</th>
               <th>Cost / pack (৳)</th>
+              <th>Bundle size</th>
               <th></th>
             </tr>
           </thead>
@@ -507,6 +527,19 @@ export default function ExtractIngredients() {
                     />
                   </td>
                   <td>
+                    {editDraft.tracking_mode === "PERIODIC_COUNT" ? (
+                      <input
+                        className="field-input !py-0.5 !text-xs w-full"
+                        inputMode="decimal"
+                        placeholder="e.g. 100"
+                        value={editDraft.bundle_size}
+                        onChange={(e) => setEditDraft((d) => ({ ...d, bundle_size: e.target.value }))}
+                      />
+                    ) : (
+                      <span className="text-ink-soft/50">—</span>
+                    )}
+                  </td>
+                  <td>
                     <div className="flex gap-2">
                       <button
                         className="font-mono text-[11px] text-green-700 disabled:opacity-50"
@@ -543,6 +576,11 @@ export default function ExtractIngredients() {
                   </td>
                   <td className="font-mono text-xs">{ing.active_pack?.pieces_per_pack ?? "—"}</td>
                   <td className="font-mono text-xs">{ing.active_pack?.cost_per_pack ? `৳${ing.active_pack.cost_per_pack}` : "—"}</td>
+                  <td className="font-mono text-xs">
+                    {ing.tracking_mode === "PERIODIC_COUNT"
+                      ? (ing.bundle_size ? `${ing.bundle_size} ${ing.base_unit}` : <span className="text-ink-soft/50">not set</span>)
+                      : <span className="text-ink-soft/50">—</span>}
+                  </td>
                   <td>
                     <div className="flex gap-3">
                       <button className="font-mono text-[11px] text-gold-deep" onClick={() => startEdit(ing)}>Edit</button>
@@ -553,7 +591,7 @@ export default function ExtractIngredients() {
               )
             )}
             {ingredients.length === 0 && (
-              <tr><td colSpan={8} className="text-ink-soft">No ingredients yet.</td></tr>
+              <tr><td colSpan={9} className="text-ink-soft">No ingredients yet.</td></tr>
             )}
           </tbody>
         </table>

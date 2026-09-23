@@ -1,7 +1,10 @@
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,8 +14,8 @@ from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOn
 from accounts.scoping import resolve_organization_id
 from . import services
 from .models import (
-    FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
-    CapitalTransaction, AccountBalanceCheck,
+    AccountType, FinancialAccount, AccountRoleAccess, AccountTransaction,
+    AccountTransfer, CapitalTransaction, AccountBalanceCheck,
 )
 from .serializers import (
     FinancialAccountSerializer, FinancialAccountNameSerializer,
@@ -86,6 +89,46 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         Idempotent; safe to run any time. Returns how many rows actually changed."""
         result = services.rebuild_account_balances(pk)
         return Response(result)
+
+    @action(detail=False, methods=["post"], permission_classes=[IsOwnerOrAdmin], url_path="create-defaults")
+    def create_defaults(self, request):
+        """Onboarding wizard step: seed the three default accounts every new
+        organization needs — "Owner Cash", "Shop Cash" (primary), "Supplier
+        Credit". Body: {outlet}. get_or_create-keyed so it's safe to call more
+        than once (e.g. the wizard resuming after a page refresh)."""
+        outlet_id = request.data.get("outlet")
+        if not outlet_id:
+            raise ValidationError({"outlet": "This field is required."})
+
+        org = self.resolve_organization()
+        if org is None:
+            raise ValidationError("Could not resolve your organization.")
+
+        from catalog.models import Outlet
+        if not Outlet.objects.filter(pk=outlet_id, organization=org).exists():
+            raise ValidationError({"outlet": "Outlet not found in your organization."})
+
+        today = timezone.localdate()
+        defaults = [
+            {"name": "Owner Cash", "account_type": AccountType.CASH, "is_primary_cash": False},
+            {"name": "Shop Cash", "account_type": AccountType.CASH, "is_primary_cash": True},
+            {"name": "Supplier Credit", "account_type": AccountType.SUPPLIER_CREDIT, "is_primary_cash": False},
+        ]
+        created = []
+        with transaction.atomic():
+            for d in defaults:
+                account, _ = FinancialAccount.objects.get_or_create(
+                    organization=org, outlet_id=outlet_id,
+                    account_type=d["account_type"], name=d["name"],
+                    defaults={
+                        "opening_balance": Decimal("0"),
+                        "opening_balance_date": today,
+                        "is_primary_cash": d["is_primary_cash"],
+                    },
+                )
+                created.append(account)
+
+        return Response(FinancialAccountSerializer(created, many=True).data, status=201)
 
 
 class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):

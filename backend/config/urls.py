@@ -22,6 +22,7 @@ from catalog.views import (
     PackDefinitionViewSet,
     RecipeViewSet,
     RecipeProductComponentViewSet,
+    TenantApplicationViewSet,
 )
 from stock.views import (
     StockInRecordViewSet,
@@ -79,6 +80,7 @@ router.register("users", UserViewSet)
 router.register("team-users", TeamUserViewSet, basename="team-users")
 router.register("push-subscriptions", PushSubscriptionViewSet, basename="push-subscriptions")
 router.register("organizations", OrganizationViewSet)
+router.register("tenant-applications", TenantApplicationViewSet, basename="tenant-applications")
 router.register("outlets", OutletViewSet)
 router.register("products", ProductViewSet)
 router.register("product-prices", ProductPriceViewSet)

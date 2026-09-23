@@ -14,6 +14,13 @@ class Organization(models.Model):
     address = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Set once, at the end of the Owner's first-login onboarding wizard
+    # (Outlet -> Accounts -> Staff). Null = the org still needs to go through
+    # it. Deliberately not inferred from "has an Outlet yet" — an owner who
+    # creates the Outlet then abandons the wizard before the Accounts step
+    # would otherwise reach the main app with no primary-cash account, which
+    # the Day-Closing flow depends on existing.
+    onboarding_completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["name"]
@@ -314,3 +321,45 @@ class ProductPrice(models.Model):
     @property
     def is_active(self):
         return self.effective_to is None
+
+
+class TenantApplicationStatus(models.TextChoices):
+    PENDING  = "PENDING",  "Pending"
+    APPROVED = "APPROVED", "Approved"
+    REJECTED = "REJECTED", "Rejected"
+
+
+class TenantApplication(models.Model):
+    """A prospective franchise owner's self-service application. Approving one
+    creates the Organization + first OWNER login in one shot — see
+    TenantApplicationViewSet.approve. Deliberately does NOT create an Outlet;
+    that's the first step of the new owner's onboarding wizard."""
+
+    org_name = models.CharField(max_length=120)
+    owner_name = models.CharField(max_length=120)
+    owner_phone = models.CharField(max_length=20)
+    # Hashed once at submit time via django.contrib.auth.hashers.make_password —
+    # never the raw password. Named password_hash (not `password`) so it's never
+    # mistaken for a live-auth field.
+    password_hash = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=10, choices=TenantApplicationStatus.choices,
+        default=TenantApplicationStatus.PENDING,
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="tenant_applications_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    created_organization = models.ForeignKey(
+        Organization, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="tenant_applications",
+    )
+
+    class Meta:
+        ordering = ["-submitted_at"]
+
+    def __str__(self):
+        return f"{self.org_name} ({self.status})"

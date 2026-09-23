@@ -67,6 +67,8 @@ function pct(a: number, b: number) {
 // ── SVG: Daily bar chart ──────────────────────────────────────────────────────
 
 function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
+  const [selected, setSelected] = useState<number | null>(daily.length > 0 ? daily.length - 1 : null);
+
   if (daily.length === 0) {
     return <p className="py-6 text-center font-mono text-xs text-ink-soft italic">No closed days in this period.</p>;
   }
@@ -90,54 +92,97 @@ function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
   }));
 
   const step = daily.length <= 10 ? 1 : Math.ceil(daily.length / 9);
+  const baseY = PAD.t + ph;
+  const sel = selected != null ? daily[selected] : null;
+  const selRev  = sel ? Number(sel.revenue) : 0;
+  const selCogs = sel ? Math.min(Number(sel.cogs), selRev) : 0;
+  const selGp   = sel ? selRev - selCogs : 0;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {/* grid lines + y labels */}
-      {ticks.map((tk, i) => (
-        <g key={i}>
-          <line x1={PAD.l} y1={tk.y} x2={W - PAD.r} y2={tk.y}
-                stroke="#e8dfc8" strokeWidth={i === 0 ? "0.8" : "0.4"} />
-          <text x={PAD.l - 5} y={tk.y + 3} textAnchor="end"
-                fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
-            {tk.label}
-          </text>
-        </g>
-      ))}
+    <div>
+      <div className="overflow-x-auto">
+        <div className="min-w-[380px]">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+            {/* grid lines + y labels */}
+            {ticks.map((tk, i) => (
+              <g key={i}>
+                <line x1={PAD.l} y1={tk.y} x2={W - PAD.r} y2={tk.y}
+                      stroke="#e8dfc8" strokeWidth={i === 0 ? "0.8" : "0.4"} />
+                <text x={PAD.l - 5} y={tk.y + 3} textAnchor="end"
+                      fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
+                  {tk.label}
+                </text>
+              </g>
+            ))}
 
-      {/* bars */}
-      {daily.map((d, i) => {
-        const x   = PAD.l + i * groupW + barOff;
-        const rev = Number(d.revenue);
-        const cogs = Math.min(Number(d.cogs), rev);
-        const gp  = rev - cogs;
-        const revH  = rev  * scale;
-        const cogsH = cogs * scale;
-        const gpH   = gp   * scale;
-        const baseY = PAD.t + ph;
+            {/* bars */}
+            {daily.map((d, i) => {
+              const x   = PAD.l + i * groupW + barOff;
+              const rev = Number(d.revenue);
+              const cogs = Math.min(Number(d.cogs), rev);
+              const gp  = rev - cogs;
+              const revH  = rev  * scale;
+              const cogsH = cogs * scale;
+              const gpH   = gp   * scale;
 
-        return (
-          <g key={i}>
-            <title>{`${d.date}  Rev: ${bdt(rev)}  COGS: ${bdt(cogs)}  GP: ${bdt(gp)}`}</title>
-            {gpH   > 0 && <rect x={x} y={baseY - revH}        width={barW} height={gpH}   fill="#7A2420" opacity="0.82" rx="1.5" />}
-            {cogsH > 0 && <rect x={x} y={baseY - cogsH}       width={barW} height={cogsH} fill="#C9A227" opacity="0.75" rx="1.5" />}
-          </g>
-        );
-      })}
+              return (
+                <g key={i}>
+                  {gpH   > 0 && <rect x={x} y={baseY - revH}        width={barW} height={gpH}   fill="#7A2420" opacity={selected === i ? 1 : 0.82} rx="1.5" />}
+                  {cogsH > 0 && <rect x={x} y={baseY - cogsH}       width={barW} height={cogsH} fill="#C9A227" opacity={selected === i ? 0.95 : 0.75} rx="1.5" />}
+                </g>
+              );
+            })}
 
-      {/* x-axis date labels */}
-      {daily.map((d, i) => {
-        if (i % step !== 0 && i !== daily.length - 1) return null;
-        const cx = PAD.l + i * groupW + groupW / 2;
-        const label = d.date.slice(5).replace("-", "/");
-        return (
-          <text key={i} x={cx} y={H - 6} textAnchor="middle"
-                fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
-            {label}
-          </text>
-        );
-      })}
-    </svg>
+            {/* x-axis date labels */}
+            {daily.map((d, i) => {
+              if (i % step !== 0 && i !== daily.length - 1 && selected !== i) return null;
+              const cx = PAD.l + i * groupW + groupW / 2;
+              const label = d.date.slice(5).replace("-", "/");
+              return (
+                <text key={i} x={cx} y={H - 6} textAnchor="middle"
+                      fontFamily="monospace" fontSize="7.5"
+                      fontWeight={selected === i ? "bold" : "normal"}
+                      fill={selected === i ? "#7A2420" : "#9B8A78"}>
+                  {label}
+                </text>
+              );
+            })}
+
+            {/* Tap/click targets — one per day, full plot height, on top of
+                everything else so a bar can be selected even when its own height
+                is 0 (a day with no sales). */}
+            {daily.map((_, i) => {
+              const x = PAD.l + i * groupW;
+              return (
+                <rect
+                  key={i}
+                  x={x} y={PAD.t} width={groupW} height={ph}
+                  fill={selected === i ? "#7A2420" : "transparent"}
+                  opacity={selected === i ? 0.06 : 0}
+                  onClick={() => setSelected(i)}
+                  style={{ cursor: "pointer" }}
+                />
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {sel && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-paper-dim px-2 py-1.5 font-mono text-[10.5px]">
+          <span className="font-semibold text-ink">{sel.date}</span>
+          <span className="text-ink-soft">
+            Revenue <span className="font-semibold text-ink">{bdt(selRev)}</span>
+          </span>
+          <span className="text-ink-soft">
+            COGS <span className="font-semibold text-ink">{bdt(selCogs)}</span>
+          </span>
+          <span className="text-ink-soft">
+            Gross profit <span className="font-semibold" style={{ color: "#7A2420" }}>{bdt(selGp)}</span>
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -535,11 +580,7 @@ export default function OwnerDashboard() {
               </div>
             }
           >
-            <div className="overflow-x-auto">
-              <div className="min-w-[380px]">
-                <DailyBarChart daily={data.daily} />
-              </div>
-            </div>
+            <DailyBarChart daily={data.daily} />
           </Card>
 
           {/* ── Two-column: Products + P&L ────────────────────────────── */}

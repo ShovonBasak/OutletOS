@@ -6,10 +6,13 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import IsAdmin, IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.permissions import (
+    IsAdmin, IsAdminOrReadOnly, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly,
+)
 from .models import (
     ComboComponent,
     Ingredient,
@@ -21,6 +24,8 @@ from .models import (
     Recipe,
     RecipeProductComponent,
     SupplierProductAlias,
+    TenantApplication,
+    TenantApplicationStatus,
 )
 from .serializers import (
     ComboComponentSerializer,
@@ -35,6 +40,8 @@ from .serializers import (
     RecipeProductComponentSerializer,
     RecipeSerializer,
     SupplierProductAliasSerializer,
+    TenantApplicationSerializer,
+    TenantApplicationSubmitSerializer,
 )
 
 
@@ -95,6 +102,128 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             },
             status=201,
         )
+
+    @action(detail=True, methods=["post"], url_path="complete-onboarding",
+            permission_classes=[IsOwnerOrAdmin])
+    def complete_onboarding(self, request, pk=None):
+        """Marks the caller's own organization as done with the first-login
+        onboarding wizard (Outlet -> Accounts -> Staff). Deliberately scoped to
+        request.user.organization rather than the `pk` in the URL — an OWNER
+        must not be able to stamp a DIFFERENT organization's onboarding via a
+        crafted id; only a general PATCH on Organization (admin-only) could do
+        that, and this action intentionally doesn't offer one."""
+        org = request.user.organization
+        if org is None or str(org.pk) != str(pk):
+            raise ValidationError("You can only complete onboarding for your own organization.")
+        if org.onboarding_completed_at is None:
+            org.onboarding_completed_at = timezone.now()
+            org.save(update_fields=["onboarding_completed_at"])
+        return Response(OrganizationSerializer(org).data)
+
+
+class TenantApplicationViewSet(viewsets.ModelViewSet):
+    """Self-service intake for new franchise tenants. `submit` is the only
+    public (unauthenticated) action — everything else (list/retrieve/approve/
+    reject) is platform-admin only, matching the same review pattern used for
+    StockInRecordViewSet.approve / DailyClosingViewSet.lock elsewhere."""
+
+    queryset = TenantApplication.objects.select_related("reviewed_by", "created_organization")
+    serializer_class = TenantApplicationSerializer
+    permission_classes = [IsAdmin]
+    http_method_names = ["get", "post", "head", "options"]  # no PATCH/DELETE — status changes only via actions
+
+    def get_permissions(self):
+        if self.action == "submit":
+            return [AllowAny()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
+
+    @action(detail=False, methods=["post"])
+    def submit(self, request):
+        """Body: {org_name, owner_name, owner_phone, owner_password}. Hashes
+        the password once here — the raw value is never stored or returned."""
+        from django.contrib.auth.hashers import make_password
+
+        serializer = TenantApplicationSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if TenantApplication.objects.filter(
+            owner_phone=data["owner_phone"], status=TenantApplicationStatus.PENDING
+        ).exists():
+            raise ValidationError(
+                "There's already a pending application for this phone number."
+            )
+
+        application = TenantApplication.objects.create(
+            org_name=data["org_name"],
+            owner_name=data["owner_name"],
+            owner_phone=data["owner_phone"],
+            password_hash=make_password(data["owner_password"]),
+        )
+        return Response(TenantApplicationSerializer(application).data, status=201)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        """Atomically creates the Organization + first OWNER login from a
+        PENDING application. Deliberately does not create an Outlet — that's
+        the first step of the new owner's onboarding wizard."""
+        from django.db import IntegrityError, transaction
+        from django.utils.text import slugify
+        from accounts.models import Role, User
+
+        application = self.get_object()
+        if application.status != TenantApplicationStatus.PENDING:
+            raise ValidationError("This application has already been reviewed.")
+
+        try:
+            with transaction.atomic():
+                org = Organization.objects.create(
+                    name=application.org_name, slug=slugify(application.org_name)
+                )
+                owner = User(
+                    phone=application.owner_phone, name=application.owner_name,
+                    role=Role.OWNER, organization=org,
+                    is_staff=False, is_superuser=False,
+                )
+                # Pre-hashed at submit time — assign directly, never re-hash.
+                owner.password = application.password_hash
+                owner.save()
+
+                application.status = TenantApplicationStatus.APPROVED
+                application.reviewed_by = request.user
+                application.reviewed_at = timezone.now()
+                application.created_organization = org
+                application.save(update_fields=[
+                    "status", "reviewed_by", "reviewed_at", "created_organization",
+                ])
+        except IntegrityError:
+            raise ValidationError(
+                "This phone number is already registered to another account — "
+                "resolve that before approving."
+            )
+
+        return Response(TenantApplicationSerializer(application).data)
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        application = self.get_object()
+        if application.status != TenantApplicationStatus.PENDING:
+            raise ValidationError("This application has already been reviewed.")
+        application.status = TenantApplicationStatus.REJECTED
+        application.reviewed_by = request.user
+        application.reviewed_at = timezone.now()
+        application.rejection_reason = (request.data.get("reason") or "").strip()
+        application.save(update_fields=[
+            "status", "reviewed_by", "reviewed_at", "rejection_reason",
+        ])
+        return Response(TenantApplicationSerializer(application).data)
 
 
 class OutletViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
@@ -286,7 +415,10 @@ class ComboComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = Ingredient.objects.prefetch_related("aliases", "pack_definitions")
     serializer_class = IngredientSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    # Owner setup flow (Extract Ingredients) edits ingredients directly —
+    # was IsAdminOrReadOnly (platform-admin only), which 403'd every real
+    # OWNER trying to save a name/unit/tracking-mode correction here.
+    permission_classes = [IsOwnerOrAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset().filter(is_active=True)
@@ -405,7 +537,9 @@ class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
 class SupplierProductAliasViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = SupplierProductAlias.objects.select_related("ingredient")
     serializer_class = SupplierProductAliasSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    # Written from the same Extract Ingredients save flow as IngredientViewSet
+    # above — same OWNER-lockout bug, same fix.
+    permission_classes = [IsOwnerOrAdminOrReadOnly]
     org_lookup = "ingredient__organization"
 
     def get_queryset(self):
@@ -419,7 +553,10 @@ class SupplierProductAliasViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet)
 class PackDefinitionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = PackDefinition.objects.select_related("ingredient")
     serializer_class = PackDefinitionSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    # "pieces_per_pack" is explicitly an Owner-editable field on the Extract
+    # Ingredients screen (see CLAUDE.md's Owner setup flow) — same fix as
+    # IngredientViewSet/SupplierProductAliasViewSet above.
+    permission_classes = [IsOwnerOrAdminOrReadOnly]
     org_lookup = "ingredient__organization"
 
     def get_queryset(self):
