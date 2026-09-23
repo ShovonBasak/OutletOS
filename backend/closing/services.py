@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sales.models import SalesChannel
 from sales.pricing import resolve_price
-from .models import DailyClosingSalesLine, DailyClosingStockCount, LineSource
+from .models import DailyClosing, DailyClosingSalesLine, DailyClosingStockCount, LineSource, PaymentEntry
 
 
 def _walk_in_channel():
@@ -87,3 +87,51 @@ def recompute_closing(closing):
         )
         line.recompute()
         line.save()
+
+
+def sync_cash_payment_entry(closing):
+    """Set the primary-cash PaymentEntry to the CURRENT computed_cash right
+    before it's posted to the ledger. Without this, posting would use whatever
+    amount the cash PaymentEntry last held — stale if the sales lines changed
+    since (e.g. staff never revisited the Payments step, or a sell-correction
+    edited yesterday's sale after the day was already locked) — silently
+    corrupting the account's running balance by the gap.
+
+    Re-fetches `closing` fresh so `computed_cash` (which reads sales_lines) is
+    never computed against a stale prefetch cache the caller might be holding."""
+    from finance.models import FinancialAccount
+
+    primary_cash = (
+        FinancialAccount.objects.filter(is_primary_cash=True).first()
+        or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
+    )
+    if not primary_cash:
+        return
+    closing_fresh = DailyClosing.objects.get(pk=closing.pk)
+    cash_obj, _ = PaymentEntry.objects.get_or_create(
+        daily_closing=closing_fresh, account=primary_cash
+    )
+    cash_obj.amount = closing_fresh.computed_cash
+    cash_obj.save()
+
+
+def record_account_transactions(closing, user):
+    """Idempotently (re-)write SALES_COLLECTION transactions for each payment
+    entry on this closing — voids whatever was posted before and re-posts from
+    the current PaymentEntry amounts. Safe to call any number of times, e.g.
+    once at submit/lock and again whenever a later correction changes the
+    day's numbers (see reports.views.correct_sells)."""
+    from finance import services as finance_services
+    from finance.models import AccountTransaction, SourceType, TransactionType
+
+    for t in AccountTransaction.objects.filter(
+        source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
+    ):
+        finance_services.void_transaction(t.id)
+    for payment in closing.payments.select_related("account").filter(amount__gt=0):
+        finance_services.post_transaction(
+            account=payment.account, transaction_type=TransactionType.SALES_COLLECTION,
+            amount=payment.amount, date=closing.closing_date, entered_by=user,
+            source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
+            note=f"Day closing — {closing.closing_date}",
+        )

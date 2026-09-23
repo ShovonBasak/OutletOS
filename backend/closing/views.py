@@ -25,6 +25,7 @@ from .serializers import (
     DailyClosingListSerializer,
     DailyClosingSerializer,
 )
+from . import services as closing_services
 from .services import recompute_closing
 
 
@@ -511,27 +512,9 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
-    def _sync_cash_payment_entry(self, closing):
-        """Set the primary-cash PaymentEntry to the CURRENT computed_cash right
-        before it's posted to the ledger. Without this, submit()/lock() would
-        post whatever amount the cash PaymentEntry last held — stale if staff
-        edited counts/online-sell after their last visit to the Payments step
-        (or never visited it at all) — silently corrupting the account's
-        running balance by the gap between what was shown and what posted."""
-        from finance.models import FinancialAccount
-
-        primary_cash = (
-            FinancialAccount.objects.filter(is_primary_cash=True).first()
-            or FinancialAccount.objects.filter(account_type="CASH", is_active=True).first()
-        )
-        if not primary_cash:
-            return
-        closing_fresh = self.get_queryset().get(pk=closing.pk)
-        cash_obj, _ = PaymentEntry.objects.get_or_create(
-            daily_closing=closing_fresh, account=primary_cash
-        )
-        cash_obj.amount = closing_fresh.computed_cash
-        cash_obj.save()
+    @staticmethod
+    def _sync_cash_payment_entry(closing):
+        closing_services.sync_cash_payment_entry(closing)
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdmin], url_path="reopen")
     def reopen(self, request, pk=None):
@@ -581,21 +564,7 @@ class DailyClosingViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _record_account_transactions(closing, user):
-        """Idempotently write SALES_COLLECTION transactions for each payment entry."""
-        from finance import services as finance_services
-        from finance.models import AccountTransaction, SourceType, TransactionType
-        for t in AccountTransaction.objects.filter(
-            source_type=SourceType.DAILY_CLOSING,
-            source_id=closing.id,
-        ):
-            finance_services.void_transaction(t.id)
-        for payment in closing.payments.select_related("account").filter(amount__gt=0):
-            finance_services.post_transaction(
-                account=payment.account, transaction_type=TransactionType.SALES_COLLECTION,
-                amount=payment.amount, date=closing.closing_date, entered_by=user,
-                source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
-                note=f"Day closing — {closing.closing_date}",
-            )
+        closing_services.record_account_transactions(closing, user)
 
     @staticmethod
     def _close_operating_day(closing):

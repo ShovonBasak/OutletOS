@@ -21,6 +21,7 @@ interface CorrectionResult {
   old_qty: number;
   new_qty: number;
   delta: number;
+  stock_adjusted: boolean;
 }
 
 interface StockRow {
@@ -50,8 +51,18 @@ export default function SellCorrectionsPage() {
   const [rebuilding, setRebuilding] = useState(false);
   const [confirmRebuild, setConfirmRebuild] = useState(false);
   const [saveResult, setSaveResult] = useState<CorrectionResult[] | null>(null);
+  const [cashResynced, setCashResynced] = useState(false);
   const [rebuildStock, setRebuildStock] = useState<StockRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // What a correction should also fix, besides the sold quantity itself.
+  // Untick "Fix stock" when stock has already been corrected some other way
+  // (e.g. today's Day-Start Stock Check already absorbed the discrepancy) —
+  // applying it again here would double-count the adjustment. Untick
+  // "Fix cash" if you only want the sale/stock corrected without touching
+  // the cash account.
+  const [fixStock, setFixStock] = useState(true);
+  const [fixCash, setFixCash] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,11 +175,15 @@ export default function SellCorrectionsPage() {
         product_id: r.product_id,
         new_qty: parseInt(edits[r.product_id], 10),
       }));
-      const res = await api<{ ok: boolean; applied: CorrectionResult[] }>(
+      const res = await api<{ ok: boolean; applied: CorrectionResult[]; cash_resynced: boolean }>(
         "/reports/correct-sells/",
-        { method: "POST", body: JSON.stringify({ outlet: 1, date, corrections }) }
+        {
+          method: "POST",
+          body: JSON.stringify({ outlet: 1, date, corrections, fix_stock: fixStock, fix_cash: fixCash }),
+        }
       );
       setSaveResult(res.applied);
+      setCashResynced(res.cash_resynced);
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -277,7 +292,10 @@ export default function SellCorrectionsPage() {
       {/* Save result */}
       {saveResult && saveResult.length > 0 && (
         <div className="rounded border border-leaf-deep/30 bg-leaf-deep/5 px-4 py-3 text-xs text-leaf-deep">
-          <p className="font-semibold mb-1">Saved — stock updated by difference</p>
+          <p className="font-semibold mb-1">
+            Saved — {saveResult[0].stock_adjusted ? "stock updated by difference" : "stock left untouched"}
+            {", "}{cashResynced ? "cash account re-synced" : "cash account left untouched"}
+          </p>
           {saveResult.map((r, i) => (
             <p key={i}>
               {r.product}: {r.old_qty} → {r.new_qty}
@@ -323,6 +341,22 @@ export default function SellCorrectionsPage() {
       {/* Main table + add panel */}
       {!loading && rows.length > 0 && (
         <>
+          {/* What a correction should also fix — visible up front, not just after an edit */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded border border-ink/10 bg-ink/[0.02] px-4 py-2.5">
+            <label className="flex items-center gap-1.5 text-xs text-ink">
+              <input type="checkbox" checked={fixStock} onChange={(e) => setFixStock(e.target.checked)} />
+              Fix stock
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-ink">
+              <input type="checkbox" checked={fixCash} onChange={(e) => setFixCash(e.target.checked)} />
+              Fix cash
+            </label>
+            <p className="text-[10px] text-ink-soft">
+              Untick "Fix stock" if it&apos;s already been corrected another way (e.g. a stock
+              check already caught it) — applying it again would double-count.
+            </p>
+          </div>
+
           <div className="overflow-x-auto rounded-lg border border-ink/10">
             <table className="min-w-full border-collapse text-sm">
               <thead>
@@ -493,7 +527,7 @@ export default function SellCorrectionsPage() {
             </button>
             {changedRows.length > 0 && (
               <p className="text-xs text-ink-soft">
-                Stock adjusts by the exact difference — no full rebuild needed.
+                {fixStock ? "Stock adjusts by the exact difference." : "Stock will not be touched."}
               </p>
             )}
           </div>

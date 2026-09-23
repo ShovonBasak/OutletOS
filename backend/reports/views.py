@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from catalog.models import Outlet, Product, ProductType, TrackingMode
 from closing.models import (
     ChannelSettlement,
+    ClosingStatus,
     DailyChannelDiscount,
     DailyClosing,
     DailyClosingSalesLine,
@@ -1119,13 +1120,27 @@ def daily_sells(request):
 def correct_sells(request):
     """
     Correct walk-in sell quantities for a specific day.
-    Body: {outlet: 1, date: "YYYY-MM-DD", corrections: [{product_id, new_qty}]}
-    Adjusts walk-in DailyClosingSalesLine, syncs PrepLog, applies RawStock delta.
+    Body: {outlet: 1, date: "YYYY-MM-DD", corrections: [{product_id, new_qty}],
+           fix_stock?: bool, fix_cash?: bool}
+
+    fix_stock (default true) — reverse the raw-ingredient stock and prep-log
+    for the quantity delta. Turn this OFF when the stock side has already been
+    corrected some other way (e.g. today's Day-Start Stock Check already
+    absorbed the discrepancy this sale error caused) — applying it again would
+    double-count the adjustment.
+
+    fix_cash (default true) — if the day is already SUBMITTED/LOCKED (so its
+    cash total was already posted to the ledger), re-sync the primary-cash
+    PaymentEntry and re-post the account transactions from the corrected
+    numbers. Turn this OFF if you only want to fix the recorded sale/stock
+    without touching the cash account (rare — usually you want both).
     """
     from datetime import date as date_cls
     outlet_id = int(request.data.get("outlet", 1))
     date_str = request.data.get("date")
     corrections = request.data.get("corrections", [])
+    fix_stock = bool(request.data.get("fix_stock", True))
+    fix_cash = bool(request.data.get("fix_cash", True))
 
     if not date_str:
         return Response({"error": "date required"}, status=400)
@@ -1206,13 +1221,12 @@ def correct_sells(request):
             else:
                 if walkin_line:
                     walkin_line.quantity_sold = new_walkin
-                    walkin_line.save()
                 else:
                     try:
                         price, _ = resolve_price(product, walk_in, target_date)
                     except Exception:
                         price = product.selling_price
-                    DailyClosingSalesLine.objects.create(
+                    walkin_line = DailyClosingSalesLine(
                         daily_closing=daily_closing,
                         product=product,
                         channel=walk_in,
@@ -1220,38 +1234,57 @@ def correct_sells(request):
                         unit_price=price,
                         source=LineSource.SYSTEM_DERIVED,
                     )
+                # gross_amount/commission_amount/net_amount are stored, not
+                # computed on read — recompute() must run before save() or
+                # computed_cash (which sums net_amount) silently stays stale
+                # at the pre-correction total.
+                walkin_line.recompute()
+                walkin_line.save()
 
-            preplogs = PreparationLog.objects.filter(
-                outlet=outlet,
-                product=product,
-                source=PrepSource.FRESH,
-            ).filter(
-                Q(op_date=target_date)
-                | Q(op_date__isnull=True, timestamp__date=target_date)
-            )
-            if preplogs.exists():
-                if new_total == 0:
-                    preplogs.delete()
-                else:
-                    preplogs.update(pieces_prepared=new_total, wastage_pieces=0)
+            if fix_stock:
+                preplogs = PreparationLog.objects.filter(
+                    outlet=outlet,
+                    product=product,
+                    source=PrepSource.FRESH,
+                ).filter(
+                    Q(op_date=target_date)
+                    | Q(op_date__isnull=True, timestamp__date=target_date)
+                )
+                if preplogs.exists():
+                    if new_total == 0:
+                        preplogs.delete()
+                    else:
+                        preplogs.update(pieces_prepared=new_total, wastage_pieces=0)
 
-            for r in product.recipes.all():
-                ing = r.ingredient
-                if ing.tracking_mode == TrackingMode.ONE_TIME:
-                    continue
-                RawStock.adjust(outlet, ing, -(Decimal(str(delta)) * r.quantity_per_unit))
+                for r in product.recipes.all():
+                    ing = r.ingredient
+                    if ing.tracking_mode == TrackingMode.ONE_TIME:
+                        continue
+                    RawStock.adjust(outlet, ing, -(Decimal(str(delta)) * r.quantity_per_unit))
 
             applied.append({
                 "product": product.name,
                 "old_qty": old_total,
                 "new_qty": new_total,
                 "delta": delta,
+                "stock_adjusted": fix_stock,
             })
 
         if errors:
             raise ValueError("; ".join(errors))
 
-    return Response({"ok": True, "applied": applied})
+        # The sales-line edits above only change what computed_cash WOULD
+        # report if recalculated — they don't touch money already posted to
+        # the ledger when this day was submitted/locked. Re-sync that too,
+        # unless the caller explicitly opted out (e.g. because only the stock
+        # side needed fixing, or vice versa).
+        cash_resynced = fix_cash and bool(applied) and daily_closing.status != ClosingStatus.DRAFT
+        if cash_resynced:
+            from closing import services as closing_services
+            closing_services.sync_cash_payment_entry(daily_closing)
+            closing_services.record_account_transactions(daily_closing, request.user)
+
+    return Response({"ok": True, "applied": applied, "cash_resynced": cash_resynced})
 
 
 @api_view(["GET"])
