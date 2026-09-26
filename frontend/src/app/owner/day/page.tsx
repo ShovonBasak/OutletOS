@@ -533,7 +533,9 @@ async function enableNotifications() {
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Total</span>
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
                             </div>
-                            {catRows.map((s, i) => (
+                            {catRows.map((s, i) => {
+                              const pks = packLabel(s.total_sold, s.pieces_per_pack);
+                              return (
                               <div
                                 key={i}
                                 className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_3rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
@@ -550,14 +552,16 @@ async function enableNotifications() {
                                 <span className="self-center font-mono text-[11px] text-ink-soft text-right">
                                   {s.online_sold > 0 ? s.online_sold : "—"}
                                 </span>
-                                <span className="self-center font-mono text-[12px] font-bold text-ink text-right">
-                                  {s.total_sold}
-                                </span>
+                                <div className="self-center text-right">
+                                  <p className="font-mono text-[12px] font-bold text-ink">{s.total_sold}</p>
+                                  {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                                </div>
                                 <span className="self-center font-mono text-[11px] text-leaf-deep font-semibold text-right">
                                   {Number(s.revenue) > 0 ? bdtD(s.revenue) : "—"}
                                 </span>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         );
                       })}

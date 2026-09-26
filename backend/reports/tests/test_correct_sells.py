@@ -17,7 +17,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from django.utils import timezone
 
-from catalog.models import Ingredient, Outlet, Product, ProductPrice, Recipe, TrackingMode
+from catalog.models import Ingredient, Outlet, PackDefinition, Product, ProductPrice, Recipe, TrackingMode
 from closing.models import DailyClosing, DailyClosingSalesLine, LineSource
 from finance.models import AccountTransaction, FinancialAccount, SourceType, TransactionType
 from stock.models import RawStock
@@ -48,6 +48,10 @@ class CorrectSellsCashStockTests(APITestCase):
 
         self.ingredient = Ingredient.objects.create(
             name="Raw Rice", base_unit="portion", tracking_mode=TrackingMode.RECIPE_LINKED,
+        )
+        PackDefinition.objects.create(
+            ingredient=self.ingredient, pieces_per_pack=Decimal("5"),
+            cost_per_pack=Decimal("100"), effective_from=datetime.date(2026, 1, 1),
         )
         self.product = Product.objects.create(name="Rice", requires_preparation=False)
         Recipe.objects.create(product=self.product, ingredient=self.ingredient, quantity_per_unit=1)
@@ -206,3 +210,37 @@ class CorrectSellsCashStockTests(APITestCase):
         self.assertEqual(row["total_sold"], 8)
         self.assertEqual(row["walkin_sold"], 8)
         self.assertEqual(Decimal(row["revenue"]), Decimal("400.00"))
+
+    def test_sales_section_shows_pack_breakdown_for_non_prep_products_only(self):
+        """Matches the Display/Raw stock sections' convention: only a
+        direct-stock product (no prep step) has a meaningful pack size."""
+        prepped = Product.objects.create(name="Fried Burger", requires_preparation=True)
+        prepped_ing = Ingredient.objects.create(
+            name="Bun", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
+        )
+        Recipe.objects.create(product=prepped, ingredient=prepped_ing, quantity_per_unit=1)
+        PackDefinition.objects.create(
+            ingredient=prepped_ing, pieces_per_pack=Decimal("12"),
+            cost_per_pack=Decimal("240"), effective_from=datetime.date(2026, 1, 1),
+        )
+        ProductPrice.objects.create(
+            product=prepped, price=Decimal("120.00"), effective_from=datetime.date(2026, 1, 1),
+        )
+        prepped_line = DailyClosingSalesLine(
+            daily_closing=self.closing, product=prepped, channel=self.walk_in,
+            quantity_sold=3, unit_price=Decimal("120.00"), source=LineSource.STAFF_ENTRY,
+        )
+        prepped_line.recompute()
+        prepped_line.save()
+
+        resp = self.owner_client.get(
+            f"/api/reports/day-overview/?outlet={self.outlet.id}&date={self.closing_date}"
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        by_name = {r["product_name"]: r for r in resp.data["closing"]["sales_by_product"]}
+
+        # Rice: direct-stock, 1 recipe unit per piece, pack of 5 -> "1 pk" for 5 sold.
+        self.assertEqual(Decimal(by_name["Rice"]["pieces_per_pack"]), Decimal("5"))
+        # A prepared product never shows a pack size here, even though its
+        # own recipe ingredient (buns) has one.
+        self.assertIsNone(by_name["Fried Burger"]["pieces_per_pack"])

@@ -870,6 +870,9 @@ export interface DayOverviewSalesProduct {
   total_sold: number;
   selling_price: string;
   revenue: string;
+  /** Direct-stock products only (no prep step) — same convention as the
+   * Display/Raw stock sections. Null for prepared products. */
+  pieces_per_pack: string | null;
 }
 
 export interface DayOverviewClosing {
