@@ -12,10 +12,8 @@ export default function Home() {
     if (loading) return;
     if (!user) {
       router.replace("/login");
-    } else if (user.role === "OWNER") {
-      // Day view is the most-used owner screen — land there by default.
-      router.replace("/owner/day");
-    } else if (user.role === "ADMIN") {
+    } else if (user.role === "OWNER" || user.role === "ADMIN") {
+      // Day view is the most-used owner screen — it's the /owner route itself.
       router.replace("/owner");
     } else {
       router.replace("/staff");
