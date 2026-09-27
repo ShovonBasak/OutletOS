@@ -10,8 +10,16 @@ export default function Home() {
 
   useEffect(() => {
     if (loading) return;
-    if (!user) router.replace("/login");
-    else router.replace(user.role === "OWNER" || user.role === "ADMIN" ? "/owner" : "/staff");
+    if (!user) {
+      router.replace("/login");
+    } else if (user.role === "OWNER") {
+      // Day view is the most-used owner screen — land there by default.
+      router.replace("/owner/day");
+    } else if (user.role === "ADMIN") {
+      router.replace("/owner");
+    } else {
+      router.replace("/staff");
+    }
   }, [user, loading, router]);
 
   return (
