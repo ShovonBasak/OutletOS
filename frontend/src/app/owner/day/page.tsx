@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { DatePicker } from "@/components/DatePicker";
 import { pushPermissionState, subscribeToPush } from "@/lib/push";
 import { bdt, bdtD, shortDate, today, timeOf } from "@/lib/format";
 import type { DayOverview, DayOverviewStockIn, DayOverviewSalesProduct, DayOverviewTransaction, DayOverviewPeriodicCheck, DayOverviewSupplyStockIn, PackagingLevel } from "@/lib/types";
@@ -253,12 +254,16 @@ async function enableNotifications() {
         >
           ‹
         </button>
-        <div className="text-center">
-          <p className="font-display text-[15px] font-bold text-ink">
-            {isToday ? "Today" : shortDate(date)}
-          </p>
-          <p className="font-mono text-[10px] text-ink-soft">{date}</p>
-        </div>
+        <DatePicker value={date} onChange={setDate} max={today()}>
+          <div className="text-center">
+            <p className="font-display text-[15px] font-bold text-ink">
+              {isToday ? "Today" : shortDate(date)}
+            </p>
+            <p className="font-mono text-[10px] text-ink-soft underline decoration-dotted">
+              {date}
+            </p>
+          </div>
+        </DatePicker>
         <button
           onClick={() => setDate(nextDay(date))}
           disabled={isToday}
@@ -526,11 +531,11 @@ async function enableNotifications() {
                             <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/40 px-1 pt-2 pb-0.5">
                               {cat}
                             </p>
-                            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_3rem_6rem] px-1 pb-1">
+                            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_4.5rem_6rem] px-1 pb-1">
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">WI</span>
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">App</span>
-                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Total</span>
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Total</span>
                               <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
                             </div>
                             {catRows.map((s, i) => {
@@ -538,7 +543,7 @@ async function enableNotifications() {
                               return (
                               <div
                                 key={i}
-                                className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_3rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
+                                className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_4.5rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
                               >
                                 <div className="min-w-0">
                                   <p className="font-mono text-[11px] text-ink truncate">{s.product_name}</p>
@@ -552,7 +557,7 @@ async function enableNotifications() {
                                 <span className="self-center font-mono text-[11px] text-ink-soft text-right">
                                   {s.online_sold > 0 ? s.online_sold : "—"}
                                 </span>
-                                <div className="self-center text-right">
+                                <div className="self-center text-center">
                                   <p className="font-mono text-[12px] font-bold text-ink">{s.total_sold}</p>
                                   {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
                                 </div>

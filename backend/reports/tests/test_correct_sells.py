@@ -211,9 +211,13 @@ class CorrectSellsCashStockTests(APITestCase):
         self.assertEqual(row["walkin_sold"], 8)
         self.assertEqual(Decimal(row["revenue"]), Decimal("400.00"))
 
-    def test_sales_section_shows_pack_breakdown_for_non_prep_products_only(self):
-        """Matches the Display/Raw stock sections' convention: only a
-        direct-stock product (no prep step) has a meaningful pack size."""
+    def test_sales_section_shows_pack_breakdown_for_single_ingredient_products(self):
+        """Pack breakdown isn't gated on requires_preparation — a single-
+        ingredient PREPARED product (e.g. fried chicken from one raw-chicken
+        recipe line) has just as meaningful a pack size as a direct-stock
+        one. Only a genuinely multi-ingredient product with no designated
+        primary ingredient has nothing sensible to show."""
+        # Single-ingredient, prepared — must still show a pack size.
         prepped = Product.objects.create(name="Fried Burger", requires_preparation=True)
         prepped_ing = Ingredient.objects.create(
             name="Bun", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
@@ -233,14 +237,32 @@ class CorrectSellsCashStockTests(APITestCase):
         prepped_line.recompute()
         prepped_line.save()
 
+        # Multi-ingredient, no designated primary — nothing sensible to show.
+        combo = Product.objects.create(name="Burger Combo", requires_preparation=True)
+        fries_ing = Ingredient.objects.create(
+            name="Fries", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
+        )
+        Recipe.objects.create(product=combo, ingredient=prepped_ing, quantity_per_unit=1)
+        Recipe.objects.create(product=combo, ingredient=fries_ing, quantity_per_unit=1)
+        ProductPrice.objects.create(
+            product=combo, price=Decimal("150.00"), effective_from=datetime.date(2026, 1, 1),
+        )
+        combo_line = DailyClosingSalesLine(
+            daily_closing=self.closing, product=combo, channel=self.walk_in,
+            quantity_sold=2, unit_price=Decimal("150.00"), source=LineSource.STAFF_ENTRY,
+        )
+        combo_line.recompute()
+        combo_line.save()
+
         resp = self.owner_client.get(
             f"/api/reports/day-overview/?outlet={self.outlet.id}&date={self.closing_date}"
         )
         self.assertEqual(resp.status_code, 200, resp.data)
         by_name = {r["product_name"]: r for r in resp.data["closing"]["sales_by_product"]}
 
-        # Rice: direct-stock, 1 recipe unit per piece, pack of 5 -> "1 pk" for 5 sold.
+        # Rice: direct-stock, single ingredient, pack of 5.
         self.assertEqual(Decimal(by_name["Rice"]["pieces_per_pack"]), Decimal("5"))
-        # A prepared product never shows a pack size here, even though its
-        # own recipe ingredient (buns) has one.
-        self.assertIsNone(by_name["Fried Burger"]["pieces_per_pack"])
+        # Fried Burger: prepared, but still single-ingredient -> pack of 12.
+        self.assertEqual(Decimal(by_name["Fried Burger"]["pieces_per_pack"]), Decimal("12"))
+        # Burger Combo: two ingredients, no is_primary set -> no pack shown.
+        self.assertIsNone(by_name["Burger Combo"]["pieces_per_pack"])

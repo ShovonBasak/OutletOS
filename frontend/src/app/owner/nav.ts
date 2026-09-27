@@ -17,8 +17,8 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Overview",
     items: [
-      { href: "/owner",     label: "Dashboard" },
       { href: "/owner/day", label: "Day overview" },
+      { href: "/owner",     label: "Dashboard" },
     ],
   },
   {
@@ -139,8 +139,8 @@ export interface MobileTab extends NavItem {
   icon: string;
 }
 export const OWNER_MOBILE_TABS: MobileTab[] = [
-  { href: "/owner",           label: "Analytics", icon: "↗" },
   { href: "/owner/day",       label: "Day",       icon: "⌂" },
+  { href: "/owner",           label: "Analytics", icon: "↗" },
   { href: "/owner/approvals", label: "Approvals", icon: "✓" },
   { href: "/owner/more",      label: "More",      icon: "⋯" },
 ];

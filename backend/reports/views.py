@@ -135,8 +135,7 @@ def _bulk_active_prices(product_ids, as_of):
 
 def _sales_by_product(sales_lines):
     """Aggregate a list of DailyClosingSalesLine rows into
-    {product_id: {product_name, product_category, requires_preparation,
-    walkin_sold, online_sold, revenue}}.
+    {product_id: {product_name, product_category, walkin_sold, online_sold, revenue}}.
 
     Sourced from the sales lines themselves (not DailyClosingStockCount's
     derived_walkin_sold/app_channel_sold) so it always agrees with whatever a
@@ -146,7 +145,6 @@ def _sales_by_product(sales_lines):
         agg = result.setdefault(line.product_id, {
             "product_name": line.product.name,
             "product_category": line.product.category,
-            "requires_preparation": line.product.requires_preparation,
             "walkin_sold": 0,
             "online_sold": 0,
             "revenue": Decimal("0"),
@@ -1660,21 +1658,7 @@ def day_overview(request):
         .select_related("product")
         .order_by("product__category", "product__name")
     )
-    # Non-prep products needing pack info: anything with a DisplayStock row,
-    # PLUS anything sold today — a product a sell correction touches may have
-    # no DisplayStock row for whatever reason, but the Sales section should
-    # still show its pack breakdown, same as Display/Raw stock do for theirs.
-    _sold_today_ids = set(
-        DailyClosingSalesLine.objects.filter(
-            daily_closing__outlet_id=outlet, daily_closing__closing_date=date,
-        ).values_list("product_id", flat=True)
-    )
-    non_prep_ids = list(set(
-        s.product_id for s in _display_qs if not s.product.requires_preparation
-    ) | set(
-        Product.objects.filter(id__in=_sold_today_ids, requires_preparation=False)
-        .values_list("id", flat=True)
-    ))
+    non_prep_ids = [s.product_id for s in _display_qs if not s.product.requires_preparation]
     _recipe_cost: dict = {}
     _non_prep_pack: dict = {}
     ready_ingredient_ids: set = set()  # avoids a second Recipe query below
@@ -1690,6 +1674,39 @@ def day_overview(request):
             active_pack = r.ingredient.active_pack()
             if active_pack:
                 _non_prep_pack[r.product_id] = active_pack.pieces_per_pack
+
+    # Pack info for the Sales section: NOT gated on requires_preparation
+    # (unlike _non_prep_pack above, which is Display Stock's own concern) —
+    # a prepared product can still have a meaningful pack breakdown if it has
+    # a single, clear "primary" recipe ingredient. Matches the same rule
+    # PreparationLog's PACK-mode prep uses (stock/views.py
+    # PreparationLogViewSet.perform_create): an explicit is_primary=True
+    # Recipe row, or — for a single-ingredient product — its only one.
+    # Multi-ingredient products with no is_primary flag get no pack value,
+    # same as prep logging itself would refuse to guess.
+    _sales_pack: dict = {}
+    _sold_today_ids = set(
+        DailyClosingSalesLine.objects.filter(
+            daily_closing__outlet_id=outlet, daily_closing__closing_date=date,
+        ).values_list("product_id", flat=True)
+    )
+    if _sold_today_ids:
+        _recipes_by_product: dict = {}
+        for r in (
+            Recipe.objects.filter(product_id__in=_sold_today_ids)
+            .select_related("ingredient")
+            .prefetch_related("ingredient__pack_definitions")
+        ):
+            _recipes_by_product.setdefault(r.product_id, []).append(r)
+        for pid, recipes in _recipes_by_product.items():
+            primary = next((r for r in recipes if r.is_primary), None)
+            if primary is None and len(recipes) == 1:
+                primary = recipes[0]
+            if primary is None:
+                continue
+            active_pack = primary.ingredient.active_pack()
+            if active_pack:
+                _sales_pack[pid] = active_pack.pieces_per_pack
 
     # Raw ingredient stock
     raw_stock_raw = list(
@@ -2020,14 +2037,8 @@ def day_overview(request):
                         "total_sold": agg["walkin_sold"] + agg["online_sold"],
                         "selling_price": str(price_map.get(product_id, Decimal("0"))),
                         "revenue": str(agg["revenue"].quantize(Decimal("0.01"))),
-                        # Same convention as Display/Raw stock below: only
-                        # direct-stock products (no prep step) have a
-                        # meaningful pack size — one recipe ingredient unit
-                        # per piece sold.
                         "pieces_per_pack": (
-                            str(_non_prep_pack[product_id])
-                            if not agg["requires_preparation"] and product_id in _non_prep_pack
-                            else None
+                            str(_sales_pack[product_id]) if product_id in _sales_pack else None
                         ),
                     }
                     for product_id, agg in _sales_by_product(sales_lines_list).items()

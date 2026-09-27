@@ -21,7 +21,11 @@ export default function LoginPage() {
     try {
       const user = await login(phone, password);
       setUser(user);
-      router.replace(user.role === "OWNER" || user.role === "ADMIN" ? "/owner" : "/staff");
+      // Day view is the most-used owner screen — land there by default.
+      // Admin still lands on the Analytics dashboard.
+      if (user.role === "OWNER") router.replace("/owner/day");
+      else if (user.role === "ADMIN") router.replace("/owner");
+      else router.replace("/staff");
     } catch {
       setError("Invalid phone or password.");
     } finally {
