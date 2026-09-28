@@ -17,8 +17,8 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Overview",
     items: [
-      { href: "/owner",     label: "Dashboard" },
-      { href: "/owner/day", label: "Day overview" },
+      { href: "/owner",          label: "Day overview" },
+      { href: "/owner/analytics", label: "Dashboard" },
     ],
   },
   {
@@ -111,7 +111,6 @@ const FLAT = OWNER_NAV.flatMap((g) => g.items).sort((a, b) => b.href.length - a.
 const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/approvals", "Approvals"],
   ["/owner/reports",   "Reports"],
-  ["/owner/day",       "Day overview"],
   ["/owner/more",      "More"],
   ["/owner/profile",   "Profile"],
   ["/owner/products/edit-recipe", "Edit recipe"],
@@ -138,15 +137,17 @@ export interface MobileTab extends NavItem {
   icon: string;
 }
 export const OWNER_MOBILE_TABS: MobileTab[] = [
-  { href: "/owner",           label: "Analytics", icon: "↗" },
-  { href: "/owner/day",       label: "Day",       icon: "⌂" },
+  { href: "/owner",           label: "Day",       icon: "⌂" },
+  { href: "/owner/analytics", label: "Analytics", icon: "↗" },
   { href: "/owner/approvals", label: "Approvals", icon: "✓" },
   { href: "/owner/more",      label: "More",      icon: "⋯" },
 ];
 
 // Map any owner route to the bottom tab that should stay highlighted on mobile.
 const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
-  { tab: "/owner/day", prefixes: ["/owner/day"] },
+  // Old bookmarked path — stub redirects to /owner, but keep the tab correct
+  // for the brief render before that fires.
+  { tab: "/owner", prefixes: ["/owner/day"] },
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
     tab: "/owner/more",
@@ -159,14 +160,16 @@ const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
       "/owner/fryer-oil",
     ],
   },
-  // Analytics tab matches /owner exactly — caught by the fallback below for anything not above.
+  // Day tab matches /owner exactly and Analytics tab matches /owner/analytics —
+  // both caught by the exact-match check and fallback below.
 ];
 
 export function mobileTabFor(pathname: string): string {
+  if (pathname === "/owner") return "/owner";
   for (const g of TAB_GROUPS) {
     if (g.prefixes.some((p) => under(pathname, p))) return g.tab;
   }
-  return "/owner";
+  return "/owner/analytics";
 }
 
 // Which accordion group contains the active route — used to auto-open it.

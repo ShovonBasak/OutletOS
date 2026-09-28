@@ -108,7 +108,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export const useAuth = () => useContext(AuthContext);
 
 function ownerOrAdminRedirect(role: Role | undefined): string {
-  return role === "OWNER" || role === "ADMIN" ? "/owner" : "/staff";
+  // Day view is the most-used owner screen — it's the /owner route itself.
+  if (role === "OWNER" || role === "ADMIN") return "/owner";
+  return "/staff";
 }
 
 /** Guard a page to one or more roles; redirects to /login if unauthenticated.

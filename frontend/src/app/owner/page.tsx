@@ -3,662 +3,1378 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { bdt } from "@/lib/format";
-import type { DashboardData, DashboardProductRow, Pnl, ProductPerformanceResponse } from "@/lib/types";
+import { DatePicker } from "@/components/DatePicker";
+import { pushPermissionState, subscribeToPush } from "@/lib/push";
+import { bdt, bdtD, shortDate, today, timeOf } from "@/lib/format";
+import type { DayOverview, DayOverviewStockIn, DayOverviewSalesProduct, DayOverviewTransaction, DayOverviewPeriodicCheck, DayOverviewSupplyStockIn, PackagingLevel } from "@/lib/types";
+import { INGREDIENT_GROUPS } from "@/lib/types";
 
-// ── Period helpers ────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-type Period = "7d" | "30d" | "month" | "last_month" | "custom";
-
-const PERIODS: { value: Period; label: string }[] = [
-  { value: "7d",         label: "7 days" },
-  { value: "30d",        label: "30 days" },
-  { value: "month",      label: "This month" },
-  { value: "last_month", label: "Last month" },
-  { value: "custom",     label: "Custom" },
-];
-
-function localDate(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function packLabel(qty: number, ppp: string | null): string | null {
+  const perPack = ppp ? parseFloat(ppp) : 0;
+  if (perPack <= 0 || qty <= 0) return null;
+  const packs = Math.floor(qty / perPack);
+  if (packs === 0) return null;
+  const extra = parseFloat((qty % perPack).toFixed(3));
+  if (extra < 0.001) return `${packs} pk`;
+  return `${packs} pk + ${extra % 1 === 0 ? extra : extra.toFixed(1)}`;
 }
 
-function periodRange(p: Period): { start: string; end: string } {
-  const now = new Date();
-  const end = localDate(now);
-  if (p === "7d") {
-    const s = new Date(now); s.setDate(s.getDate() - 6);
-    return { start: localDate(s), end };
-  }
-  if (p === "30d") {
-    const s = new Date(now); s.setDate(s.getDate() - 29);
-    return { start: localDate(s), end };
-  }
-  if (p === "month") {
-    return { start: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, end };
-  }
-  // last_month
-  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const last  = new Date(now.getFullYear(), now.getMonth(), 0);
-  return { start: localDate(first), end: localDate(last) };
+function localIso(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-// ── Number helpers ────────────────────────────────────────────────────────────
-
-function niceMax(n: number): number {
-  if (n <= 0) return 1000;
-  const mag = Math.pow(10, Math.floor(Math.log10(n)));
-  const norm = n / mag;
-  const nice = norm <= 1.5 ? 1.5 : norm <= 2 ? 2 : norm <= 3 ? 3 : norm <= 4 ? 4 : norm <= 5 ? 5 : 10;
-  return nice * mag;
+function prevDay(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() - 1);
+  return localIso(d);
 }
 
-function shortK(n: number): string {
-  if (n === 0) return "0";
-  if (Math.abs(n) >= 100_000) return `${(n / 1000).toFixed(0)}k`;
-  if (Math.abs(n) >= 1_000)   return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
-  return String(Math.round(n));
+function nextDay(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  return localIso(d);
 }
 
-function pct(a: number, b: number) {
-  if (!b) return "—";
-  return `${((a / b) * 100).toFixed(1)}%`;
-}
+const DAY_STATUS_CONFIG = {
+  NOT_STARTED: {
+    label: "Not started",
+    dot: "bg-ink-soft/40",
+    badge: "bg-ink-soft/10 text-ink-soft border-ink-soft/20",
+  },
+  STOCK_CONFIRMED: {
+    label: "Stock confirmed",
+    dot: "bg-gold animate-pulse",
+    badge: "bg-gold/10 text-gold-deep border-gold/30",
+  },
+  IN_PROGRESS: {
+    label: "In progress",
+    dot: "bg-chrome animate-pulse",
+    badge: "bg-chrome/10 text-chrome border-chrome/30",
+  },
+  CLOSED: {
+    label: "Closed",
+    dot: "bg-leaf",
+    badge: "bg-leaf/10 text-leaf-deep border-leaf/30",
+  },
+} as const;
 
-// ── SVG: Daily bar chart ──────────────────────────────────────────────────────
+const STOCK_IN_STATUS_BADGE: Record<string, string> = {
+  DRAFT: "bg-ink-soft/10 text-ink-soft",
+  PENDING: "bg-gold/15 text-gold-deep",
+  APPROVED: "bg-leaf/15 text-leaf-deep",
+  REJECTED: "bg-chili/10 text-chili",
+};
 
-function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
-  const [selected, setSelected] = useState<number | null>(daily.length > 0 ? daily.length - 1 : null);
+// ── sub-components ────────────────────────────────────────────────────────────
 
-  if (daily.length === 0) {
-    return <p className="py-6 text-center font-mono text-xs text-ink-soft italic">No closed days in this period.</p>;
-  }
-
-  const W = 600, H = 195;
-  const PAD = { t: 14, r: 12, b: 36, l: 48 };
-  const pw = W - PAD.l - PAD.r;
-  const ph = H - PAD.t - PAD.b;
-
-  const maxRev = Math.max(...daily.map(d => Number(d.revenue)));
-  const top = niceMax(maxRev);
-  const scale = ph / top;
-
-  const groupW = pw / daily.length;
-  const barW = Math.max(2, groupW * 0.72);
-  const barOff = (groupW - barW) / 2;
-
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
-    y: PAD.t + ph * (1 - t),
-    label: shortK(top * t),
-  }));
-
-  const step = daily.length <= 10 ? 1 : Math.ceil(daily.length / 9);
-  const baseY = PAD.t + ph;
-  const sel = selected != null ? daily[selected] : null;
-  const selRev  = sel ? Number(sel.revenue) : 0;
-  const selCogs = sel ? Math.min(Number(sel.cogs), selRev) : 0;
-  const selGp   = sel ? selRev - selCogs : 0;
-
+function Section({
+  title,
+  badge,
+  badgeColor = "bg-ink-soft/10 text-ink-soft",
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  badge: string;
+  badgeColor?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <div className="min-w-[380px]">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-            {/* grid lines + y labels */}
-            {ticks.map((tk, i) => (
-              <g key={i}>
-                <line x1={PAD.l} y1={tk.y} x2={W - PAD.r} y2={tk.y}
-                      stroke="#e8dfc8" strokeWidth={i === 0 ? "0.8" : "0.4"} />
-                <text x={PAD.l - 5} y={tk.y + 3} textAnchor="end"
-                      fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
-                  {tk.label}
-                </text>
-              </g>
-            ))}
-
-            {/* bars */}
-            {daily.map((d, i) => {
-              const x   = PAD.l + i * groupW + barOff;
-              const rev = Number(d.revenue);
-              const cogs = Math.min(Number(d.cogs), rev);
-              const gp  = rev - cogs;
-              const revH  = rev  * scale;
-              const cogsH = cogs * scale;
-              const gpH   = gp   * scale;
-
-              return (
-                <g key={i}>
-                  {gpH   > 0 && <rect x={x} y={baseY - revH}        width={barW} height={gpH}   fill="#7A2420" opacity={selected === i ? 1 : 0.82} rx="1.5" />}
-                  {cogsH > 0 && <rect x={x} y={baseY - cogsH}       width={barW} height={cogsH} fill="#C9A227" opacity={selected === i ? 0.95 : 0.75} rx="1.5" />}
-                </g>
-              );
-            })}
-
-            {/* x-axis date labels */}
-            {daily.map((d, i) => {
-              if (i % step !== 0 && i !== daily.length - 1 && selected !== i) return null;
-              const cx = PAD.l + i * groupW + groupW / 2;
-              const label = d.date.slice(5).replace("-", "/");
-              return (
-                <text key={i} x={cx} y={H - 6} textAnchor="middle"
-                      fontFamily="monospace" fontSize="7.5"
-                      fontWeight={selected === i ? "bold" : "normal"}
-                      fill={selected === i ? "#7A2420" : "#9B8A78"}>
-                  {label}
-                </text>
-              );
-            })}
-
-            {/* Tap/click targets — one per day, full plot height, on top of
-                everything else so a bar can be selected even when its own height
-                is 0 (a day with no sales). */}
-            {daily.map((_, i) => {
-              const x = PAD.l + i * groupW;
-              return (
-                <rect
-                  key={i}
-                  x={x} y={PAD.t} width={groupW} height={ph}
-                  fill={selected === i ? "#7A2420" : "transparent"}
-                  opacity={selected === i ? 0.06 : 0}
-                  onClick={() => setSelected(i)}
-                  style={{ cursor: "pointer" }}
-                />
-              );
-            })}
-          </svg>
-        </div>
-      </div>
-
-      {sel && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-paper-dim px-2 py-1.5 font-mono text-[10.5px]">
-          <span className="font-semibold text-ink">{sel.date}</span>
-          <span className="text-ink-soft">
-            Revenue <span className="font-semibold text-ink">{bdt(selRev)}</span>
+    <div className="rounded-lg border border-[#d8cdb0] bg-paper overflow-hidden">
+      <button
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="font-mono text-[12px] font-semibold text-ink tracking-wide">
+          {title}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-medium ${badgeColor}`}>
+            {badge}
           </span>
-          <span className="text-ink-soft">
-            COGS <span className="font-semibold text-ink">{bdt(selCogs)}</span>
-          </span>
-          <span className="text-ink-soft">
-            Gross profit <span className="font-semibold" style={{ color: "#7A2420" }}>{bdt(selGp)}</span>
-          </span>
+          <span className="font-mono text-[11px] text-ink-soft">{open ? "▲" : "▼"}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-dashed border-[#d8cdb0] px-4 pb-4 pt-3">
+          {children}
+          <button
+            onClick={() => setOpen(false)}
+            className="mt-4 flex w-full items-center justify-center gap-1.5 border-t border-dashed border-[#d8cdb0] pt-3 font-mono text-[10px] text-ink-soft/50 hover:text-ink-soft active:text-ink transition-colors"
+          >
+            <span>▲</span>
+            <span>Collapse</span>
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-// ── SVG: Top products horizontal bars ────────────────────────────────────────
-
-function TopProductsChart({ products }: { products: DashboardData["top_products"] }) {
-  if (products.length === 0) {
-    return <p className="py-4 text-center font-mono text-xs text-ink-soft italic">No sales data.</p>;
-  }
-  const maxRev = Math.max(...products.map(p => Number(p.revenue)));
-
+function KpiPill({
+  label,
+  value,
+  color = "text-ink",
+}: {
+  label: string;
+  value: string;
+  color?: string;
+}) {
   return (
-    <div className="flex flex-col gap-2.5">
-      {products.map((p, i) => {
-        const rev  = Number(p.revenue);
-        const cogs = Number(p.cogs);
-        const gp   = rev - cogs;
-        const margin = Number(p.margin_pct);
-        const revPct  = maxRev > 0 ? (rev  / maxRev) * 100 : 0;
-        const cogsPct = maxRev > 0 ? (cogs / maxRev) * 100 : 0;
-        const marginColor = margin >= 40 ? "text-leaf-deep" : margin >= 20 ? "text-gold-deep" : "text-chili";
-
-        return (
-          <div key={i}>
-            <div className="grid grid-cols-[1fr_5.5rem_5.5rem_3.5rem] gap-x-2 items-baseline mb-0.5">
-              <span className="font-mono text-[10px] text-ink">{p.product_name}</span>
-              <span className="font-mono text-[10px] text-ink text-right">{bdt(rev)}</span>
-              <span className="font-mono text-[10px] text-ink-soft text-right">{bdt(cogs)}</span>
-              <span className={`font-mono text-[10px] font-semibold text-right ${marginColor}`}>{margin.toFixed(0)}%</span>
-            </div>
-            <div className="h-[7px] bg-paper-dim rounded overflow-hidden">
-              <div className="h-full flex rounded overflow-hidden">
-                <div style={{ width: `${revPct - cogsPct}%`, backgroundColor: "#7A2420", opacity: 0.75 }} />
-                <div style={{ width: `${cogsPct}%`, backgroundColor: "#C9A227", opacity: 0.65 }} />
-              </div>
-            </div>
-          </div>
-        );
-      })}
+    <div className="flex flex-1 flex-col rounded-lg border border-[#d8cdb0] bg-paper px-3 py-2.5">
+      <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">{label}</span>
+      <span className={`font-mono text-[15px] font-bold leading-tight ${color}`}>{value}</span>
     </div>
   );
 }
 
-// ── P&L waterfall ─────────────────────────────────────────────────────────────
+// ── main page ─────────────────────────────────────────────────────────────────
 
-const WATERFALL_COLORS = {
-  revenue:    { bar: "#3F6B3F", text: "text-leaf-deep",  opacity: 0.75 },
-  deduction:  { bar: "#7A2420", text: "text-chili",       opacity: 0.60 },
-  losses:     { bar: "#C9601C", text: "text-chili",       opacity: 0.65 },
-  costs:      { bar: "#B08030", text: "text-chili",       opacity: 0.60 },
-  income:     { bar: "#3F6B3F", text: "text-leaf-deep",  opacity: 0.55 },
-};
-
-type WfCategory = keyof typeof WATERFALL_COLORS;
-
-type WfRow =
-  | { kind: "section"; label: string }
-  | { kind: "row"; label: string; value: number; sign: "+" | "−"; cat: WfCategory };
-
-function PnlWaterfall({ pnl }: { pnl: Pnl }) {
-  const revenue = Number(pnl.gross_revenue);
-
-  const entries: WfRow[] = [
-    { kind: "row", label: "Revenue",     value: revenue,                      sign: "+", cat: "revenue" },
-    { kind: "row", label: "Commission",  value: Number(pnl.commission_total), sign: "−", cat: "deduction" },
-    { kind: "row", label: "COGS",        value: Number(pnl.cogs),             sign: "−", cat: "deduction" },
-    { kind: "section", label: "Losses" },
-    { kind: "row", label: "Wastage",     value: Number(pnl.wastage_cost),     sign: "−", cat: "losses" },
-    { kind: "row", label: "Shrinkage",   value: Number(pnl.shrinkage_cost),   sign: "−", cat: "losses" },
-    { kind: "section", label: "Costs" },
-    { kind: "row", label: "Packaging",   value: Number(pnl.packaging_cost),   sign: "−", cat: "costs" },
-    { kind: "row", label: "Fixed costs", value: Number(pnl.fixed_costs),      sign: "−", cat: "costs" },
-    { kind: "row", label: "Variable",    value: Number(pnl.variable_costs),   sign: "−", cat: "costs" },
-    { kind: "row", label: "Adhoc",       value: Number(pnl.adhoc_costs),      sign: "−", cat: "costs" },
-    { kind: "section", label: "Other income" },
-    { kind: "row", label: "Other income",value: Number(pnl.other_income),     sign: "+", cat: "income" },
-  ];
-
-  // Remove section headers whose rows are all zero, and filter zero-value rows
-  const filtered: WfRow[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (e.kind === "section") {
-      let j = i + 1;
-      let sectionHasData = false;
-      while (j < entries.length && entries[j].kind !== "section") {
-        const next = entries[j];
-        if (next.kind === "row" && next.value > 0) sectionHasData = true;
-        j++;
-      }
-      if (sectionHasData) filtered.push(e);
-    } else {
-      if (e.value > 0) filtered.push(e);
-    }
-  }
-
-  const net = Number(pnl.net_profit);
-  const ref = revenue || 1;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      {filtered.map((e, i) => {
-        if (e.kind === "section") {
-          return (
-            <div key={i} className="grid grid-cols-[6.5rem_1fr_6rem] items-center gap-2 pt-1">
-              <span className="font-mono text-[8px] uppercase tracking-widest text-ink-soft/50 text-right">{e.label}</span>
-              <div className="h-px bg-[#e8dfc8]" />
-              <span />
-            </div>
-          );
-        }
-        const { bar, text, opacity } = WATERFALL_COLORS[e.cat];
-        const w = Math.min((e.value / ref) * 100, 100);
-        return (
-          <div key={i} className="grid grid-cols-[6.5rem_1fr_6rem] items-center gap-2">
-            <span className="font-mono text-[10px] text-ink-soft text-right">{e.label}</span>
-            <div className="h-[16px] bg-paper-dim rounded overflow-hidden">
-              <div className="h-full rounded" style={{ width: `${w}%`, backgroundColor: bar, opacity }} />
-            </div>
-            <span className={`font-mono text-[11px] font-semibold text-right ${text}`}>
-              {e.sign} {bdt(e.value)}
-            </span>
-          </div>
-        );
-      })}
-      <div className="grid grid-cols-[6.5rem_1fr_6rem] items-center gap-2 mt-1 border-t border-dashed border-[#d8cdb0] pt-2">
-        <span className="font-mono text-[10px] font-bold text-ink text-right">Net profit</span>
-        <div className="h-[18px] bg-paper-dim rounded overflow-hidden">
-          <div className="h-full rounded"
-               style={{ width: `${Math.min(Math.abs(net) / ref * 100, 100)}%`, backgroundColor: net >= 0 ? "#3F6B3F" : "#C9601C" }} />
-        </div>
-        <span className={`font-mono text-[13px] font-bold text-right ${net >= 0 ? "text-leaf-deep" : "text-chili"}`}>
-          {bdt(net)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ── Channel split ─────────────────────────────────────────────────────────────
-
-function ChannelBars({ channels, total }: { channels: DashboardData["channels"]; total: number }) {
-  if (channels.length === 0) {
-    return <p className="py-4 text-center font-mono text-xs text-ink-soft italic">No channel data.</p>;
-  }
-  const COLORS = ["#7A2420", "#C9A227", "#3F6B3F", "#C9601C", "#5C6B8A"];
-
-  const ROW = "grid grid-cols-[1fr_6rem_4rem] sm:grid-cols-[1fr_4.5rem_6rem_4.5rem_5rem] gap-x-3";
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className={`${ROW} pb-1`}>
-        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Channel</span>
-        <span className="hidden sm:block font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Units</span>
-        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
-        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Share</span>
-        <span className="hidden sm:block font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Commission</span>
-      </div>
-      {channels.map((ch, i) => {
-        const rev  = Number(ch.revenue);
-        const share = total > 0 ? (rev / total) * 100 : 0;
-        const color = COLORS[i % COLORS.length];
-        return (
-          <div key={i}>
-            <div className={`${ROW} items-center mb-1`}>
-              <span className="font-mono text-[11px] text-ink font-medium">{ch.channel}</span>
-              <span className="hidden sm:block font-mono text-[10px] text-ink-soft text-right">{ch.units_sold}</span>
-              <span className="font-mono text-[11px] text-ink font-semibold text-right">{bdt(rev)}</span>
-              <span className="font-mono text-[10px] text-ink-soft text-right">{share.toFixed(0)}%</span>
-              <span className="hidden sm:block font-mono text-[10px] text-ink-soft text-right">{Number(ch.commission) > 0 ? `− ${bdt(ch.commission)}` : "—"}</span>
-            </div>
-            <div className="h-2 bg-paper-dim rounded overflow-hidden">
-              <div className="h-full rounded" style={{ width: `${share}%`, backgroundColor: color, opacity: 0.7 }} />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Card wrapper ──────────────────────────────────────────────────────────────
-
-function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-[#d8cdb0] bg-paper overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-[#d8cdb0]">
-        <h2 className="font-mono text-[10px] font-semibold uppercase tracking-widest text-chrome">{title}</h2>
-        {action}
-      </div>
-      <div className="p-5">{children}</div>
-    </div>
-  );
-}
-
-// ── KPI card ──────────────────────────────────────────────────────────────────
-
-function KpiCard({ label, value, sub, color = "text-ink" }: { label: string; value: string; sub?: string; color?: string }) {
-  return (
-    <div className="flex flex-col rounded-xl border border-[#d8cdb0] bg-paper px-4 py-3">
-      <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft mb-1">{label}</span>
-      <span className={`font-display text-[20px] font-bold leading-tight ${color}`}>{value}</span>
-      {sub && <span className="font-mono text-[9px] text-ink-soft mt-0.5">{sub}</span>}
-    </div>
-  );
-}
-
-// ── Legend ────────────────────────────────────────────────────────────────────
-
-function Legend() {
-  return (
-    <div className="flex items-center gap-4 mt-2">
-      <div className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-5 rounded-sm" style={{ backgroundColor: "#7A2420", opacity: 0.82 }} />
-        <span className="font-mono text-[9px] text-ink-soft">Gross profit</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="inline-block h-2.5 w-5 rounded-sm" style={{ backgroundColor: "#C9A227", opacity: 0.75 }} />
-        <span className="font-mono text-[9px] text-ink-soft">COGS</span>
-      </div>
-    </div>
-  );
-}
-
-// ── Main dashboard ────────────────────────────────────────────────────────────
-
-export default function OwnerDashboard() {
-  const [period, setPeriod] = useState<Period>("30d");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd]     = useState("");
-  const [range, setRange]   = useState<{ start: string; end: string }>(periodRange("30d"));
-  const [data, setData]     = useState<DashboardData | null>(null);
+export default function OwnerHome() {
+  const [date, setDate] = useState(today());
+  const [data, setData] = useState<DayOverview | null>(null);
+  const [periodicLevels, setPeriodicLevels] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [allProducts, setAllProducts] = useState<DashboardProductRow[] | null>(null);
-  const [prodExpanded, setProdExpanded] = useState(false);
-  const [prodExpandLoading, setProdExpandLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [showZeroQty, setShowZeroQty] = useState(false);
+  const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "busy">(
+    "default"
+  );
+
+  useEffect(() => {
+    setNotifState(pushPermissionState() as typeof notifState);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setData(null);
-    setAllProducts(null);
-    setProdExpanded(false);
     try {
-      const d = await api<DashboardData>(`/reports/dashboard/?start=${range.start}&end=${range.end}`);
+      const [d, pl] = await Promise.all([
+        api<DayOverview>(`/reports/day-overview/?date=${date}`),
+        api<PackagingLevel[]>(`/periodic-stock-checks/levels/`),
+      ]);
       setData(d);
+      setPeriodicLevels(pl);
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [date]);
 
-  async function expandProducts() {
-    if (allProducts) { setProdExpanded(true); return; }
-    setProdExpandLoading(true);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function actStockIn(id: number, action: "approve" | "reject") {
+    setActionBusy(`si-${id}`);
     try {
-      const q = `start=${range.start}&end=${range.end}`;
-      const res = await api<ProductPerformanceResponse>(`/reports/product-performance/?${q}`);
-      setAllProducts(res.rows.map(r => ({
-        product_name: r.product_name,
-        category: r.category,
-        units_sold: r.units_sold,
-        revenue: r.gross_revenue,
-        cogs: r.cogs,
-        gross_profit: r.gross_profit,
-        margin_pct: r.margin_pct,
-      })));
-      setProdExpanded(true);
+      await api(`/stock-in/${id}/${action}/`, { method: "POST" });
+      await load();
     } finally {
-      setProdExpandLoading(false);
+      setActionBusy(null);
     }
   }
 
-  useEffect(() => { load(); }, [load]);
-
-  function selectPeriod(p: Period) {
-    setPeriod(p);
-    if (p !== "custom") setRange(periodRange(p));
-  }
-
-  function applyCustom() {
-    if (customStart && customEnd && customStart <= customEnd) {
-      setRange({ start: customStart, end: customEnd });
+  async function lockClosing(id: number) {
+    setActionBusy(`cl-${id}`);
+    try {
+      await api(`/daily-closings/${id}/lock/`, { method: "POST" });
+      await load();
+    } finally {
+      setActionBusy(null);
     }
   }
 
-  const revenue     = data ? Number(data.pnl.gross_revenue) : 0;
-  const netProfit   = data ? Number(data.pnl.net_profit)    : 0;
-  const cogs        = data ? Number(data.pnl.cogs)          : 0;
-  const grossProfit = data ? Number(data.pnl.gross_profit)  : 0;
-  const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-  const totalUnits  = data?.daily.reduce((s, d) => s + d.units_sold, 0) ?? 0;
-  const activeDays  = data?.daily.length ?? 0;
-  const totalRevenue = data?.channels.reduce((s, c) => s + Number(c.revenue), 0) ?? 0;
+async function enableNotifications() {
+    setNotifState("busy");
+    try {
+      const ok = await subscribeToPush();
+      setNotifState(ok ? "granted" : "denied");
+    } catch {
+      setNotifState("denied");
+    }
+  }
+
+  const isToday = date === today();
+  const opDay = data?.operating_day;
+  const statusCfg = opDay
+    ? DAY_STATUS_CONFIG[opDay.status]
+    : DAY_STATUS_CONFIG.NOT_STARTED;
+
+  const pendingStockIns = (data?.stock_ins ?? []).filter((s) => s.status === "PENDING");
+  const closingNeedsReview =
+    data?.closing && data.closing.status === "SUBMITTED";
+  const hasActions = pendingStockIns.length > 0 || closingNeedsReview;
+
+  const discrepancies = (data?.day_start_checks ?? []).filter(
+    (c) => Number(c.discrepancy_qty) !== 0
+  );
+  const totalShrinkage = discrepancies
+    .filter((c) => Number(c.discrepancy_qty) > 0)
+    .reduce((s, c) => s + Number(c.shrinkage_cost), 0);
+
+  const totalPiecesPrepared = (data?.prep_logs ?? []).reduce(
+    (s, p) => s + p.pieces_prepared,
+    0
+  );
+  const totalPrepValue = (data?.prep_logs ?? []).reduce(
+    (s, p) => s + p.pieces_prepared * Number(p.selling_price),
+    0
+  );
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
 
-      {/* ── Period picker ─────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-1.5 flex-wrap">
-          {PERIODS.map(p => (
-            <button
-              key={p.value}
-              onClick={() => selectPeriod(p.value)}
-              className={`rounded-full px-3.5 py-1.5 font-mono text-[10px] font-medium transition-colors ${
-                period === p.value
-                  ? "bg-near-black text-gold"
-                  : "border border-[#d8cdb0] text-ink-soft hover:border-ink-soft"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+      {/* ── Push notification prompt ────────────────────────────────────── */}
+      {notifState === "default" && (
+        <div className="flex items-center justify-between rounded-lg border border-gold/30 bg-gold/5 px-3 py-2.5">
+          <p className="font-mono text-[11px] text-ink-soft">
+            Enable alerts for stock-in submissions
+          </p>
+          <button
+            onClick={enableNotifications}
+            className="ml-3 shrink-0 rounded bg-near-black px-3 py-1.5 font-mono text-[11px] font-semibold text-gold"
+          >
+            Enable
+          </button>
         </div>
+      )}
 
-        {period === "custom" && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="date"
-              value={customStart}
-              max={customEnd || undefined}
-              onChange={e => setCustomStart(e.target.value)}
-              className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-2 py-1 font-mono text-[11px] text-ink"
-            />
-            <span className="font-mono text-[10px] text-ink-soft">to</span>
-            <input
-              type="date"
-              value={customEnd}
-              min={customStart || undefined}
-              onChange={e => setCustomEnd(e.target.value)}
-              className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-2 py-1 font-mono text-[11px] text-ink"
-            />
-            <button
-              onClick={applyCustom}
-              disabled={!customStart || !customEnd || customStart > customEnd}
-              className="rounded-full bg-near-black px-3.5 py-1.5 font-mono text-[10px] font-medium text-gold disabled:opacity-40"
-            >
-              Apply
-            </button>
+      {/* ── Date navigator ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setDate(prevDay(date))}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d8cdb0] font-mono text-sm text-ink-soft active:bg-paper-dim"
+        >
+          ‹
+        </button>
+        <DatePicker value={date} onChange={setDate} max={today()}>
+          <div className="text-center">
+            <p className="font-display text-[15px] font-bold text-ink">
+              {isToday ? "Today" : shortDate(date)}
+            </p>
+            <p className="font-mono text-[10px] text-ink-soft underline decoration-dotted">
+              {date}
+            </p>
           </div>
-        )}
+        </DatePicker>
+        <button
+          onClick={() => setDate(nextDay(date))}
+          disabled={isToday}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d8cdb0] font-mono text-sm text-ink-soft disabled:opacity-30 active:bg-paper-dim"
+        >
+          ›
+        </button>
       </div>
 
       {loading && (
-        <p className="py-10 text-center font-mono text-xs text-ink-soft">Loading…</p>
+        <p className="py-6 text-center font-mono text-xs text-ink-soft">Loading…</p>
       )}
 
       {data && (
         <>
-          {/* ── KPI strip ────────────────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <KpiCard
-              label="Revenue"
-              value={bdt(revenue)}
-              sub={`${activeDays} day${activeDays !== 1 ? "s" : ""}`}
-              color={revenue > 0 ? "text-leaf-deep" : "text-ink"}
-            />
-            <KpiCard
-              label="Net profit"
-              value={bdt(netProfit)}
-              sub={pct(netProfit, revenue) !== "—" ? `${pct(netProfit, revenue)} margin` : undefined}
-              color={netProfit > 0 ? "text-leaf-deep" : netProfit < 0 ? "text-chili" : "text-ink"}
-            />
-            <KpiCard
-              label="Gross margin"
-              value={`${grossMargin.toFixed(1)}%`}
-              sub={`GP ${bdt(grossProfit)}`}
-              color={grossMargin >= 40 ? "text-leaf-deep" : grossMargin >= 20 ? "text-gold-deep" : "text-chili"}
-            />
-            <KpiCard
-              label="COGS"
-              value={bdt(cogs)}
-              sub={pct(cogs, revenue) !== "—" ? `${pct(cogs, revenue)} of rev` : undefined}
-              color="text-ink-soft"
-            />
-            <KpiCard
-              label="Units sold"
-              value={totalUnits.toLocaleString()}
-              sub={activeDays > 0 ? `avg ${(totalUnits / activeDays).toFixed(0)}/day` : undefined}
-            />
+          {/* ── Status + Financial KPIs — combined hero ──────────────────── */}
+          <div className="rounded-xl border border-[#d8cdb0] bg-paper px-4 pt-3.5 pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${statusCfg.dot}`} />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-ink-soft">
+                  Operating day
+                </span>
+              </div>
+              <span className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-medium ${statusCfg.badge}`}>
+                {opDay ? statusCfg.label : "Not started"}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-x-3 border-t border-dashed border-[#d8cdb0] pt-3">
+              <div className="flex flex-col gap-0.5">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Revenue</span>
+                <span className={`font-mono text-[16px] font-bold leading-tight ${Number(data.pnl.gross_revenue) > 0 ? "text-leaf-deep" : "text-ink"}`}>
+                  {bdt(data.pnl.gross_revenue)}
+                </span>
+                {(Number(data.pnl.commission_total) > 0 || Number(data.pnl.channel_discount) > 0) && (
+                  <span className="font-mono text-[9px] text-ink-soft/60 leading-tight">
+                    {[
+                      Number(data.pnl.commission_total) > 0 && `cmm −${bdt(data.pnl.commission_total)}`,
+                      Number(data.pnl.channel_discount) > 0 && `disc −${bdt(data.pnl.channel_discount)}`,
+                    ].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col gap-0.5 items-center text-center">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">Gross profit</span>
+                <span className={`font-mono text-[16px] font-bold leading-tight ${
+                  Number(data.pnl.gross_profit) > 0 ? "text-leaf-deep"
+                  : Number(data.pnl.gross_profit) < 0 ? "text-chili"
+                  : "text-ink"
+                }`}>
+                  {bdt(data.pnl.gross_profit)}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5 items-end text-right">
+                <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft">COGS</span>
+                <span className="font-mono text-[15px] font-semibold leading-tight text-ink-soft">
+                  {bdt(data.pnl.cogs)}
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* ── Daily bar chart ───────────────────────────────────────── */}
-          <Card
-            title={`Daily revenue vs COGS — ${data.start} to ${data.end}`}
-            action={
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1 font-mono text-[9px] text-ink-soft">
-                  <span className="inline-block h-2 w-3 rounded-sm" style={{ backgroundColor: "#7A2420", opacity: 0.82 }} />
-                  Gross profit
-                </span>
-                <span className="flex items-center gap-1 font-mono text-[9px] text-ink-soft">
-                  <span className="inline-block h-2 w-3 rounded-sm" style={{ backgroundColor: "#C9A227", opacity: 0.75 }} />
-                  COGS
-                </span>
-              </div>
-            }
-          >
-            <DailyBarChart daily={data.daily} />
-          </Card>
+          {/* ── Action queue ─────────────────────────────────────────────── */}
+          {hasActions && (
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-chili">
+                ● Needs your review
+              </p>
 
-          {/* ── Two-column: Products + P&L ────────────────────────────── */}
-          <div className="grid gap-5 md:grid-cols-2">
-            <Card title="Products by revenue">
-              <div className="grid grid-cols-[1fr_5.5rem_5.5rem_3.5rem] gap-x-2 pb-2 border-b border-dashed border-[#e8dfc8]">
-                <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
-                <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
-                <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">COGS</span>
-                <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Margin</span>
-              </div>
-              <div className="mt-3">
-                <TopProductsChart products={prodExpanded && allProducts ? allProducts : data.top_products} />
-              </div>
-              {data.top_products_total > data.top_products.length && (
-                <div className="mt-3 border-t border-dashed border-[#e8dfc8] pt-2.5 text-right">
-                  {prodExpanded ? (
-                    <button
-                      className="font-mono text-[10px] text-ink-soft hover:text-ink"
-                      onClick={() => setProdExpanded(false)}
+              {pendingStockIns.map((r) => (
+                <StockInActionCard
+                  key={r.id}
+                  record={r}
+                  busy={actionBusy}
+                  onApprove={() => actStockIn(r.id, "approve")}
+                  onReject={() => actStockIn(r.id, "reject")}
+                />
+              ))}
+
+              {closingNeedsReview && data.closing && (
+                <div className="queue-item">
+                  <div className="qtop">
+                    <span>Closing — {shortDate(date)}</span>
+                    <span
+                      className={`stamp ${data.closing.has_flag ? "stamp-variance" : "stamp-pending"} rotate-0`}
                     >
-                      ▲ Show less
+                      {data.closing.has_flag ? "Variance" : "Pending lock"}
+                    </span>
+                  </div>
+                  <div className="qmeta">
+                    {data.closing.has_flag
+                      ? `${data.closing.flagged_products.length} flagged product(s) · walk-in derived below zero`
+                      : `Revenue ${bdt(data.closing.channel_day_net_revenue)} — awaiting owner lock`}
+                  </div>
+                  <div className="qbtns">
+                    <button
+                      className="approve"
+                      disabled={actionBusy === `cl-${data.closing.id}`}
+                      onClick={() => lockClosing(data.closing!.id)}
+                    >
+                      {actionBusy === `cl-${data.closing.id}` ? "…" : "Accept & lock"}
                     </button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* ── Business sections: Sales + Closing ───────────────────────── */}
+          <div className="flex flex-col gap-2">
+
+            {/* Closing */}
+            <Section
+              title="Closing"
+              badge={
+                data.closing
+                  ? data.closing.status === "LOCKED"
+                    ? `Locked · ${bdt(data.closing.channel_day_net_revenue)}`
+                    : data.closing.status === "SUBMITTED"
+                    ? `Awaiting review · ${bdt(data.closing.channel_day_net_revenue)}`
+                    : "Draft"
+                  : "Not closed"
+              }
+              badgeColor={
+                data.closing?.status === "LOCKED"
+                  ? "bg-leaf/10 text-leaf-deep border border-leaf/20"
+                  : data.closing?.status === "SUBMITTED"
+                  ? "bg-gold/15 text-gold-deep border border-gold/20"
+                  : "bg-ink-soft/10 text-ink-soft"
+              }
+              defaultOpen={opDay?.status === "CLOSED"}
+            >
+              {!data.closing ? (
+                <p className="font-mono text-[11px] text-ink-soft italic">No closing for this day.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {/* Revenue summary */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="flex flex-col">
+                      <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Total revenue</span>
+                      <span className="font-mono text-[14px] font-bold text-leaf-deep">
+                        {bdt(data.closing.channel_day_net_revenue)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-center text-center">
+                      <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Online</span>
+                      <span className="font-mono text-[13px] font-semibold text-ink">
+                        {bdt(data.closing.online_payments)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-end text-right">
+                      <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Walk-in</span>
+                      <span className="font-mono text-[13px] font-semibold text-ink">
+                        {bdt(data.closing.total_offline_sales)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Payment entries */}
+                  {data.closing.payments.length > 0 && (
+                    <div className="flex flex-col gap-0.5">
+                      <p className="font-mono text-[9px] uppercase tracking-wide text-ink-soft mb-0.5">
+                        Payments
+                      </p>
+                      {data.closing.payments.map((p, i) => (
+                        <div key={i} className="flex justify-between">
+                          <span className="font-mono text-[11px] text-ink-soft">
+                            {p.is_primary_cash ? "Cash (computed)" : p.account_name}
+                          </span>
+                          <span className="font-mono text-[11px] font-semibold text-ink">
+                            {bdt(p.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Remains at close */}
+                  {data.closing.stock_counts_remains.length > 0 && (() => {
+                    const remains = data.closing!.stock_counts_remains;
+                    const categories = [...new Set(remains.map(r => r.product_category))];
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-baseline justify-between mb-0.5">
+                          <p className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">
+                            Unsold prep at close
+                          </p>
+                          <span className="font-mono text-[11px] font-bold text-gold-deep">
+                            {bdt(data.closing!.total_remains_value)}
+                          </span>
+                        </div>
+                        {categories.map(cat => (
+                          <div key={cat}>
+                            <p className="font-mono text-[9px] text-ink-soft/40 uppercase tracking-wider pt-1 pb-0.5">
+                              {cat}
+                            </p>
+                            {remains.filter(r => r.product_category === cat).map((r, i) => (
+                              <div key={i} className="flex items-baseline justify-between">
+                                <span className="font-mono text-[11px] text-ink truncate mr-2">
+                                  {r.product_name}
+                                </span>
+                                <span className="font-mono text-[11px] shrink-0 text-ink-soft">
+                                  {r.remains_pieces} pcs
+                                  <span className="text-ink-soft/40 mx-1">·</span>
+                                  <span className="text-gold-deep font-semibold">{bdt(r.remains_value)}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Flags */}
+                  {data.closing.has_flag && (
+                    <div className="rounded border border-chili/30 bg-chili/5 px-3 py-2">
+                      <p className="font-mono text-[10px] font-semibold text-chili mb-1">
+                        ⚠ Stock count flags
+                      </p>
+                      {data.closing.flagged_products.map((fp, i) => (
+                        <p key={i} className="font-mono text-[10px] text-chili">
+                          {fp.product_name}: walk-in derived {fp.derived_walkin_sold} pcs
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
+              )}
+            </Section>
+
+            {/* Sales */}
+            {(() => {
+              const sales: DayOverviewSalesProduct[] = data.closing?.sales_by_product ?? [];
+              const categories = [...new Set(sales.map(s => s.product_category))];
+              const totalRevenue = sales.reduce((sum, s) => sum + Number(s.revenue), 0);
+              const totalPcs = sales.reduce((sum, s) => sum + s.total_sold, 0);
+              return (
+                <Section
+                  title="Sales"
+                  badge={
+                    sales.length === 0
+                      ? data.closing ? "No sales" : "Not closed"
+                      : `${totalPcs} pcs · ${bdt(totalRevenue)}`
+                  }
+                  badgeColor={
+                    sales.length > 0
+                      ? "bg-leaf/10 text-leaf-deep border border-leaf/20"
+                      : "bg-ink-soft/10 text-ink-soft"
+                  }
+                  defaultOpen={false}
+                >
+                  {sales.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">
+                      {data.closing ? "No product sales recorded." : "Day not closed yet."}
+                    </p>
                   ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+                      {categories.map(cat => {
+                        const catRows = sales.filter(s => s.product_category === cat);
+                        return (
+                          <div key={cat}>
+                            <p className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/40 px-1 pt-2 pb-0.5">
+                              {cat}
+                            </p>
+                            <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_4.5rem_6rem] px-1 pb-1">
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">WI</span>
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">App</span>
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Total</span>
+                              <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Revenue</span>
+                            </div>
+                            {catRows.map((s, i) => {
+                              const pks = packLabel(s.total_sold, s.pieces_per_pack);
+                              return (
+                              <div
+                                key={i}
+                                className="grid grid-cols-[minmax(0,1fr)_2.5rem_2.5rem_4.5rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-mono text-[11px] text-ink truncate">{s.product_name}</p>
+                                  {Number(s.selling_price) > 0 && (
+                                    <p className="font-mono text-[9px] text-ink-soft/60">{bdtD(s.selling_price)} / pc</p>
+                                  )}
+                                </div>
+                                <span className="self-center font-mono text-[11px] text-ink-soft text-right">
+                                  {s.walkin_sold > 0 ? s.walkin_sold : "—"}
+                                </span>
+                                <span className="self-center font-mono text-[11px] text-ink-soft text-right">
+                                  {s.online_sold > 0 ? s.online_sold : "—"}
+                                </span>
+                                <div className="self-center text-center">
+                                  <p className="font-mono text-[12px] font-bold text-ink">{s.total_sold}</p>
+                                  {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                                </div>
+                                <span className="self-center font-mono text-[11px] text-leaf-deep font-semibold text-right">
+                                  {Number(s.revenue) > 0 ? bdtD(s.revenue) : "—"}
+                                </span>
+                              </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                      <div className="mt-2 flex items-center justify-between border-t border-dashed border-[#d8cdb0] pt-2 px-1">
+                        <span className="font-mono text-[10px] text-ink-soft">{totalPcs} pcs total</span>
+                        <span className="font-mono text-[12px] font-bold text-leaf-deep">
+                          {bdt(totalRevenue)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
+
+            {/* Transactions */}
+            {(() => {
+              const txns: DayOverviewTransaction[] = data.transactions ?? [];
+              const netFlow = txns.reduce((s, t) => s + Number(t.amount), 0);
+              const TXN_TYPE_LABEL: Record<string, string> = {
+                SALES_COLLECTION: "Sales collection",
+                EXPENSE_PAYMENT: "Expense",
+                TRANSFER_IN: "Transfer in",
+                TRANSFER_OUT: "Transfer out",
+                CAPITAL_INJECTION: "Capital injection",
+                OWNER_WITHDRAWAL: "Withdrawal",
+                ADJUSTMENT: "Adjustment",
+                SUPPLIER_ORDER_DEDUCTION: "Supplier payment",
+                OTHER_INCOME: "Other income",
+              };
+              return (
+                <Section
+                  title="Transactions"
+                  badge={txns.length === 0 ? "None" : `${txns.length} · net ${bdt(netFlow)}`}
+                  badgeColor={
+                    txns.length === 0 ? "bg-ink-soft/10 text-ink-soft"
+                    : netFlow >= 0 ? "bg-leaf/10 text-leaf-deep border border-leaf/20"
+                    : "bg-chili/10 text-chili border border-chili/20"
+                  }
+                  defaultOpen={false}
+                >
+                  {txns.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">No transactions recorded for this day.</p>
+                  ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+                      <div className="grid grid-cols-[minmax(0,1fr)_5rem] px-1 pb-1">
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Type · Account</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Amount</span>
+                      </div>
+                      {txns.map((t) => {
+                        const amt = Number(t.amount);
+                        return (
+                          <div
+                            key={t.id}
+                            className="grid grid-cols-[minmax(0,1fr)_5rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <p className="font-mono text-[11px] text-ink truncate">
+                                {TXN_TYPE_LABEL[t.transaction_type] ?? t.transaction_type}
+                              </p>
+                              <p className="font-mono text-[9px] text-ink-soft/60 truncate">{t.account_name}</p>
+                              {t.note && (
+                                <p className="font-mono text-[9px] text-ink-soft/50 truncate italic">{t.note}</p>
+                              )}
+                            </div>
+                            <span className={`self-center font-mono text-[12px] font-semibold text-right ${
+                              amt > 0 ? "text-leaf-deep" : amt < 0 ? "text-chili" : "text-ink-soft"
+                            }`}>
+                              {amt >= 0 ? "+" : ""}{bdt(t.amount)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      <div className="mt-2 flex items-center justify-between border-t border-dashed border-[#d8cdb0] pt-2 px-1">
+                        <span className="font-mono text-[10px] text-ink-soft">Net flow</span>
+                        <span className={`font-mono text-[12px] font-bold ${
+                          netFlow > 0 ? "text-leaf-deep" : netFlow < 0 ? "text-chili" : "text-ink-soft"
+                        }`}>
+                          {netFlow >= 0 ? "+" : ""}{bdt(netFlow)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
+
+            {/* Day end / Current stock */}
+            {(() => {
+              const allDisplayAll = data.display_stock.filter(s => !s.requires_preparation);
+              const rawStockAll = data.raw_stock ?? [];
+              const supplyItemsAll = periodicLevels;
+
+              // Apply zero-qty filter
+              const allDisplay = showZeroQty ? allDisplayAll : allDisplayAll.filter(s => s.pieces_available > 0);
+              const rawStock   = showZeroQty ? rawStockAll  : rawStockAll.filter(rs => Number(rs.quantity_available) > 0);
+              const supplyItems = showZeroQty ? supplyItemsAll : supplyItemsAll.filter(s => Number(s.current_qty) > 0);
+
+              const totalItems = allDisplay.length + rawStock.length + supplyItems.length;
+              const totalAll   = allDisplayAll.length + rawStockAll.length + supplyItemsAll.length;
+              const zeroCount  = totalAll - totalItems;
+
+              const displayTotal = allDisplay.reduce((sum, s) => sum + s.pieces_available * Number(s.purchase_price ?? 0), 0);
+              const rawTotal = rawStock.reduce((sum, rs) => sum + Number(rs.quantity_available) * Number(rs.cost_per_base_unit), 0);
+              const supplyTotal = supplyItems.reduce((sum, s) => sum + Number(s.current_qty) * Number(s.cost_per_base_unit ?? 0), 0);
+
+              const COL4 = "grid grid-cols-[minmax(0,1fr)_4.5rem_6rem_6.5rem]";
+              const sectionTitle = opDay?.status === "CLOSED" ? "Day end stock" : "Current stock";
+
+              // Single unified group per category: products (display_stock) + ingredients (raw_stock) merged
+              const unifiedGroups = [
+                ...INGREDIENT_GROUPS,
+                { key: "Supply", icon: "📦" },
+              ].map(({ key, icon }) => ({
+                key,
+                icon,
+                products: allDisplay
+                  .filter(s => s.product_category === key)
+                  .sort((a, b) => a.product_name.localeCompare(b.product_name)),
+                ingredients: rawStock
+                  .filter(rs => rs.ingredient_group === key)
+                  .sort((a, b) =>
+                    a.primary_product.localeCompare(b.primary_product) ||
+                    a.ingredient.localeCompare(b.ingredient)
+                  ),
+              })).filter(g => g.products.length > 0 || g.ingredients.length > 0);
+
+              return (
+                <Section
+                  title={sectionTitle}
+                  badge={totalItems === 0 ? "Empty" : `${totalItems} item${totalItems !== 1 ? "s" : ""}`}
+                  badgeColor="bg-ink-soft/10 text-ink-soft"
+                  defaultOpen={false}
+                >
+                  {/* Zero-qty toggle */}
+                  <div className="flex items-center justify-between mb-3 -mt-1">
+                    <span className="font-mono text-[10px] text-ink-soft/60">
+                      {showZeroQty ? "Showing all items" : `${zeroCount} empty item${zeroCount !== 1 ? "s" : ""} hidden`}
+                    </span>
                     <button
-                      className="font-mono text-[10px] text-chrome hover:underline disabled:opacity-50"
-                      disabled={prodExpandLoading}
-                      onClick={expandProducts}
+                      onClick={() => setShowZeroQty(v => !v)}
+                      className="flex items-center gap-1.5"
+                      aria-label="Toggle zero quantity items"
                     >
-                      {prodExpandLoading ? "Loading…" : `▼ Show all ${data.top_products_total} products`}
+                      <span className="font-mono text-[10px] text-ink-soft">Show empty</span>
+                      <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${showZeroQty ? "bg-chrome" : "bg-ink-soft/20"}`}>
+                        <span className={`absolute top-0.5 left-0 h-3 w-3 rounded-full bg-white shadow transition-transform ${showZeroQty ? "translate-x-3.5" : "translate-x-0.5"}`} />
+                      </span>
                     </button>
+                  </div>
+
+                  {totalItems === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">No stock data available.</p>
+                  ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+
+                      {/* Column headers */}
+                      <div className={`${COL4} px-1 pb-1 pt-1`}>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Qty</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
+                      </div>
+
+                      {/* Unified category groups — products + ingredients under one header */}
+                      {unifiedGroups.flatMap(({ key, icon, products, ingredients }, gi) => [
+                        <div key={`grp-${key}`} className={`px-1 pb-0.5 ${gi === 0 ? "pt-1" : "pt-3"}`}>
+                          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">
+                            {icon} {key}
+                          </span>
+                        </div>,
+                        // Product rows (ready-to-sell pieces)
+                        ...products.map((s, i) => {
+                          const cost = Number(s.purchase_price ?? 0);
+                          const pks = packLabel(s.pieces_available, s.pieces_per_pack);
+                          return (
+                            <div key={`prod-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                              <div className="min-w-0">
+                                <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.product_name}</p>
+                              </div>
+                              <div className="text-center">
+                                <p className={`font-mono text-[11px] font-semibold ${s.pieces_available === 0 ? "text-ink-soft/40" : s.pieces_available < 5 ? "text-chili" : "text-ink"}`}>{s.pieces_available}</p>
+                                {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                              </div>
+                              <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{cost > 0 && s.pieces_available > 0 ? bdtD(s.pieces_available * cost) : "—"}</span>
+                            </div>
+                          );
+                        }),
+                        // Ingredient rows (raw material)
+                        ...ingredients.map((rs, i) => {
+                          const qty = Number(rs.quantity_available);
+                          const cost = Number(rs.cost_per_base_unit);
+                          const pks = packLabel(qty, rs.pieces_per_pack);
+                          return (
+                            <div key={`raw-${key}-${i}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                              <div className="min-w-0">
+                                <p className="font-mono text-[11px] text-ink leading-tight break-words">{rs.ingredient}</p>
+                                <p className="font-mono text-[9px] text-ink-soft/60">{rs.base_unit}</p>
+                              </div>
+                              <div className="text-center">
+                                <p className={`font-mono text-[11px] font-semibold ${qty === 0 ? "text-ink-soft/40" : qty < 5 ? "text-chili" : "text-ink"}`}>
+                                  {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                                </p>
+                                {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                              </div>
+                              <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                              <span className="self-center font-mono text-[11px] text-ink font-medium text-right">{cost > 0 && qty > 0 ? bdtD(qty * cost) : "—"}</span>
+                            </div>
+                          );
+                        }),
+                      ])}
+
+                      {/* Supplies */}
+                      {supplyItems.length > 0 && (
+                        <>
+                          <div className="px-1 pt-3 pb-0.5">
+                            <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">📦 Supplies</span>
+                          </div>
+                          <div className={`${COL4} px-1 pb-1 pt-1`}>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Qty</span>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Cost</span>
+                            <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
+                          </div>
+                          {supplyItems.map((s) => {
+                            const qty = Number(s.current_qty);
+                            const cost = Number(s.cost_per_base_unit ?? 0);
+                            const pks = packLabel(qty, s.bundle_size);
+                            const zero = qty === 0;
+                            const low = qty < 5;
+                            return (
+                              <div key={`sup-${s.ingredient}`} className={`${COL4} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}>
+                                <div className="min-w-0">
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.ingredient_display_name}</p>
+                                  {s.last_checked_at && (
+                                    <p className="font-mono text-[9px] text-ink-soft/60">{shortDate(s.last_checked_at)} · {timeOf(s.last_checked_at)}</p>
+                                  )}
+                                </div>
+                                <div className="text-center">
+                                  <p className={`font-mono text-[11px] font-semibold ${zero ? "text-chili" : low ? "text-gold-deep" : "text-ink"}`}>
+                                    {qty % 1 === 0 ? qty : qty.toFixed(2)}
+                                  </p>
+                                  {pks && <p className="font-mono text-[9px] text-ink-soft/50">{pks}</p>}
+                                </div>
+                                <span className="self-center font-mono text-[10px] text-ink-soft text-right">{cost > 0 ? bdtD(cost) : "—"}</span>
+                                <span className="self-center font-mono text-[11px] text-ink font-medium text-right">{cost > 0 ? bdtD(qty * cost) : "—"}</span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {/* Grand total */}
+                      {(displayTotal + rawTotal + supplyTotal) > 0 && (
+                        <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
+                          <span className="font-mono text-[11px] font-semibold text-ink">
+                            Total: {bdtD(displayTotal + rawTotal + supplyTotal)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
+
+          </div>
+
+          {/* ── Operational detail ────────────────────────────────────────── */}
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-[#d8cdb0]" />
+            <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/40">
+              Operational detail
+            </span>
+            <div className="h-px flex-1 bg-[#d8cdb0]" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+
+            {/* Prepared for sale */}
+            {(() => {
+              type ProdSummary = {
+                product_name: string;
+                selling_price: string;
+                fresh: number;
+                carried_forward: number;
+                wastage: number;
+              };
+              const byProduct = data.prep_logs.reduce<Record<string, ProdSummary>>((acc, p) => {
+                if (!acc[p.product_name]) {
+                  acc[p.product_name] = {
+                    product_name: p.product_name,
+                    selling_price: p.selling_price,
+                    fresh: 0,
+                    carried_forward: 0,
+                    wastage: 0,
+                  };
+                }
+                if (p.source === "FRESH") acc[p.product_name].fresh += p.pieces_prepared;
+                else acc[p.product_name].carried_forward += p.pieces_prepared;
+                acc[p.product_name].wastage += p.wastage_pieces ?? 0;
+                return acc;
+              }, {});
+              for (const w of data.closing?.stock_counts_wastage ?? []) {
+                if (byProduct[w.product_name]) {
+                  byProduct[w.product_name].wastage += w.wastage_pieces;
+                }
+              }
+              const rows = Object.values(byProduct);
+              const grandTotal = rows.reduce(
+                (s, r) => s + (r.fresh + r.carried_forward) * Number(r.selling_price),
+                0
+              );
+              return (
+                <Section
+                  title="Prepared for sale"
+                  badge={
+                    rows.length === 0
+                      ? "Nothing prepared"
+                      : `${rows.length} product${rows.length !== 1 ? "s" : ""}`
+                  }
+                  badgeColor={rows.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
+                  defaultOpen={opDay?.status !== "CLOSED" && rows.length > 0}
+                >
+                  {rows.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">No preparation entries for this day.</p>
+                  ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+                      <div className="grid grid-cols-[minmax(0,1fr)_3rem_2.5rem_2.5rem_6rem] px-1 pb-1">
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Fr</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">CF</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Wst</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Sell value</span>
+                      </div>
+                      {rows.map((r, i) => {
+                        const total = r.fresh + r.carried_forward;
+                        const sellValue = total * Number(r.selling_price);
+                        return (
+                          <div
+                            key={i}
+                            className="grid grid-cols-[minmax(0,1fr)_3rem_2.5rem_2.5rem_6rem] rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-mono text-[11px] text-ink truncate">{r.product_name}</p>
+                              {Number(r.selling_price) > 0 && (
+                                <p className="font-mono text-[9px] text-ink-soft/60">{bdtD(r.selling_price)} / pc</p>
+                              )}
+                            </div>
+                            <span className="self-center font-mono text-[11px] font-semibold text-chrome text-right">
+                              {r.fresh > 0 ? r.fresh : "—"}
+                            </span>
+                            <span className="self-center font-mono text-[11px] text-gold-deep text-right">
+                              {r.carried_forward > 0 ? r.carried_forward : "—"}
+                            </span>
+                            <span className={`self-center font-mono text-[11px] text-right ${r.wastage > 0 ? "text-chili font-semibold" : "text-ink-soft"}`}>
+                              {r.wastage > 0 ? r.wastage : "—"}
+                            </span>
+                            <span className="self-center font-mono text-[11px] text-ink-soft text-right">
+                              {sellValue > 0 ? bdtD(sellValue) : "—"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {grandTotal > 0 && (
+                        <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
+                          <span className="font-mono text-[11px] font-semibold text-ink">
+                            Total: {bdtD(grandTotal)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
+
+            {/* Preparation log */}
+            <Section
+              title="Preparation log"
+              badge={
+                data.prep_logs.length === 0
+                  ? "Nothing prepared"
+                  : `${totalPiecesPrepared} pcs · ${data.prep_logs.length} entr${data.prep_logs.length !== 1 ? "ies" : "y"}`
+              }
+              badgeColor={
+                data.prep_logs.length > 0
+                  ? "bg-chrome/10 text-chrome border border-chrome/20"
+                  : "bg-ink-soft/10 text-ink-soft"
+              }
+              defaultOpen={false}
+            >
+              {data.prep_logs.length === 0 ? (
+                <p className="font-mono text-[11px] text-ink-soft italic">
+                  {opDay ? "No prep entries yet." : "Day not started yet."}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-0">
+                  <div className="grid grid-cols-[minmax(0,1fr)_2.5rem_3rem_6.5rem] pb-1">
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Product</span>
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Src</span>
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Pcs</span>
+                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Value</span>
+                  </div>
+                  {data.prep_logs.map((p, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-[minmax(0,1fr)_2.5rem_3rem_6.5rem] border-t border-dashed border-[#e8dfc8] py-1.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-[11px] text-ink truncate">{p.product_name}</p>
+                        <p className="font-mono text-[9px] text-ink-soft/60">{timeOf(p.timestamp)}</p>
+                      </div>
+                      <span
+                        className={`mt-0.5 self-start font-mono text-[10px] text-right ${
+                          p.source === "FRESH" ? "text-chrome" : "text-gold-deep"
+                        }`}
+                      >
+                        {p.source === "FRESH" ? "Fr" : "CF"}
+                      </span>
+                      <span className="mt-0.5 self-start font-mono text-[11px] font-semibold text-ink text-right">
+                        {p.pieces_prepared}
+                      </span>
+                      <span className="mt-0.5 self-start font-mono text-[11px] text-ink-soft text-right">
+                        {Number(p.selling_price) > 0
+                          ? bdtD(p.pieces_prepared * Number(p.selling_price))
+                          : "—"}
+                      </span>
+                    </div>
+                  ))}
+                  {totalPrepValue > 0 && (
+                    <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2">
+                      <span className="font-mono text-[11px] text-ink font-semibold">
+                        Total: {bdtD(totalPrepValue)}
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
-            </Card>
+            </Section>
 
-            <Card title="P&L breakdown">
-              <PnlWaterfall pnl={data.pnl} />
-              <div className="mt-4 grid grid-cols-3 gap-2 border-t border-dashed border-[#d8cdb0] pt-4">
-                {[
-                  {
-                    label: "Losses",
-                    value: bdt(Number(data.pnl.wastage_cost) + Number(data.pnl.shrinkage_cost)),
-                    sub: "wastage + shrinkage",
-                    accent: "#C9601C",
-                    textColor: "#C9601C",
-                  },
-                  {
-                    label: "Costs",
-                    value: bdt(Number(data.pnl.fixed_costs) + Number(data.pnl.variable_costs) + Number(data.pnl.adhoc_costs)),
-                    sub: "fixed + variable + adhoc",
-                    accent: "#B08030",
-                    textColor: "#B08030",
-                  },
-                  {
-                    label: "Other income",
-                    value: bdt(data.pnl.other_income),
-                    sub: "oil, recyclables…",
-                    accent: "#3F6B3F",
-                    textColor: "#3F6B3F",
-                  },
-                ].map(({ label, value, sub, accent, textColor }) => (
-                  <div key={label} className="flex flex-col gap-0.5 pl-2" style={{ borderLeft: `3px solid ${accent}` }}>
-                    <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">{label}</span>
-                    <span className="font-mono text-[12px] font-semibold" style={{ color: textColor }}>{value}</span>
-                    <span className="font-mono text-[9px] text-ink-soft/50">{sub}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
+            {/* Stock in */}
+            <Section
+              title="Stock in"
+              badge={
+                data.stock_ins.length === 0
+                  ? "None today"
+                  : `${data.stock_ins.length} record${data.stock_ins.length !== 1 ? "s" : ""}`
+              }
+              badgeColor={
+                pendingStockIns.length > 0
+                  ? "bg-gold/15 text-gold-deep border border-gold/20"
+                  : "bg-ink-soft/10 text-ink-soft"
+              }
+              defaultOpen={false}
+            >
+              {data.stock_ins.length === 0 ? (
+                <p className="font-mono text-[11px] text-ink-soft italic">No stock received today.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {data.stock_ins.map((r) => (
+                    <Link
+                      key={r.id}
+                      href="/owner/stock-in"
+                      className="flex items-start justify-between rounded border border-[#e8dfc8] bg-paper-dim px-3 py-2 active:bg-paper-dim/70"
+                    >
+                      <div>
+                        <p className="font-mono text-[11px] font-semibold text-ink">
+                          #{String(r.id).padStart(4, "0")}
+                          {r.invoice_number ? ` · ${r.invoice_number}` : ""}
+                        </p>
+                        <p className="font-mono text-[10px] text-ink-soft">
+                          {r.item_count} line{r.item_count !== 1 ? "s" : ""} · by {r.submitted_by_name}
+                        </p>
+                        {r.notes && (
+                          <p className="font-mono text-[10px] text-ink-soft italic">{r.notes}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-medium ${
+                            STOCK_IN_STATUS_BADGE[r.status] ?? "bg-ink-soft/10 text-ink-soft"
+                          }`}
+                        >
+                          {r.status}
+                        </span>
+                        <span className="font-mono text-[11px] text-ink-soft">›</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </Section>
+
+            {/* Day-start stock check */}
+            <Section
+              title="Day-start stock check"
+              badge={
+                discrepancies.length > 0
+                  ? `${discrepancies.length} discrepanc${discrepancies.length === 1 ? "y" : "ies"}`
+                  : opDay
+                  ? "All clear"
+                  : "No data"
+              }
+              badgeColor={
+                discrepancies.length > 0
+                  ? "bg-chili/10 text-chili border border-chili/20"
+                  : "bg-leaf/10 text-leaf-deep"
+              }
+              defaultOpen={false}
+            >
+              {data.day_start_checks.length === 0 ? (
+                <p className="font-mono text-[11px] text-ink-soft italic">
+                  {opDay ? "No stock checks recorded." : "Day not started yet."}
+                </p>
+              ) : (
+                <div className="flex flex-col gap-0 -mx-1">
+                  {(() => {
+                    const COL = "grid grid-cols-[minmax(0,1fr)_4rem_4rem_3.5rem]";
+
+                    const renderRow = (chk: (typeof data.day_start_checks)[0], key: string) => {
+                      const disc = Number(chk.discrepancy_qty);
+                      const sysQty = Number(chk.system_qty);
+                      const confQty = Number(chk.confirmed_qty);
+                      const isShortfall = disc > 0;
+                      const isSurplus = disc < 0;
+                      const sysPacks = packLabel(sysQty, chk.pieces_per_pack);
+                      const confPacks = packLabel(confQty, chk.pieces_per_pack);
+                      const fmtQty = (n: number) => n % 1 === 0 ? String(n) : n.toFixed(2);
+                      return (
+                        <div
+                          key={key}
+                          className={`${COL} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8] ${
+                            isShortfall ? "bg-chili/5" : isSurplus ? "bg-gold/5" : ""
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="font-mono text-[11px] text-ink leading-tight break-words">{chk.ingredient}</p>
+                            <p className="font-mono text-[9px] text-ink-soft/60">{chk.base_unit}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="font-mono text-[11px] text-ink-soft">{fmtQty(sysQty)}</p>
+                            {sysPacks && <p className="font-mono text-[9px] text-ink-soft/50">{sysPacks}</p>}
+                          </div>
+                          <div className="text-center">
+                            <p className={`font-mono text-[11px] font-semibold ${isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink"}`}>
+                              {fmtQty(confQty)}
+                            </p>
+                            {confPacks && <p className="font-mono text-[9px] text-ink-soft/50">{confPacks}</p>}
+                          </div>
+                          <span className={`self-center font-mono text-[11px] font-semibold text-right ${
+                            isShortfall ? "text-chili" : isSurplus ? "text-gold-deep" : "text-ink-soft/40"
+                          }`}>
+                            {disc === 0 ? "—" : disc > 0 ? `−${fmtQty(disc)}` : `+${fmtQty(Math.abs(disc))}`}
+                          </span>
+                          {(isShortfall || isSurplus) && (
+                            <div className="col-span-4 pb-0.5">
+                              <span className="font-mono text-[10px] text-ink-soft/70 capitalize">
+                                {chk.discrepancy_reason
+                                  ? chk.discrepancy_reason.toLowerCase().replace(/_/g, " ")
+                                  : "no reason given"}
+                                {chk.note ? ` · ${chk.note}` : ""}
+                                {isShortfall && Number(chk.shrinkage_cost) > 0 && (
+                                  <span className="text-chili"> · shrinkage {bdt(chk.shrinkage_cost)}</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
+                    const knownGroups = new Set(INGREDIENT_GROUPS.map(g => g.key));
+                    const grouped = [...INGREDIENT_GROUPS, { key: "Other", icon: "🗂" }].flatMap(({ key, icon }, gi) => {
+                      const rows = data.day_start_checks.filter(c => c.ingredient_group === key);
+                      if (rows.length === 0) return [];
+                      return [
+                        <div key={`grp-${key}`} className={`px-1 pb-0.5 ${gi === 0 ? "pt-1" : "pt-3"}`}>
+                          <span className="font-mono text-[9px] uppercase tracking-widest text-ink-soft/60">
+                            {icon} {key}
+                          </span>
+                        </div>,
+                        ...rows.map((chk, i) => renderRow(chk, `${key}-${i}`)),
+                      ];
+                    });
+
+                    const ungrouped = data.day_start_checks.filter(
+                      c => !knownGroups.has(c.ingredient_group) && c.ingredient_group !== "Other"
+                    );
+
+                    return (
+                      <>
+                        <div className={`${COL} px-1 pb-1 pt-1`}>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Ingredient</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">System</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Confirmed</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Δ</span>
+                        </div>
+                        {grouped}
+                        {ungrouped.map((chk, i) => renderRow(chk, `ung-${i}`))}
+                      </>
+                    );
+                  })()}
+                  {totalShrinkage > 0 && (
+                    <div className="mt-2 flex justify-end border-t border-dashed border-[#d8cdb0] pt-2 px-1">
+                      <span className="font-mono text-[11px] text-chili font-semibold">
+                        Total shrinkage cost: {bdt(totalShrinkage)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+
+            {/* Packaging & Supplies counts */}
+            {(() => {
+              type SupplyEntry =
+                | { kind: "recount"; time: string; data: DayOverviewPeriodicCheck }
+                | { kind: "stockin"; time: string; data: DayOverviewSupplyStockIn };
+
+              const entries: SupplyEntry[] = [
+                ...(data.periodic_checks ?? []).map((c) => ({
+                  kind: "recount" as const,
+                  time: c.checked_at,
+                  data: c,
+                })),
+                ...(data.supply_stock_ins ?? []).filter((s) => s.approved_at).map((s) => ({
+                  kind: "stockin" as const,
+                  time: s.approved_at!,
+                  data: s,
+                })),
+              ].sort((a, b) => a.time.localeCompare(b.time));
+
+              // Build running balance per ingredient to compute before/after for every entry.
+              // Anchor: for each ingredient, the first recount's "before" =
+              //   counted_qty + consumed_since_last_check - stock_in_since_last_check
+              // (this is the level at the previous periodic check, before any of today's events)
+              type Computed = { before: number | null; adj: number; after: number | null };
+              const computed: Computed[] = entries.map(() => ({ before: null, adj: 0, after: null }));
+
+              const byIng = new Map<string, number[]>();
+              entries.forEach((e, i) => {
+                const name = e.data.ingredient_name;
+                if (!byIng.has(name)) byIng.set(name, []);
+                byIng.get(name)!.push(i);
+              });
+
+              const openingLevels: Record<string, string> = data.supply_opening_levels ?? {};
+
+              for (const [ingName, indices] of byIng.entries()) {
+                // Anchor: opening balance from backend (level at start of viewed day)
+                const openingStr = openingLevels[ingName];
+                let running: number | null = openingStr != null ? Number(openingStr) : null;
+
+                for (const i of indices) {
+                  const e = entries[i];
+                  if (e.kind === "recount") {
+                    const c = e.data;
+                    const after = Number(c.counted_qty);
+                    computed[i].before = running;
+                    computed[i].after = after;
+                    computed[i].adj = running !== null ? after - running : 0;
+                    running = after;
+                  } else {
+                    const qty = Number(e.data.quantity_added);
+                    computed[i].before = running;
+                    computed[i].adj = qty;
+                    computed[i].after = running !== null ? running + qty : null;
+                    running = computed[i].after ?? (running !== null ? running + qty : null);
+                  }
+                }
+              }
+
+              const COLS = "grid grid-cols-[minmax(0,1fr)_3rem_3.5rem_3rem]";
+
+              const fmt = (n: number | null) =>
+                n === null ? "—" : String(Math.round(n * 100) / 100);
+
+              return (
+                <Section
+                  title="Packaging & Supplies"
+                  badge={entries.length === 0 ? "No entries" : `${entries.length} log${entries.length !== 1 ? "s" : ""}`}
+                  badgeColor={entries.length > 0 ? "bg-chrome/10 text-chrome border border-chrome/20" : "bg-ink-soft/10 text-ink-soft"}
+                  defaultOpen={false}
+                >
+                  {entries.length === 0 ? (
+                    <p className="font-mono text-[11px] text-ink-soft italic">
+                      No supply counts recorded for this day.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-0 -mx-1">
+                      <div className={`${COLS} px-1 pb-1`}>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">Item</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">Before</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-center">Adj</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wide text-ink-soft text-right">After</span>
+                      </div>
+                      {entries.map((entry, idx) => {
+                        const { before, adj, after } = computed[idx];
+                        const adjR = Math.round(adj * 100) / 100;
+                        const afterN = after !== null ? Math.round(after * 100) / 100 : null;
+
+                        if (entry.kind === "recount") {
+                          const c = entry.data;
+                          return (
+                            <div
+                              key={`rc-${c.id}`}
+                              className={`${COLS} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{c.ingredient_name}</p>
+                                  <span className="shrink-0 rounded-sm bg-chrome/10 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-chrome">Recount</span>
+                                </div>
+                                <p className="font-mono text-[9px] text-ink-soft/60">
+                                  {timeOf(c.checked_at)}
+                                  {c.checked_by_name ? ` · ${c.checked_by_name}` : ""}
+                                  {c.note ? ` · ${c.note}` : ""}
+                                </p>
+                              </div>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{fmt(before)}</span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-center ${adjR < 0 ? "text-chili" : adjR > 0 ? "text-leaf-deep" : "text-ink-soft/40"}`}>
+                                {adjR === 0 ? "—" : adjR > 0 ? `+${adjR}` : `${adjR}`}
+                              </span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-right ${afterN === 0 ? "text-chili" : afterN !== null && afterN < 5 ? "text-gold-deep" : "text-ink"}`}>
+                                {fmt(after)}
+                              </span>
+                            </div>
+                          );
+                        } else {
+                          const s = entry.data;
+                          return (
+                            <div
+                              key={`si-${idx}`}
+                              className={`${COLS} rounded px-1 py-1.5 border-t border-dashed border-[#e8dfc8]`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <p className="font-mono text-[11px] text-ink leading-tight break-words">{s.ingredient_name}</p>
+                                  <span className="shrink-0 rounded-sm bg-leaf-deep/10 px-1 py-px font-mono text-[8px] uppercase tracking-wide text-leaf-deep">Stock-in</span>
+                                </div>
+                                <p className="font-mono text-[9px] text-ink-soft/60">
+                                  {s.approved_at ? timeOf(s.approved_at) : ""}
+                                  {s.approved_by_name ? ` · ${s.approved_by_name}` : ""}
+                                </p>
+                              </div>
+                              <span className="self-center font-mono text-[11px] text-ink-soft text-right">{fmt(before)}</span>
+                              <span className="self-center font-mono text-[11px] font-semibold text-leaf-deep text-center">+{adjR}</span>
+                              <span className={`self-center font-mono text-[11px] font-semibold text-right ${afterN === 0 ? "text-chili" : afterN !== null && afterN < 5 ? "text-gold-deep" : "text-ink"}`}>
+                                {fmt(after)}
+                              </span>
+                            </div>
+                          );
+                        }
+                      })}
+                    </div>
+                  )}
+                </Section>
+              );
+            })()}
+
           </div>
-
-          {/* ── Channel breakdown ──────────────────────────────────────── */}
-          <Card title="Revenue by sales channel">
-            <ChannelBars channels={data.channels} total={totalRevenue} />
-          </Card>
         </>
       )}
+    </div>
+  );
+}
+
+// ── stock-in action card ──────────────────────────────────────────────────────
+
+function StockInActionCard({
+  record,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  record: DayOverviewStockIn;
+  busy: string | null;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="queue-item">
+      <div className="qtop">
+        <span>Stock in #SI-{String(record.id).padStart(4, "0")}</span>
+        <span className="stamp stamp-pending rotate-0">Pending</span>
+      </div>
+      <div className="qmeta">
+        {record.item_count} line{record.item_count !== 1 ? "s" : ""} · by {record.submitted_by_name}
+        {record.invoice_number ? ` · ${record.invoice_number}` : ""}
+      </div>
+      <div className="qbtns">
+        <button
+          className="approve"
+          disabled={busy === `si-${record.id}`}
+          onClick={onApprove}
+        >
+          {busy === `si-${record.id}` ? "…" : "Approve"}
+        </button>
+        <button
+          className="reject"
+          disabled={busy === `si-${record.id}`}
+          onClick={onReject}
+        >
+          Reject
+        </button>
+      </div>
     </div>
   );
 }
