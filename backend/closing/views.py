@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from accounts.mixins import OrgScopedQuerySetMixin
-from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly, IsStaffOwnerOrAdmin
+from accounts.permissions import IsOwner, IsOwnerOrReadOnly, IsStaffOwnerFullAdminReadOnly
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Product
 from sales.models import SalesChannel
@@ -42,7 +42,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     ).select_related("outlet", "staff")
     serializer_class = DailyClosingSerializer
     org_lookup = "outlet__organization"
-    permission_classes = [IsStaffOwnerOrAdmin]
+    permission_classes = [IsStaffOwnerFullAdminReadOnly]
 
     # Slim prefetch for list — drops heavy stock_count product nesting; still
     # fetches sales_lines/channel_discounts/payments for the financial rollup
@@ -506,7 +506,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         self._record_account_transactions(closing, request.user)
         return self._fresh_response(closing)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
     def lock(self, request, pk=None):
         """Owner reviews a flagged closing and locks it.
 
@@ -528,7 +528,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     def _sync_cash_payment_entry(closing):
         closing_services.sync_cash_payment_entry(closing)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAdmin], url_path="reopen")
+    @action(detail=True, methods=["post"], permission_classes=[IsOwner], url_path="reopen")
     def reopen(self, request, pk=None):
         """Owner reopens a LOCKED or SUBMITTED closing so staff can re-edit.
 
@@ -607,5 +607,5 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 class ChannelSettlementViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ChannelSettlement.objects.select_related("channel", "outlet")
     serializer_class = ChannelSettlementSerializer
-    permission_classes = [IsOwnerOrAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
     org_lookup = "outlet__organization"

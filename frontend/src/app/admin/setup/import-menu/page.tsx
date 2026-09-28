@@ -424,7 +424,7 @@ export default function ImportMenu() {
           </tbody>
         </table>
       </div>
-      <Link href="/owner/setup/map-recipes" className="btn btn-ghost w-48">
+      <Link href="/admin/setup/map-recipes" className="btn btn-ghost w-48">
         Next: Map recipes →
       </Link>
     </div>

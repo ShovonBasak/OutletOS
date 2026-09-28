@@ -429,7 +429,7 @@ export default function MapRecipes() {
                         Ingredients
                       </p>
                       <Link
-                        href={`/owner/products/edit-recipe/${p.id}`}
+                        href={`/admin/products/edit-recipe/${p.id}`}
                         className="font-mono text-[10px] text-leaf-deep underline"
                       >
                         set quantities →

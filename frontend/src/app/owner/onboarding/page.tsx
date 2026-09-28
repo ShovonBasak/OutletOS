@@ -55,7 +55,10 @@ export default function OnboardingWizard() {
       const freshUser = await api<User>("/auth/me/");
       saveUser(freshUser);
       setUser(freshUser);
-      router.replace("/owner/setup");
+      // The catalog (menu/recipes/pricing) is shared across every franchise
+      // outlet and platform-admin managed — a new Owner has nothing of their
+      // own left to set up, so they land straight on the main dashboard.
+      router.replace("/owner");
     } finally {
       setFinishing(false);
     }

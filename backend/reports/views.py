@@ -17,6 +17,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.permissions import IsOwner
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Outlet, Product, ProductType, TrackingMode
 from closing.models import (
@@ -1141,10 +1142,12 @@ def daily_sells(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsOwner])
 def correct_sells(request):
     """
-    Correct walk-in sell quantities for a specific day.
+    Correct walk-in sell quantities for a specific day. OWNER only — this
+    rewrites historical sales/stock data for one tenant, outside ADMIN's
+    platform-config scope and beyond what STAFF should be able to do.
     Body: {outlet: 1, date: "YYYY-MM-DD", corrections: [{product_id, new_qty}],
            fix_stock?: bool, fix_cash?: bool}
 

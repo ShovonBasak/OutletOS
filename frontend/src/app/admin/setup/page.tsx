@@ -4,19 +4,19 @@ import Link from "next/link";
 
 const STEPS = [
   {
-    href: "/owner/setup/extract",
+    href: "/admin/setup/extract",
     n: 1,
     title: "Extract ingredients from slips",
     hint: "Clean names + base unit + pack yield, captured once",
   },
   {
-    href: "/owner/setup/import-menu",
+    href: "/admin/setup/import-menu",
     n: 2,
     title: "Import menu",
     hint: "Bulk-add the sellable products",
   },
   {
-    href: "/owner/setup/map-recipes",
+    href: "/admin/setup/map-recipes",
     n: 3,
     title: "Map recipes",
     hint: "Assign which ingredients each product uses",

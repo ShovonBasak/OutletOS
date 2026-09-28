@@ -10,9 +10,9 @@ class CostType(models.TextChoices):
 
 
 class CostCategory(models.Model):
-    organization = models.ForeignKey(
-        "catalog.Organization", on_delete=models.PROTECT, related_name="cost_categories",
-    )
+    """Global, not organization-scoped — every franchise outlet uses the same
+    expense categories (platform-admin managed)."""
+
     name = models.CharField(max_length=80)
     cost_type = models.CharField(max_length=10, choices=CostType.choices)
 

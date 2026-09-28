@@ -1,14 +1,16 @@
 from rest_framework import viewsets
 from rest_framework.exceptions import ValidationError
 
-from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.mixins import OrgScopedQuerySetMixin
+from accounts.permissions import IsAdminOrReadOnly
 from accounts.scoping import resolve_outlet_param
 from .models import CostCategory, Expense
 from .serializers import CostCategorySerializer, ExpenseSerializer
 
 
-class CostCategoryViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
+class CostCategoryViewSet(viewsets.ModelViewSet):
+    # Global, not organization-scoped — every franchise outlet uses the same
+    # expense categories.
     queryset = CostCategory.objects.all()
     serializer_class = CostCategorySerializer
     permission_classes = [IsAdminOrReadOnly]

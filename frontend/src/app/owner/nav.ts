@@ -1,16 +1,14 @@
-// Owner/Admin desktop nav.
-// adminOnly: true  — item/group visible only to ADMIN role.
-// Items without adminOnly are visible to both OWNER and ADMIN.
+// Owner desktop/mobile nav. ADMIN never reaches these screens — it has its
+// own separate section entirely, under /admin/*, with its own layout and
+// nav (see src/app/admin/nav.ts). OWNER is the only role this file serves.
 
 export interface NavItem {
   href: string;
   label: string;
-  adminOnly?: boolean;
 }
 export interface NavGroup {
   group: string;
   items: NavItem[];
-  adminOnly?: boolean;
 }
 
 export const OWNER_NAV: NavGroup[] = [
@@ -50,7 +48,7 @@ export const OWNER_NAV: NavGroup[] = [
   {
     group: "Manage",
     items: [
-      { href: "/owner/sell-corrections", label: "Sell corrections", adminOnly: true },
+      { href: "/owner/sell-corrections", label: "Sell corrections" },
       { href: "/owner/accounts",         label: "Accounts" },
       { href: "/owner/expenses",         label: "Expenses" },
       { href: "/owner/other-income",     label: "Other income" },
@@ -64,39 +62,10 @@ export const OWNER_NAV: NavGroup[] = [
       { href: "/owner/settings/channels",        label: "Sales channels" },
       { href: "/owner/settings/pricing",         label: "Pricing & promos" },
       { href: "/owner/settings/menu-mapping",    label: "Menu mapping" },
-      { href: "/owner/settings/cost-categories", label: "Cost categories" },
-    ],
-  },
-  // Administration group — visible to Admin only
-  {
-    group: "Administration",
-    adminOnly: true,
-    items: [
-      { href: "/owner/products",                         label: "Products & recipes" },
-      { href: "/owner/settings/account-access",          label: "Account access" },
-      { href: "/owner/organizations",                    label: "Organizations" },
-    ],
-  },
-  {
-    group: "Setup",
-    items: [
-      { href: "/owner/setup/extract",      label: "Extract ingredients" },
-      { href: "/owner/setup/import-menu",  label: "Import menu" },
-      { href: "/owner/setup/map-recipes",  label: "Map recipes" },
+      { href: "/owner/settings/account-access",  label: "Account access" },
     ],
   },
 ];
-
-/** Filter nav groups for a given role, dropping adminOnly entries for OWNER. */
-export function navFor(isAdmin: boolean): NavGroup[] {
-  return OWNER_NAV
-    .filter((g) => !g.adminOnly || isAdmin)
-    .map((g) => ({
-      ...g,
-      items: g.items.filter((item) => !item.adminOnly || isAdmin),
-    }))
-    .filter((g) => g.items.length > 0);
-}
 
 // True when pathname is exactly href or is a sub-route under it (requires a
 // "/" boundary so "/owner/stock-in" never matches "/owner/stock-in-history").
@@ -104,7 +73,7 @@ function under(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-// Flattened all items (all roles), longest-href-first so sub-routes resolve correctly.
+// Flattened all items, longest-href-first so sub-routes resolve correctly.
 const FLAT = OWNER_NAV.flatMap((g) => g.items).sort((a, b) => b.href.length - a.href.length);
 
 // Titles for sub-pages that aren't in the sidebar (reached via buttons/hubs).
@@ -113,15 +82,11 @@ const SUBPAGE_TITLES: Array<[string, string]> = [
   ["/owner/reports",   "Reports"],
   ["/owner/more",      "More"],
   ["/owner/profile",   "Profile"],
-  ["/owner/products/edit-recipe", "Edit recipe"],
-  ["/owner/products/add-combo",   "Add combo"],
-  ["/owner/products/add",         "Add product"],
   ["/owner/team/add-outlet",      "Add outlet"],
   ["/owner/settings/outlet",          "Outlet"],
   ["/owner/settings/channels",        "Sales channels"],
   ["/owner/settings/pricing",         "Pricing & promos"],
   ["/owner/settings/menu-mapping",    "Menu mapping"],
-  ["/owner/settings/cost-categories", "Cost categories"],
   ["/owner/settings/account-access",  "Account access"],
 ];
 
@@ -145,16 +110,14 @@ export const OWNER_MOBILE_TABS: MobileTab[] = [
 
 // Map any owner route to the bottom tab that should stay highlighted on mobile.
 const TAB_GROUPS: Array<{ tab: string; prefixes: string[] }> = [
-  // Old bookmarked path — stub redirects to /owner, but keep the tab correct
-  // for the brief render before that fires.
   { tab: "/owner", prefixes: ["/owner/day"] },
   { tab: "/owner/approvals", prefixes: ["/owner/approvals", "/owner/stock-in", "/owner/closings"] },
   {
     tab: "/owner/more",
     prefixes: [
       "/owner/more", "/owner/profile", "/owner/sell-corrections", "/owner/accounts",
-      "/owner/expenses", "/owner/other-income", "/owner/products", "/owner/team", "/owner/analyst",
-      "/owner/settings", "/owner/setup",
+      "/owner/expenses", "/owner/other-income", "/owner/team", "/owner/analyst",
+      "/owner/settings",
       "/owner/reports", "/owner/stock", "/owner/sales", "/owner/sell-history",
       "/owner/stock-in-history", "/owner/settlements", "/owner/pnl", "/owner/packaging",
       "/owner/fryer-oil",

@@ -178,7 +178,7 @@ export default function ProductsPage() {
                   <td>
                     {p.product_type === "SINGLE" && (
                       <Link
-                        href={`/owner/products/edit-recipe/${p.id}`}
+                        href={`/admin/products/edit-recipe/${p.id}`}
                         className="font-mono text-[11px] text-gold-deep underline"
                       >
                         Edit recipe
@@ -189,7 +189,7 @@ export default function ProductsPage() {
                 {isAdmin && (
                   <td>
                     <Link
-                      href={`/owner/products/edit/${p.id}`}
+                      href={`/admin/products/edit/${p.id}`}
                       className="font-mono text-[11px] text-ink-soft underline"
                     >
                       Change price
@@ -267,10 +267,10 @@ export default function ProductsPage() {
       </p>
       {isAdmin && (
         <div className="flex gap-2">
-          <Link href="/owner/products/add" className="btn btn-ghost w-40">
+          <Link href="/admin/products/add" className="btn btn-ghost w-40">
             + Add product
           </Link>
-          <Link href="/owner/setup/map-recipes" className="btn btn-ghost w-40">
+          <Link href="/admin/setup/map-recipes" className="btn btn-ghost w-40">
             Map recipes
           </Link>
         </div>
@@ -310,7 +310,7 @@ export default function ProductsPage() {
         Selling a combo deducts each component from display stock automatically.
       </p>
       {isAdmin && (
-        <Link href="/owner/products/add-combo" className="btn btn-ghost w-40">
+        <Link href="/admin/products/add-combo" className="btn btn-ghost w-40">
           + Add combo
         </Link>
       )}

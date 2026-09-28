@@ -40,7 +40,7 @@ export default function AddProductPage() {
         }),
       });
       // Recipe (which ingredients it's made from) is assigned next.
-      router.push(`/owner/products/edit-recipe/${product.id}`);
+      router.push(`/admin/products/edit-recipe/${product.id}`);
     } catch {
       setError("Could not save product.");
       setSaving(false);
@@ -49,7 +49,7 @@ export default function AddProductPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/owner/products" className="self-start font-mono text-[11px] text-ink-soft">
+      <Link href="/admin/products" className="self-start font-mono text-[11px] text-ink-soft">
         ‹ Back to Products &amp; recipes
       </Link>
 

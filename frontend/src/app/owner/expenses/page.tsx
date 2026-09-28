@@ -47,12 +47,6 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Add-category form
-  const [newCatName, setNewCatName] = useState("");
-  const [newCatType, setNewCatType] = useState<CostCategory["cost_type"]>("ADHOC");
-  const [catSaving, setCatSaving] = useState(false);
-  const [catError, setCatError] = useState<string | null>(null);
-
   const range = rangeFor(period, custom);
 
   async function refreshExpenses() {
@@ -146,24 +140,6 @@ export default function ExpensesPage() {
       await api(`/expenses/${id}/`, { method: "DELETE" });
       await refreshExpenses();
     } catch { setError("Could not delete expense."); }
-  }
-
-  async function saveCategory() {
-    if (!newCatName.trim()) { setCatError("Name is required."); return; }
-    setCatSaving(true); setCatError(null);
-    try {
-      await api("/cost-categories/", { method: "POST", body: JSON.stringify({ name: newCatName.trim(), cost_type: newCatType }) });
-      setNewCatName(""); setNewCatType("ADHOC");
-      await refreshCategories();
-    } catch { setCatError("Could not save category."); }
-    finally { setCatSaving(false); }
-  }
-
-  async function deleteCategory(id: number) {
-    try {
-      await api(`/cost-categories/${id}/`, { method: "DELETE" });
-      await refreshCategories();
-    } catch { setCatError("Cannot delete — category has expenses linked to it."); }
   }
 
   function paidFromLabel(e: Expense): string {
@@ -338,7 +314,8 @@ export default function ExpensesPage() {
         </button>
       </div>
 
-      {/* ── categories ── */}
+      {/* ── categories (view-only — same list for every franchise outlet;
+          add/edit/delete lives in the platform admin's Types console) ── */}
       <div className="flex flex-col gap-3">
         <h2 className="sec">Categories</h2>
         <div className="rounded border border-[#d8cdb0]">
@@ -347,36 +324,13 @@ export default function ExpensesPage() {
               i < categories.length - 1 ? "border-b border-dotted border-[#d8cdb0]" : ""
             }`}>
               <span className="text-ink">{c.name}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-ink-soft capitalize">{c.cost_type.toLowerCase()}</span>
-                <button className="text-chili opacity-50 hover:opacity-100" onClick={() => deleteCategory(c.id)}>✕</button>
-              </div>
+              <span className="text-ink-soft capitalize">{c.cost_type.toLowerCase()}</span>
             </div>
           ))}
           {categories.length === 0 && (
             <p className="px-3 py-3 font-mono text-[11px] text-ink-soft">No categories yet.</p>
           )}
         </div>
-
-        <div className="formgrid">
-          <label className="field">
-            <span className="field-label">New category name</span>
-            <input className="field-input" placeholder="e.g. Utilities" value={newCatName}
-              onChange={(e) => setNewCatName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") saveCategory(); }} />
-          </label>
-          <label className="field">
-            <span className="field-label">Type</span>
-            <select className="field-input" value={newCatType}
-              onChange={(e) => setNewCatType(e.target.value as CostCategory["cost_type"])}>
-              {COST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-          </label>
-        </div>
-        {catError && <p className="font-mono text-[11px] text-chili-deep">{catError}</p>}
-        <button className="btn btn-primary w-44" disabled={catSaving} onClick={saveCategory}>
-          {catSaving ? "Saving…" : "Add category"}
-        </button>
       </div>
     </div>
   );

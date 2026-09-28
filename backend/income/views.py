@@ -1,14 +1,16 @@
 from rest_framework import viewsets
 from rest_framework.exceptions import ValidationError
 
-from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import IsAdminOrReadOnly, IsOwnerOrAdminOrReadOnly
+from accounts.mixins import OrgScopedQuerySetMixin
+from accounts.permissions import IsAdminOrReadOnly
 from accounts.scoping import resolve_outlet_param
 from .models import OtherIncomeCategory, OtherIncome
 from .serializers import OtherIncomeCategorySerializer, OtherIncomeSerializer
 
 
-class OtherIncomeCategoryViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
+class OtherIncomeCategoryViewSet(viewsets.ModelViewSet):
+    # Global, not organization-scoped — every franchise outlet uses the same
+    # other-income categories.
     queryset = OtherIncomeCategory.objects.all()
     serializer_class = OtherIncomeCategorySerializer
     permission_classes = [IsAdminOrReadOnly]

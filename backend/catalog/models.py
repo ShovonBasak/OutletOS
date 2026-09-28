@@ -4,10 +4,13 @@ from django.db import models
 
 
 class Organization(models.Model):
-    """A franchise account. The tenant root: every Outlet — and everything that
-    hangs off catalog data (Product, Ingredient) or finances — belongs to exactly
-    one Organization. Cross-organization access is reserved for the ADMIN
-    (platform-admin) role."""
+    """A franchise account. The tenant root: every Outlet, and everything that
+    hangs off finances, belongs to exactly one Organization. The catalog
+    (Product, Ingredient, Recipe, pricing, cost/income types) is deliberately
+    NOT organization-scoped — every CP Five Star franchise sells the same menu
+    at the same recipe/price, so it's one shared, platform-admin-managed
+    source of truth rather than per-tenant rows. Cross-organization access is
+    reserved for the ADMIN (platform-admin) role."""
 
     name = models.CharField(max_length=120)
     slug = models.SlugField(max_length=120, unique=True)
@@ -61,11 +64,10 @@ class Product(models.Model):
     made from via Recipe.
 
     Selling price is version-tracked in ProductPrice — use active_price() to get
-    the current value instead of a raw field on this model."""
+    the current value instead of a raw field on this model.
 
-    organization = models.ForeignKey(
-        Organization, on_delete=models.PROTECT, related_name="products",
-    )
+    Global, not organization-scoped — see Organization's docstring."""
+
     name = models.CharField(max_length=120)
     category = models.CharField(max_length=80, blank=True)
     product_type = models.CharField(
@@ -131,11 +133,10 @@ class IngredientGroup(models.TextChoices):
 class Ingredient(models.Model):
     """The canonical, internal name for a raw material — one row per real-world
     thing you buy, regardless of what a supplier calls it. Stock (RawStock) and
-    packs (PackDefinition) live here, not on Product."""
+    packs (PackDefinition) live here, not on Product.
 
-    organization = models.ForeignKey(
-        Organization, on_delete=models.PROTECT, related_name="ingredients",
-    )
+    Global, not organization-scoped — see Organization's docstring."""
+
     name = models.CharField(max_length=120)
     # The countable unit recipes are written in — chosen for what's natural in a
     # recipe (e.g. "portion" for mayo, not "bottle"), so recipe lines stay whole.

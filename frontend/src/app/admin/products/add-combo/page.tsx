@@ -68,7 +68,7 @@ export default function AddComboPage() {
           })
         )
       );
-      router.push("/owner/products");
+      router.push("/admin/products");
     } catch {
       setError("Could not save combo.");
       setSaving(false);
@@ -77,7 +77,7 @@ export default function AddComboPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/owner/products" className="self-start font-mono text-[11px] text-ink-soft">
+      <Link href="/admin/products" className="self-start font-mono text-[11px] text-ink-soft">
         ‹ Back to Products &amp; packs
       </Link>
 

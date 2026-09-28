@@ -12,7 +12,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.mixins import OrgScopedQuerySetMixin
-from accounts.permissions import IsOwnerOrAdmin, IsStaffOwnerOrAdmin
+from accounts.permissions import IsOwner, IsStaffOwnerFullAdminReadOnly
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
@@ -70,7 +70,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     serializer_class = StockInRecordSerializer
     pagination_class = StockInListPagination
     org_lookup = "outlet__organization"
-    permission_classes = [IsStaffOwnerOrAdmin]
+    permission_classes = [IsStaffOwnerFullAdminReadOnly]
 
     _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
         "items__ingredient", "items__pack_definition"
@@ -431,7 +431,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
         return Response(self.get_serializer(record).data)
 
-    @action(detail=True, methods=["patch"], url_path="set-date", permission_classes=[IsOwnerOrAdmin])
+    @action(detail=True, methods=["patch"], url_path="set-date", permission_classes=[IsOwner])
     def set_date(self, request, pk=None):
         """Owner/admin correction for a slip date OCR got wrong. Only before
         approval — once approved, stock_in_date has already fed RawStock,
@@ -517,7 +517,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             record.save()
         return record
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
     def approve(self, request, pk=None):
         """Owner approves PENDING → APPROVED; RawStock increments (base units).
 
@@ -620,7 +620,7 @@ class StockInRecordViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
         return Response(self.get_serializer(record).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin])
+    @action(detail=True, methods=["post"], permission_classes=[IsOwner])
     def reject(self, request, pk=None):
         record = self.get_object()
         if record.status != StockInStatus.PENDING:
@@ -938,7 +938,7 @@ class PreparationLogViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = PreparationLog.objects.select_related("product", "outlet")
     serializer_class = PreparationLogSerializer
     org_lookup = "outlet__organization"
-    permission_classes = [IsStaffOwnerOrAdmin]
+    permission_classes = [IsStaffOwnerFullAdminReadOnly]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -1185,7 +1185,7 @@ class OperatingDayViewSet(OrgScopedQuerySetMixin, viewsets.ReadOnlyModelViewSet)
     )
     serializer_class = OperatingDaySerializer
     org_lookup = "outlet__organization"
-    permission_classes = [IsStaffOwnerOrAdmin]
+    permission_classes = [IsStaffOwnerFullAdminReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1446,6 +1446,8 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         """Full recount. Body: {outlet, ingredient, counted_qty, note?}."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
         outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
+        if outlet is None:
+            raise ValidationError("Could not resolve an outlet for this request.")
         obj = self._record(
             outlet,
             ingredient,
@@ -1469,6 +1471,8 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         physical bundle is still 100 pieces)."""
         ingredient = Ingredient.objects.get(pk=request.data["ingredient"])
         outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
+        if outlet is None:
+            raise ValidationError("Could not resolve an outlet for this request.")
         prev = (
             PeriodicStockCheck.objects.filter(outlet=outlet, ingredient=ingredient)
             .order_by("-checked_at")
@@ -1521,8 +1525,11 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         Returns the latest counted_qty when a check exists, otherwise derives
         the quantity from all approved stock-in records (bootstrap case)."""
         outlet = _outlet_obj(resolve_outlet_param(request))
+        if outlet is None:
+            raise ValidationError(
+                "Could not resolve an outlet — pick an organization first."
+            )
         ingredients = Ingredient.objects.filter(
-            organization_id=outlet.organization_id,
             tracking_mode=TrackingMode.PERIODIC_COUNT, is_active=True,
         ).prefetch_related("aliases")
         # Latest check per ingredient (Python dedup — SQLite-safe, no DISTINCT ON).

@@ -12,7 +12,10 @@ export default function Home() {
     if (loading) return;
     if (!user) {
       router.replace("/login");
-    } else if (user.role === "OWNER" || user.role === "ADMIN") {
+    } else if (user.role === "ADMIN") {
+      // ADMIN has its own section entirely, under /admin/* — never /owner/*.
+      router.replace("/admin/organizations");
+    } else if (user.role === "OWNER") {
       // Day view is the most-used owner screen — it's the /owner route itself.
       router.replace("/owner");
     } else {

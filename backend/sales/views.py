@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import IsAdminOrReadOnly
+from accounts.permissions import IsOwnerOrReadOnly
 from catalog.models import Product
 from .models import (
     ChannelMenuMap,
@@ -40,7 +40,7 @@ def _recompute_channel_lines(channel):
 class SalesChannelViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = SalesChannel.objects.all()
     serializer_class = SalesChannelSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("slim") == "1":
@@ -66,19 +66,19 @@ class SalesChannelViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
 class ChannelPromotionViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = ChannelPromotion.objects.all()
     serializer_class = ChannelPromotionSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
 
 class OrderLevelOfferViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = OrderLevelOffer.objects.all()
     serializer_class = OrderLevelOfferSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
 
 class ChannelMenuMapViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ChannelMenuMap.objects.select_related("channel", "product")
     serializer_class = ChannelMenuMapSerializer
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
     org_lookup = "channel__organization"
 
     def get_queryset(self):
@@ -99,10 +99,9 @@ def price_resolve(request):
     except (KeyError, Product.DoesNotExist, SalesChannel.DoesNotExist):
         return Response({"detail": "product and channel query params required."}, status=400)
     user = request.user
-    if not user.is_admin and (
-        product.organization_id != user.organization_id
-        or channel.organization_id != user.organization_id
-    ):
+    # Product is global (shared catalog) — only the channel needs the
+    # cross-org IDOR check now.
+    if not user.is_admin and channel.organization_id != user.organization_id:
         return Response({"detail": "Not found."}, status=404)
     price, basis = resolve_price(product, channel)
     return Response({"product": product.id, "channel": channel.id, "price": price, "basis": basis})

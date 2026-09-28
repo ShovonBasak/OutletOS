@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import type { Organization, Paginated } from "@/lib/types";
 
 function fieldCls(err?: boolean) {
@@ -18,13 +17,17 @@ const EMPTY_FORM = {
 };
 
 export default function OrganizationsPage() {
-  const { selectedOrgId, selectOrg } = useAuth();
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<{ name: string; address: string; is_active: boolean } | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -71,6 +74,45 @@ export default function OrganizationsPage() {
     }
   }
 
+  function startEdit(org: Organization) {
+    setEditingId(org.id);
+    setEditDraft({ name: org.name, address: org.address ?? "", is_active: org.is_active });
+    setEditError(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDraft(null);
+    setEditError(null);
+  }
+
+  async function saveEdit(id: number) {
+    if (!editDraft) return;
+    if (!editDraft.name.trim()) {
+      setEditError("Organization name is required.");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const updated = await api<Organization>(`/organizations/${id}/`, {
+        method: "PATCH",
+        body: JSON.stringify(editDraft),
+      });
+      setOrgs((prev) => prev.map((o) => (o.id === id ? updated : o)));
+      cancelEdit();
+    } catch (e) {
+      const body = e instanceof ApiError ? e.body : null;
+      let msg = "Could not update organization.";
+      if (body && typeof body === "object" && "detail" in body) {
+        msg = String((body as { detail: unknown }).detail);
+      }
+      setEditError(msg);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <p className="font-mono text-[11px] text-ink-soft">
@@ -82,33 +124,76 @@ export default function OrganizationsPage() {
         <p className="font-mono text-[11px] text-ink-soft">Loading…</p>
       ) : (
         <div className="flex flex-col gap-3">
-          {orgs.map((org) => (
-            <div key={org.id} className="ticket flex flex-col gap-2 p-4">
-              <div className="flex items-center justify-between">
-                <span className="font-display text-[14px] font-bold text-ink">{org.name}</span>
-                <span
-                  className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-medium uppercase tracking-widest ${
-                    org.is_active
-                      ? "border border-green/20 bg-green/10 text-green"
-                      : "border border-chili/20 bg-chili/10 text-chili"
-                  }`}
-                >
-                  {org.is_active ? "Active" : "Inactive"}
-                </span>
+          {orgs.map((org) =>
+            editingId === org.id && editDraft ? (
+              <div key={org.id} className="ticket flex flex-col gap-2 p-4">
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[10px] text-ink-soft">Organization name</span>
+                  <input
+                    className={fieldCls()}
+                    value={editDraft.name}
+                    onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-[10px] text-ink-soft">Address</span>
+                  <input
+                    className={fieldCls()}
+                    value={editDraft.address}
+                    onChange={(e) => setEditDraft({ ...editDraft, address: e.target.value })}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={editDraft.is_active}
+                    onChange={(e) => setEditDraft({ ...editDraft, is_active: e.target.checked })}
+                  />
+                  <span className="font-mono text-[11px] text-ink">Active</span>
+                </label>
+                {editError && <p className="font-mono text-[11px] text-chili-deep">{editError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    className="btn btn-primary"
+                    disabled={editSaving}
+                    onClick={() => saveEdit(org.id)}
+                  >
+                    {editSaving ? "Saving…" : "Save"}
+                  </button>
+                  <button className="btn" disabled={editSaving} onClick={cancelEdit}>
+                    Cancel
+                  </button>
+                </div>
               </div>
-              <div className="font-mono text-[11px] text-ink-soft">
-                {org.slug} · {org.outlet_count} outlet{org.outlet_count === 1 ? "" : "s"}
-              </div>
-              <div className="flex gap-2">
+            ) : (
+              <div key={org.id} className="ticket flex flex-col gap-2 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-display text-[14px] font-bold text-ink">{org.name}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 font-mono text-[9px] font-medium uppercase tracking-widest ${
+                      org.is_active
+                        ? "border border-green/20 bg-green/10 text-green"
+                        : "border border-chili/20 bg-chili/10 text-chili"
+                    }`}
+                  >
+                    {org.is_active ? "Active" : "Inactive"}
+                  </span>
+                </div>
+                <div className="font-mono text-[11px] text-ink-soft">
+                  {org.slug} · {org.outlet_count} outlet{org.outlet_count === 1 ? "" : "s"}
+                  {org.address && ` · ${org.address}`}
+                </div>
                 <button
-                  className={`btn ${selectedOrgId === org.id ? "btn-primary" : ""} text-[11px]`}
-                  onClick={() => selectOrg(selectedOrgId === org.id ? null : org.id, org.name)}
+                  className="font-mono text-[11px] text-gold-deep underline self-start"
+                  onClick={() => startEdit(org)}
                 >
-                  {selectedOrgId === org.id ? "Viewing this organization" : "View / manage"}
+                  Edit
                 </button>
               </div>
-            </div>
-          ))}
+            )
+          )}
           {orgs.length === 0 && (
             <p className="font-mono text-[11px] text-ink-soft">No organizations yet.</p>
           )}

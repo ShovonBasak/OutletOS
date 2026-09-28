@@ -25,7 +25,9 @@ def send_push_to_owners(title: str, body: str, url: str = "/owner/stock-in") -> 
 
     from .models import PushSubscription, Role
 
-    subs = list(PushSubscription.objects.filter(user__role__in=[Role.OWNER, Role.ADMIN]).select_related("user"))
+    # ADMIN no longer handles tenant-specific approvals (stock-in etc.), so
+    # it shouldn't be paged for them — only OWNER.
+    subs = list(PushSubscription.objects.filter(user__role=Role.OWNER).select_related("user"))
     if not subs:
         return
 

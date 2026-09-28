@@ -7,7 +7,7 @@ import { Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { useAuth, useRequireRole } from "@/lib/auth";
 import {
-  navFor,
+  OWNER_NAV,
   OWNER_MOBILE_TABS,
   activeGroupFor,
   mobileTabFor,
@@ -16,12 +16,10 @@ import {
 } from "./nav";
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
-  const { loading, isAdmin } = useRequireRole(["OWNER", "ADMIN"]);
-  const { user, logout, isPlatformAdmin, selectedOrgId, selectedOrgName, selectOrg } = useAuth();
+  const { loading } = useRequireRole("OWNER");
+  const { user, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-
-  const nav = navFor(isAdmin);
 
   // Collapsible accordion: groups start collapsed, the active group auto-opens.
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -31,12 +29,9 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
   }, [pathname]);
 
   // First-login gate: an Owner whose organization hasn't finished the
-  // onboarding wizard is routed there before reaching anything else. ADMIN
-  // (platform admin, no organization of their own) is never gated.
-  const needsOnboarding =
-    !loading && !isAdmin && !!user && !user.organization_onboarding_complete;
-  const onOnboardingFlow =
-    pathname.startsWith("/owner/onboarding") || pathname.startsWith("/owner/setup");
+  // onboarding wizard is routed there before reaching anything else.
+  const needsOnboarding = !loading && !!user && !user.organization_onboarding_complete;
+  const onOnboardingFlow = pathname.startsWith("/owner/onboarding");
 
   useEffect(() => {
     if (needsOnboarding && !onOnboardingFlow) {
@@ -79,7 +74,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
             <span className="font-display text-[13px] font-bold text-gold">{user?.outlet_name ?? "CP FIVE STAR"}</span>
           </div>
           <nav className="flex flex-1 flex-col overflow-y-auto">
-            {nav.map((g) =>
+            {OWNER_NAV.map((g) =>
               g.group === "Overview" ? (
                 // Overview items are plain top-level links, not collapsible.
                 g.items.map((n) => (
@@ -128,18 +123,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="desktoptop hidden md:flex">
             <h1>{titleFor(pathname)}</h1>
-            {isPlatformAdmin && selectedOrgId ? (
-              <button
-                type="button"
-                onClick={() => selectOrg(null)}
-                className="date font-mono text-[10px] uppercase tracking-widest text-chili"
-                title="Viewing this organization's data — click to return to all organizations"
-              >
-                Viewing: {selectedOrgName ?? `Org #${selectedOrgId}`} ✕
-              </button>
-            ) : (
-              <div className="date">{user?.outlet_name ?? "Outlet"}</div>
-            )}
+            <div className="date">{user?.outlet_name ?? "Outlet"}</div>
           </div>
           <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-6">{children}</main>
         </div>

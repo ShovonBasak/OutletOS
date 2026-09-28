@@ -31,7 +31,6 @@ class ApproveStockInTests(APITestCase):
         )
         self.ingredient = Ingredient.objects.create(
             name="Test Ingredient", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
-            organization=self.org,
         )
 
     def _client_as(self, user):

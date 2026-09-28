@@ -9,10 +9,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import (
-    IsAdmin, IsAdminOrReadOnly, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly,
-)
+from accounts.mixins import OrganizationOwnedMixin
+from accounts.permissions import IsAdmin, IsAdminOrReadOnly, IsOwner, IsOwnerOrReadOnly
 from .models import (
     ComboComponent,
     Ingredient,
@@ -104,7 +102,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["post"], url_path="complete-onboarding",
-            permission_classes=[IsOwnerOrAdmin])
+            permission_classes=[IsOwner])
     def complete_onboarding(self, request, pk=None):
         """Marks the caller's own organization as done with the first-login
         onboarding wizard (Outlet -> Accounts -> Staff). Deliberately scoped to
@@ -229,10 +227,10 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
 class OutletViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     queryset = Outlet.objects.all()
     serializer_class = OutletSerializer
-    permission_classes = [IsOwnerOrAdminOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
 
-class ProductViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
+class ProductViewSet(viewsets.ModelViewSet):
     # Full prefetch used for detail/create/update and for ?expand=full list requests.
     queryset = Product.objects.all().prefetch_related(
         "components", "recipes__ingredient", "product_recipe_components__component_product", "prices"
@@ -274,8 +272,6 @@ class ProductViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         else:
             # Slim list: skip heavy nested prefetches, only fetch prices for selling_price.
             qs = Product.objects.all().prefetch_related("prices")
-
-        qs = self.scope_queryset(qs)
 
         if not prep:
             if not (self.request.user.is_owner_or_admin and p.get("include_inactive") == "1"):
@@ -381,8 +377,7 @@ class ProductViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
             )
 
         known_names = list(
-            self.scope_queryset(Product.objects.filter(is_active=True))
-            .values_list("name", flat=True)
+            Product.objects.filter(is_active=True).values_list("name", flat=True)
         )
 
         images = []
@@ -405,20 +400,16 @@ class ProductViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
             return Response({"detail": f"Extraction failed: {exc}"}, status=500)
 
 
-class ComboComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class ComboComponentViewSet(viewsets.ModelViewSet):
     queryset = ComboComponent.objects.select_related("combo_product", "component_product")
     serializer_class = ComboComponentSerializer
     permission_classes = [IsAdminOrReadOnly]
-    org_lookup = "combo_product__organization"
 
 
-class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
+class IngredientViewSet(viewsets.ModelViewSet):
     queryset = Ingredient.objects.prefetch_related("aliases", "pack_definitions")
     serializer_class = IngredientSerializer
-    # Owner setup flow (Extract Ingredients) edits ingredients directly —
-    # was IsAdminOrReadOnly (platform-admin only), which 403'd every real
-    # OWNER trying to save a name/unit/tracking-mode correction here.
-    permission_classes = [IsOwnerOrAdminOrReadOnly]
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset().filter(is_active=True)
@@ -455,15 +446,11 @@ class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
             raise ValidationError("Attach at least one slip image (field 'slips').")
 
         known_names = list(
-            self.scope_queryset(Ingredient.objects.filter(is_active=True))
-            .values_list("name", flat=True)
+            Ingredient.objects.filter(is_active=True).values_list("name", flat=True)
         )
-        org = self.resolve_organization()
         known_aliases = list(
-            SupplierProductAlias.objects.filter(
-                is_active=True, ingredient__organization=org
-            ).values_list("alias_text", flat=True)
-        ) if org else []
+            SupplierProductAlias.objects.filter(is_active=True).values_list("alias_text", flat=True)
+        )
         all_known = list({*known_names, *known_aliases})
 
         images = [f.read() for f in files]
@@ -494,17 +481,12 @@ class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         Body: {items:[{name, base_unit, tracking_mode, pieces_per_pack?,
         cost_per_pack?, alias?}]}. Each row also seeds a PackDefinition (when a
         pack yield is given) and a SupplierProductAlias (the slip wording)."""
-        org = self.resolve_organization()
-        if org is None:
-            raise ValidationError("Could not resolve an organization for this request.")
-
         created_ids = []
         for item in request.data.get("items", []):
             name = (item.get("name") or "").strip()
             if not name:
                 continue
             ingredient, _ = Ingredient.objects.get_or_create(
-                organization=org,
                 name=name,
                 defaults={
                     "base_unit": (item.get("base_unit") or "piece").strip() or "piece",
@@ -534,13 +516,12 @@ class IngredientViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         return Response(IngredientSerializer(ingredients, many=True).data, status=201)
 
 
-class SupplierProductAliasViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class SupplierProductAliasViewSet(viewsets.ModelViewSet):
     queryset = SupplierProductAlias.objects.select_related("ingredient")
     serializer_class = SupplierProductAliasSerializer
     # Written from the same Extract Ingredients save flow as IngredientViewSet
     # above — same OWNER-lockout bug, same fix.
-    permission_classes = [IsOwnerOrAdminOrReadOnly]
-    org_lookup = "ingredient__organization"
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -550,14 +531,13 @@ class SupplierProductAliasViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet)
         return qs
 
 
-class PackDefinitionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class PackDefinitionViewSet(viewsets.ModelViewSet):
     queryset = PackDefinition.objects.select_related("ingredient")
     serializer_class = PackDefinitionSerializer
     # "pieces_per_pack" is explicitly an Owner-editable field on the Extract
     # Ingredients screen (see CLAUDE.md's Owner setup flow) — same fix as
     # IngredientViewSet/SupplierProductAliasViewSet above.
-    permission_classes = [IsOwnerOrAdminOrReadOnly]
-    org_lookup = "ingredient__organization"
+    permission_classes = [IsAdminOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -577,11 +557,10 @@ class PackDefinitionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         serializer.save()
 
 
-class RecipeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class RecipeViewSet(viewsets.ModelViewSet):
     queryset = Recipe.objects.select_related("product", "ingredient")
     serializer_class = RecipeSerializer
     permission_classes = [IsAdminOrReadOnly]
-    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -591,11 +570,10 @@ class RecipeViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         return qs
 
 
-class RecipeProductComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class RecipeProductComponentViewSet(viewsets.ModelViewSet):
     queryset = RecipeProductComponent.objects.select_related("product", "component_product")
     serializer_class = RecipeProductComponentSerializer
     permission_classes = [IsAdminOrReadOnly]
-    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -605,7 +583,7 @@ class RecipeProductComponentViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSe
         return qs
 
 
-class ProductPriceViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+class ProductPriceViewSet(viewsets.ModelViewSet):
     """Direct CRUD on individual ProductPrice rows.
 
     Use POST /products/{id}/set-price/ for the normal "change price going forward"
@@ -616,7 +594,6 @@ class ProductPriceViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = ProductPrice.objects.select_related("product", "changed_by").order_by("-effective_from")
     serializer_class = ProductPriceSerializer
     permission_classes = [IsAdminOrReadOnly]
-    org_lookup = "product__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()

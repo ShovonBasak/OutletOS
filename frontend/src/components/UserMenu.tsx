@@ -71,7 +71,7 @@ function Snackbar({ text, onDone }: { text: string; onDone: () => void }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function UserMenu() {
-  const { user, logout, setUser, isOwnerOrAdmin, actingAsStaff, enterStaffView } = useAuth();
+  const { user, logout, setUser, isOwner, actingAsStaff, enterStaffView } = useAuth();
   const router = useRouter();
   const [sheet, setSheet] = useState<Sheet>("closed");
   const [toast, setToast] = useState<string | null>(null);
@@ -260,7 +260,7 @@ export function UserMenu() {
               <span className="text-ink-soft/40">›</span>
             </button>
 
-            {isOwnerOrAdmin && !actingAsStaff && (
+            {isOwner && !actingAsStaff && (
               <button
                 onClick={() => {
                   enterStaffView();

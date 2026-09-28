@@ -49,10 +49,10 @@ class CashSyncOnSubmitTests(APITestCase):
             name="Foodi", settlement_type=SettlementType.COLLECTED_AT_OUTLET, organization=self.org,
         )
         self.product_a = Product.objects.create(
-            name="Test Item A", requires_preparation=False, organization=self.org,
+            name="Test Item A", requires_preparation=False,
         )
         self.product_b = Product.objects.create(
-            name="Test Item B", requires_preparation=False, organization=self.org,
+            name="Test Item B", requires_preparation=False,
         )
         self.closing = DailyClosing.objects.create(
             outlet=self.outlet, closing_date=datetime.date(2026, 1, 15), staff=self.staff,

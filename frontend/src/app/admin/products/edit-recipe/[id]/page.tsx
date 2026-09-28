@@ -145,7 +145,7 @@ export default function EditRecipe() {
         <button className="btn btn-primary w-40" disabled={busy || (rows.length === 0 && compRows.length === 0)} onClick={save}>
           {busy ? "Saving…" : "Save quantities"}
         </button>
-        <Link href="/owner/setup/map-recipes" className="btn btn-ghost w-40">
+        <Link href="/admin/setup/map-recipes" className="btn btn-ghost w-40">
           Map recipes
         </Link>
       </div>

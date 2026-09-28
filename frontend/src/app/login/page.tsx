@@ -22,8 +22,10 @@ export default function LoginPage() {
     try {
       const user = await login(phone, password);
       setUser(user);
+      // ADMIN has its own section entirely, under /admin/* — never /owner/*.
+      if (user.role === "ADMIN") router.replace("/admin/organizations");
       // Day view is the most-used owner screen — it's the /owner route itself.
-      if (user.role === "OWNER" || user.role === "ADMIN") router.replace("/owner");
+      else if (user.role === "OWNER") router.replace("/owner");
       else router.replace("/staff");
     } catch {
       setError("Invalid phone or password.");

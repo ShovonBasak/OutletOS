@@ -66,10 +66,10 @@ class OutletAdmin(admin.ModelAdmin):
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = [
-        "name", "organization", "category", "product_type", "requires_preparation",
+        "name", "category", "product_type", "requires_preparation",
         "current_price", "is_active",
     ]
-    list_filter = ["organization", "product_type", "requires_preparation", "is_active", "category"]
+    list_filter = ["product_type", "requires_preparation", "is_active", "category"]
     search_fields = ["name"]
     inlines = [ProductPriceInline, RecipeInline, RecipeProductComponentInline, ComboComponentInline]
 
@@ -88,8 +88,8 @@ class ProductPriceAdmin(admin.ModelAdmin):
 
 @admin.register(Ingredient)
 class IngredientAdmin(admin.ModelAdmin):
-    list_display = ["name", "organization", "base_unit", "tracking_mode", "is_active"]
-    list_filter = ["organization", "tracking_mode", "is_active"]
+    list_display = ["name", "base_unit", "tracking_mode", "is_active"]
+    list_filter = ["tracking_mode", "is_active"]
     search_fields = ["name"]
     inlines = [PackDefinitionInline, SupplierProductAliasInline]
 

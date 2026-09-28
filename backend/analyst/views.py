@@ -26,7 +26,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.permissions import IsOwnerOrAdmin
 from .context import build_system_prompt
 from .models import AnalystConversation
 from .tools import TOOL_SCHEMAS, execute_tool
@@ -119,9 +118,12 @@ def _normalize_phone(raw: str) -> str:
 def _find_owner(from_phone: str):
     from accounts.models import Role, User
     suffix = _normalize_phone(from_phone)[-11:]  # Bangladesh: 11-digit local format
+    # ADMIN is the cross-org platform role — it has no outlet/organization
+    # context of its own, so it can't be "the owner" for a tenant's
+    # WhatsApp order-planning conversation.
     return User.objects.filter(
         phone__endswith=suffix,
-        role__in=[Role.OWNER, Role.ADMIN],
+        role=Role.OWNER,
         is_active=True,
     ).first()
 

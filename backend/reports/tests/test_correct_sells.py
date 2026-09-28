@@ -54,7 +54,6 @@ class CorrectSellsCashStockTests(APITestCase):
         )
 
         self.ingredient = Ingredient.objects.create(
-            organization=self.org,
             name="Raw Rice", base_unit="portion", tracking_mode=TrackingMode.RECIPE_LINKED,
         )
         PackDefinition.objects.create(
@@ -62,7 +61,7 @@ class CorrectSellsCashStockTests(APITestCase):
             cost_per_pack=Decimal("100"), effective_from=datetime.date(2026, 1, 1),
         )
         self.product = Product.objects.create(
-            organization=self.org, name="Rice", requires_preparation=False,
+            name="Rice", requires_preparation=False,
         )
         Recipe.objects.create(product=self.product, ingredient=self.ingredient, quantity_per_unit=1)
         ProductPrice.objects.create(
@@ -228,11 +227,9 @@ class CorrectSellsCashStockTests(APITestCase):
         one. Only a genuinely multi-ingredient product with no designated
         primary ingredient has nothing sensible to show."""
         # Single-ingredient, prepared — must still show a pack size.
-        prepped = Product.objects.create(
-            organization=self.org, name="Fried Burger", requires_preparation=True,
-        )
+        prepped = Product.objects.create(name="Fried Burger", requires_preparation=True)
         prepped_ing = Ingredient.objects.create(
-            organization=self.org, name="Bun", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
+            name="Bun", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
         )
         Recipe.objects.create(product=prepped, ingredient=prepped_ing, quantity_per_unit=1)
         PackDefinition.objects.create(
@@ -250,11 +247,9 @@ class CorrectSellsCashStockTests(APITestCase):
         prepped_line.save()
 
         # Multi-ingredient, no designated primary — nothing sensible to show.
-        combo = Product.objects.create(
-            organization=self.org, name="Burger Combo", requires_preparation=True,
-        )
+        combo = Product.objects.create(name="Burger Combo", requires_preparation=True)
         fries_ing = Ingredient.objects.create(
-            organization=self.org, name="Fries", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
+            name="Fries", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
         )
         Recipe.objects.create(product=combo, ingredient=prepped_ing, quantity_per_unit=1)
         Recipe.objects.create(product=combo, ingredient=fries_ing, quantity_per_unit=1)

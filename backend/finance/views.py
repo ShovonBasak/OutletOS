@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.mixins import OrganizationOwnedMixin, OrgScopedQuerySetMixin
-from accounts.permissions import IsAdmin, IsOwnerOrAdmin, IsOwnerOrAdminOrReadOnly
+from accounts.permissions import IsAdmin, IsOwner, IsOwnerFullAdminReadOnly
 from accounts.scoping import resolve_organization_id
 from . import services
 from .models import (
@@ -36,7 +36,7 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
             return [IsAuthenticated()]
-        return [IsOwnerOrAdmin()]
+        return [IsOwner()]
 
     def get_queryset(self):
         qs = self.scope_queryset(FinancialAccount.objects.all())
@@ -76,21 +76,21 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
             # against the OLD opening_balance — the whole chain needs redoing.
             services.rebuild_account_balances(account.id)
 
-    @action(detail=False, methods=["get"], permission_classes=[IsOwnerOrAdmin])
+    @action(detail=False, methods=["get"], permission_classes=[IsOwnerFullAdminReadOnly])
     def summary(self, request):
         """All active accounts with current balances — owner dashboard."""
         accounts = self.scope_queryset(FinancialAccount.objects.filter(is_active=True))
         data = FinancialAccountSerializer(accounts, many=True).data
         return Response(data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsOwnerOrAdmin], url_path="recompute-balances")
+    @action(detail=True, methods=["post"], permission_classes=[IsOwner], url_path="recompute-balances")
     def recompute_balances(self, request, pk=None):
-        """Owner/admin self-service repair — full replay from opening_balance.
+        """Owner self-service repair — full replay from opening_balance.
         Idempotent; safe to run any time. Returns how many rows actually changed."""
         result = services.rebuild_account_balances(pk)
         return Response(result)
 
-    @action(detail=False, methods=["post"], permission_classes=[IsOwnerOrAdmin], url_path="create-defaults")
+    @action(detail=False, methods=["post"], permission_classes=[IsOwner], url_path="create-defaults")
     def create_defaults(self, request):
         """Onboarding wizard step: seed the three default accounts every new
         organization needs — "Owner Cash", "Shop Cash" (primary), "Supplier
@@ -133,7 +133,9 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
 
 class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """
-    Read/create for owner+admin; destroy restricted to admin only.
+    Read/write for owner; admin reads for support. destroy is the one
+    exception — kept admin-only as an audit safety net, independent of the
+    tenant's own owner.
     Expense/transfer/capital actions auto-create their transactions elsewhere.
     """
     queryset = AccountTransaction.objects.select_related("account", "entered_by")
@@ -143,7 +145,7 @@ class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == "destroy":
             return [IsAdmin()]
-        return [IsOwnerOrAdmin()]
+        return [IsOwnerFullAdminReadOnly()]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -174,7 +176,7 @@ class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 class AccountTransferViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = AccountTransfer.objects.select_related("from_account", "to_account", "entered_by")
     serializer_class = AccountTransferSerializer
-    permission_classes = [IsOwnerOrAdmin]
+    permission_classes = [IsOwnerFullAdminReadOnly]
     org_lookup = "from_account__organization"
 
     def get_queryset(self):
@@ -207,7 +209,7 @@ class AccountTransferViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 class CapitalTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = CapitalTransaction.objects.select_related("account", "entered_by")
     serializer_class = CapitalTransactionSerializer
-    permission_classes = [IsOwnerOrAdmin]
+    permission_classes = [IsOwnerFullAdminReadOnly]
     org_lookup = "account__organization"
 
     def get_queryset(self):
@@ -240,7 +242,7 @@ class CapitalTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 class AccountBalanceCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     queryset = AccountBalanceCheck.objects.select_related("account", "checked_by")
     serializer_class = AccountBalanceCheckSerializer
-    permission_classes = [IsOwnerOrAdmin]
+    permission_classes = [IsOwnerFullAdminReadOnly]
     org_lookup = "account__organization"
 
     def perform_create(self, serializer):
@@ -454,7 +456,7 @@ class AccountRoleAccessViewSet(viewsets.ModelViewSet):
     DELETE /account-role-access/{id}/ — remove a mapping
     """
     serializer_class = AccountRoleAccessSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsOwnerFullAdminReadOnly]
     queryset = AccountRoleAccess.objects.select_related("account").all()
 
     def get_queryset(self):

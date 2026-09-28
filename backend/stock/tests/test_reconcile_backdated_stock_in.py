@@ -29,7 +29,6 @@ class ReconcileBackdatedStockInTests(TestCase):
         self.user = User.objects.create_user(phone="01700000000", password="x")
         self.ingredient = Ingredient.objects.create(
             name="Test Ingredient", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
-            organization=self.org,
         )
         self.pack = PackDefinition.objects.create(
             ingredient=self.ingredient, pieces_per_pack=Decimal("10"),
@@ -114,7 +113,6 @@ class ReconcileBackdatedStockInTests(TestCase):
     def test_periodic_count_ingredient_skipped(self):
         periodic = Ingredient.objects.create(
             name="Periodic Ingredient", base_unit="piece", tracking_mode=TrackingMode.PERIODIC_COUNT,
-            organization=self.org,
         )
         record = StockInRecord.objects.create(
             outlet=self.outlet, stock_in_date=self.day_n.date, submitted_by=self.user,

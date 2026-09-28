@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import type { Outlet, Paginated } from "@/lib/types";
 
 export default function OutletSettingsPage() {
-  const { isAdmin } = useAuth();
+  const { isOwner } = useAuth();
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [draft, setDraft] = useState<{ name: string; address: string } | null>(null);
   const [outletSaving, setOutletSaving] = useState(false);
@@ -54,7 +54,7 @@ export default function OutletSettingsPage() {
       <section className="flex flex-col gap-3">
         <h2 className="sec">Outlet details</h2>
         {draft ? (
-          isAdmin ? (
+          isOwner ? (
             <div className="flex flex-col gap-2">
               <label className="field">
                 <span className="field-label">Name</span>
@@ -102,8 +102,8 @@ export default function OutletSettingsPage() {
               label="Date selection"
               description="Allow staff to choose which date to log operations for (useful for back-entering a missed day)."
               checked={outlet.allow_staff_date_selection}
-              disabled={flagSaving || !isAdmin}
-              onChange={(v) => isAdmin && toggleFlag("allow_staff_date_selection", v)}
+              disabled={flagSaving || !isOwner}
+              onChange={(v) => isOwner && toggleFlag("allow_staff_date_selection", v)}
             />
           </div>
         ) : (

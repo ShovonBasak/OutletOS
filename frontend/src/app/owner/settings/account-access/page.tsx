@@ -26,7 +26,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export default function AccountAccessPage() {
-  const { isAdmin } = useAuth();
+  const { isOwner, isAdmin } = useAuth();
   const [accounts, setAccounts] = useState<FinancialAccountName[]>([]);
   const [access, setAccess] = useState<RoleAccess[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -51,6 +51,7 @@ export default function AccountAccessPage() {
   }
 
   async function toggle(role: string, accountId: number) {
+    if (!isOwner) return;
     const key = `${role}-${accountId}`;
     setBusy(key);
     try {
@@ -70,8 +71,8 @@ export default function AccountAccessPage() {
     }
   }
 
-  if (!isAdmin) {
-    return <p className="font-mono text-xs text-ink-soft">Admin access required.</p>;
+  if (!isOwner && !isAdmin) {
+    return <p className="font-mono text-xs text-ink-soft">Owner access required.</p>;
   }
 
   const grouped = accounts.reduce<Record<string, FinancialAccountName[]>>((acc, a) => {
@@ -89,6 +90,11 @@ export default function AccountAccessPage() {
           Restrict which accounts each role can select when logging expenses or income.
           When no accounts are pinned for a role, all active accounts are available.
         </p>
+        {!isOwner && (
+          <p className="mt-1 font-mono text-[10px] text-chili">
+            View-only — sign in as the Owner to change this.
+          </p>
+        )}
       </div>
 
       {/* Role tabs */}
@@ -135,11 +141,11 @@ export default function AccountAccessPage() {
               return (
                 <button
                   key={a.id}
-                  disabled={busy === key}
+                  disabled={busy === key || !isOwner}
                   onClick={() => toggle(activeRole, a.id)}
                   className={`flex w-full items-center justify-between border-b border-dotted border-[#e8e0cc] px-4 py-3 text-left transition-colors last:border-0 ${
                     enabled ? "bg-leaf/5 active:bg-leaf/10" : "active:bg-paper-dim"
-                  } ${!a.is_active ? "opacity-50" : ""}`}
+                  } ${!a.is_active ? "opacity-50" : ""} ${!isOwner ? "cursor-default" : ""}`}
                 >
                   <div className="flex flex-col">
                     <span className="font-mono text-sm text-ink">{a.name}</span>

@@ -155,7 +155,7 @@ export default function EditProductPricePage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link href="/owner/products" className="self-start font-mono text-[11px] text-ink-soft">
+      <Link href="/admin/products" className="self-start font-mono text-[11px] text-ink-soft">
         ‹ Back to Products &amp; packs
       </Link>
 
