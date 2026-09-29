@@ -69,11 +69,26 @@ def previous_operating_day(outlet, on_date):
     )
 
 
+def previous_closing_day(outlet, on_date):
+    """Like previous_operating_day, but skips any day that has no linked
+    DailyClosing — e.g. one force-closed via "Skip this day" because the
+    outlet never actually operated. Carry-forward needs the last day that
+    genuinely has closing stock counts, not just the nearest OperatingDay row."""
+    return (
+        OperatingDay.objects.filter(
+            outlet=outlet, date__lt=on_date, daily_closing_id__isnull=False,
+        )
+        .order_by("-date")
+        .first()
+    )
+
+
 def carry_forward_candidates(operating_day):
-    """Yesterday's closing stock counts with remains_pieces > 0 — the products
-    the carry-forward step should surface for this operating day."""
-    prev = previous_operating_day(operating_day.outlet, operating_day.date)
-    if not prev or not prev.daily_closing_id:
+    """The last closed day's stock counts with remains_pieces > 0 — the
+    products the carry-forward step should surface for this operating day.
+    Skips over any intervening days that were skipped/never operated."""
+    prev = previous_closing_day(operating_day.outlet, operating_day.date)
+    if not prev:
         return []
     return list(
         prev.daily_closing.stock_counts.select_related("product").filter(

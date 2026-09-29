@@ -1,13 +1,17 @@
 """
 Fix a missing carry-forward for a given operating day.
 
-The carry-forward step may have run and confirmed 0 items when
-OperatingDay.daily_closing_id was NULL for the previous day, causing
-carry_forward_candidates() to return []. This command:
+The carry-forward step may have found no candidates because either:
+  a) the immediate previous day's OperatingDay had an unlinked DailyClosing, or
+  b) the immediate previous day never operated at all (force-closed via
+     "Skip this day") and carry_forward_candidates() stopped there instead of
+     reaching further back to the last day that actually has a closing.
 
-  1. Links the previous day's OperatingDay to its DailyClosing (if unlinked).
-  2. Creates the missing CARRIED_FORWARD PreparationLog rows for the target date.
-  3. Updates DisplayStock for each carried-forward product.
+This command:
+  1. Links the immediate previous day's OperatingDay to its DailyClosing (if unlinked).
+  2. Walks back to the last day with a real closing (skipping any skipped days).
+  3. Creates the missing CARRIED_FORWARD PreparationLog rows for the target date.
+  4. Updates DisplayStock for each carried-forward product.
 
 Use --dry-run to preview without committing.
 Use --date YYYY-MM-DD for the operating day that missed its carry-forward (default: today).
@@ -32,7 +36,7 @@ class Command(BaseCommand):
         from stock.models import (
             OperatingDay, OperatingDayStatus, PreparationLog, PrepSource, DisplayStock,
         )
-        from stock.services import previous_operating_day
+        from stock.services import previous_operating_day, previous_closing_day
         from accounts.models import User
 
         dry_run = options["dry_run"]
@@ -55,31 +59,33 @@ class Command(BaseCommand):
             self.stdout.write("Day not started yet — nothing to fix.")
             return
 
-        # Step 1: find and link the previous day's closing if unlinked.
-        prev_day = previous_operating_day(op_day.outlet, fix_date)
-        if not prev_day:
-            self.stdout.write("No previous operating day found.")
-            return
-
-        if not prev_day.daily_closing_id:
-            prev_closing = DailyClosing.objects.filter(
-                outlet=prev_day.outlet,
-                closing_date=prev_day.date,
+        # Step 1: find and link the immediate previous day's closing if unlinked
+        # (repairs a broken FK — distinct from the "day never operated" case below).
+        immediate_prev = previous_operating_day(op_day.outlet, fix_date)
+        if immediate_prev and not immediate_prev.daily_closing_id:
+            unlinked_closing = DailyClosing.objects.filter(
+                outlet=immediate_prev.outlet,
+                closing_date=immediate_prev.date,
             ).first()
-            if prev_closing:
+            if unlinked_closing:
                 self.stdout.write(
-                    f"Linking {prev_day.date} OperatingDay → DailyClosing #{prev_closing.pk}"
+                    f"Linking {immediate_prev.date} OperatingDay → DailyClosing #{unlinked_closing.pk}"
                 )
                 if not dry_run:
-                    prev_day.daily_closing = prev_closing
-                    prev_day.save(update_fields=["daily_closing"])
-            else:
-                self.stdout.write(f"No DailyClosing found for {prev_day.date}. Cannot proceed.")
-                return
-        else:
-            prev_closing = prev_day.daily_closing
+                    immediate_prev.daily_closing = unlinked_closing
+                    immediate_prev.save(update_fields=["daily_closing"])
 
-        # Step 2: find stock counts with remains > 0 for prep products on previous day.
+        # Step 2: walk back to the last day with a real closing, skipping any
+        # intervening days that were skipped/never operated (no daily_closing).
+        prev_day = previous_closing_day(op_day.outlet, fix_date)
+        if not prev_day:
+            self.stdout.write("No previous day with a closing found.")
+            return
+        prev_closing = prev_day.daily_closing
+        if prev_day.date != fix_date - datetime.timedelta(days=1):
+            self.stdout.write(f"(Nearest previous closing is {prev_day.date} — days in between never operated.)")
+
+        # Step 3: find stock counts with remains > 0 for prep products on that day.
         candidates = prev_closing.stock_counts.filter(
             remains_pieces__gt=0,
             product__requires_preparation=True,
