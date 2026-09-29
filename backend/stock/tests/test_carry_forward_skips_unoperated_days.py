@@ -15,7 +15,7 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from catalog.models import Outlet, Product
+from catalog.models import Organization, Outlet, Product
 from closing.models import ClosingStatus, DailyClosing, DailyClosingStockCount
 from stock.models import OperatingDay, OperatingDayStatus
 from stock.services import carry_forward_candidates
@@ -25,9 +25,11 @@ User = get_user_model()
 
 class CarryForwardSkipsUnoperatedDaysTests(TestCase):
     def setUp(self):
-        self.outlet = Outlet.objects.create(name="Test Outlet")
+        self.org = Organization.objects.create(name="Test Org", slug="test-org")
+        self.outlet = Outlet.objects.create(name="Test Outlet", organization=self.org)
         self.staff = User.objects.create_user(
-            phone="01700000301", password="x", name="Test Staff", role="STAFF", outlet=self.outlet,
+            phone="01700000301", password="x", name="Test Staff", role="STAFF",
+            outlet=self.outlet, organization=self.org,
         )
         self.product = Product.objects.create(name="Hot & Crispy Chicken", requires_preparation=True)
 
