@@ -7,6 +7,7 @@ import { Brand } from "@/components/Brand";
 
 export default function ApplyPage() {
   const [orgName, setOrgName] = useState("");
+  const [orgAddress, setOrgAddress] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [ownerPhone, setOwnerPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -38,6 +39,7 @@ export default function ApplyPage() {
         method: "POST",
         body: JSON.stringify({
           org_name: orgName.trim(),
+          org_address: orgAddress.trim(),
           owner_name: ownerName.trim(),
           owner_phone: ownerPhone.trim(),
           owner_password: password,
@@ -91,6 +93,16 @@ export default function ApplyPage() {
                   value={orgName}
                   onChange={(e) => setOrgName(e.target.value)}
                   placeholder="e.g. Golden Bucket Fried Chicken"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="field-label">Shop address (optional)</span>
+                <input
+                  className="field-input"
+                  value={orgAddress}
+                  onChange={(e) => setOrgAddress(e.target.value)}
+                  placeholder="e.g. House 12, Road 5, Dhanmondi, Dhaka"
+                  autoComplete="street-address"
                 />
               </label>
               <label className="flex flex-col gap-1">

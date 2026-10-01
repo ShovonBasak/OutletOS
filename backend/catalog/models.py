@@ -24,6 +24,14 @@ class Organization(models.Model):
     # would otherwise reach the main app with no primary-cash account, which
     # the Day-Closing flow depends on existing.
     onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+    # Exactly one organization (normally the original CP Five Star outlet)
+    # should ever have this set. Its SalesChannel + ChannelMenuMap rows are
+    # cloned into every newly created organization — see
+    # sales.services.seed_channels_from_template — so a new franchise starts
+    # with a working Pathao/Foodi/Foodpanda/Walk-in setup instead of an empty
+    # Settings screen. The clones are independent rows the owner can freely
+    # edit afterward; this flag has no effect beyond the moment of creation.
+    is_channel_template = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["name"]
@@ -337,6 +345,7 @@ class TenantApplication(models.Model):
     that's the first step of the new owner's onboarding wizard."""
 
     org_name = models.CharField(max_length=120)
+    org_address = models.CharField(max_length=255, blank=True)
     owner_name = models.CharField(max_length=120)
     owner_phone = models.CharField(max_length=20)
     # Hashed once at submit time via django.contrib.auth.hashers.make_password —

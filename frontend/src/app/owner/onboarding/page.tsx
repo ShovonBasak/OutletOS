@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError, saveUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -89,19 +89,25 @@ export default function OnboardingWizard() {
         )}
 
         {step === "outlet" && (
-          <OutletStep onDone={(o) => { setOutlet(o); setStep("accounts"); }} />
+          <OutletStep initialOutlet={outlet} onDone={(o) => { setOutlet(o); setStep("accounts"); }} />
         )}
 
         {step === "accounts" && outlet && (
           <AccountsStep
             outlet={outlet}
             initialAccounts={defaultAccounts}
+            onBack={() => setStep("outlet")}
             onDone={(accounts) => { setDefaultAccounts(accounts); setStep("staff"); }}
           />
         )}
 
         {step === "staff" && outlet && (
-          <StaffStep outlet={outlet} onDone={finishOnboarding} finishing={finishing} />
+          <StaffStep
+            outlet={outlet}
+            onBack={() => setStep("accounts")}
+            onDone={finishOnboarding}
+            finishing={finishing}
+          />
         )}
       </div>
     </div>
@@ -118,9 +124,17 @@ function StepDot({ label, active, done }: { label: string; active: boolean; done
 
 // ── Step 1: Outlet (required) ────────────────────────────────────────────────
 
-function OutletStep({ onDone }: { onDone: (outlet: Outlet) => void }) {
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
+function OutletStep({
+  initialOutlet,
+  onDone,
+}: {
+  // Set when arriving here via "← Back" from a later step — the outlet
+  // already exists, so save() edits it in place instead of creating another.
+  initialOutlet: Outlet | null;
+  onDone: (outlet: Outlet) => void;
+}) {
+  const [name, setName] = useState(initialOutlet?.name ?? "");
+  const [address, setAddress] = useState(initialOutlet?.address ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -129,13 +143,18 @@ function OutletStep({ onDone }: { onDone: (outlet: Outlet) => void }) {
     setBusy(true);
     setError("");
     try {
-      const outlet = await api<Outlet>("/outlets/", {
-        method: "POST",
-        body: JSON.stringify({ name: name.trim(), address: address.trim(), is_active: true }),
-      });
+      const outlet = initialOutlet
+        ? await api<Outlet>(`/outlets/${initialOutlet.id}/`, {
+            method: "PATCH",
+            body: JSON.stringify({ name: name.trim(), address: address.trim() }),
+          })
+        : await api<Outlet>("/outlets/", {
+            method: "POST",
+            body: JSON.stringify({ name: name.trim(), address: address.trim(), is_active: true }),
+          });
       onDone(outlet);
     } catch (e) {
-      setError(errMsg(e, "Could not create outlet."));
+      setError(errMsg(e, initialOutlet ? "Could not update outlet." : "Could not create outlet."));
     } finally {
       setBusy(false);
     }
@@ -169,7 +188,9 @@ function OutletStep({ onDone }: { onDone: (outlet: Outlet) => void }) {
       </label>
       {error && <p className="font-mono text-xs text-chili-deep">{error}</p>}
       <button className="btn btn-primary" disabled={busy} onClick={save}>
-        {busy ? "Creating…" : "Create outlet →"}
+        {busy
+          ? (initialOutlet ? "Saving…" : "Creating…")
+          : (initialOutlet ? "Save & continue →" : "Create outlet →")}
       </button>
     </div>
   );
@@ -180,10 +201,12 @@ function OutletStep({ onDone }: { onDone: (outlet: Outlet) => void }) {
 function AccountsStep({
   outlet,
   initialAccounts,
+  onBack,
   onDone,
 }: {
   outlet: Outlet;
   initialAccounts: FinancialAccount[];
+  onBack: () => void;
   onDone: (accounts: FinancialAccount[]) => void;
 }) {
   const [accounts, setAccounts] = useState<FinancialAccount[]>(initialAccounts);
@@ -191,9 +214,34 @@ function AccountsStep({
   const [error, setError] = useState("");
   const [showBank, setShowBank] = useState(false);
   const [showMobile, setShowMobile] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const REQUIRED_NAMES = ["Owner Cash", "Shop Cash", "Supplier Credit"];
+  const defaultAccounts = accounts.filter((a) => REQUIRED_NAMES.includes(a.name));
+  const addedAccounts = accounts.filter((a) => !REQUIRED_NAMES.includes(a.name));
+
+  async function deleteAddedAccount(id: number) {
+    setDeletingId(id);
+    setDeleteError("");
+    try {
+      await api(`/financial-accounts/${id}/`, { method: "DELETE" });
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+      setDeleteConfirmId(null);
+    } catch (e) {
+      setDeleteError(errMsg(e, "Could not delete account — it may already have transactions."));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+  // Guards against React StrictMode's double-invoked effect in dev firing two
+  // concurrent create-defaults POSTs — `accounts.length` isn't enough since
+  // both invocations read the same stale (empty) state before either resolves.
+  const firedRef = useRef(false);
 
   useEffect(() => {
-    if (accounts.length > 0) return;
+    if (accounts.length > 0 || firedRef.current) return;
+    firedRef.current = true;
     (async () => {
       try {
         const created = await api<FinancialAccount[]>("/financial-accounts/create-defaults/", {
@@ -225,16 +273,53 @@ function AccountsStep({
         <p className="font-mono text-xs text-chili-deep">{error}</p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          {accounts
-            .filter((a) => ["Owner Cash", "Shop Cash", "Supplier Credit"].includes(a.name))
-            .map((a) => (
-              <div key={a.id} className="flex items-center justify-between rounded bg-leaf/5 px-3 py-2">
-                <span className="font-mono text-xs text-ink">
-                  {a.name} {a.is_primary_cash && <span className="text-ink-soft">(primary)</span>}
+          {defaultAccounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between rounded bg-leaf/5 px-3 py-2">
+              <span className="font-mono text-xs text-ink">
+                {a.name} {a.is_primary_cash && <span className="text-ink-soft">(primary)</span>}
+              </span>
+              <span className="font-mono text-xs text-leaf-deep">✓ created</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {addedAccounts.length > 0 && (
+        <div className="flex flex-col gap-1.5 border-t border-dashed border-[#e8dfc8] pt-3">
+          <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft">Added accounts</p>
+          {addedAccounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between rounded bg-leaf/5 px-3 py-2">
+              <span className="font-mono text-xs text-ink">
+                {a.name} <span className="text-ink-soft">({a.account_type_display})</span>
+              </span>
+              {deleteConfirmId === a.id ? (
+                <span className="flex items-center gap-2">
+                  <button
+                    className="font-mono text-[10px] font-bold text-chili-deep"
+                    disabled={deletingId === a.id}
+                    onClick={() => deleteAddedAccount(a.id)}
+                  >
+                    {deletingId === a.id ? "Removing…" : "Confirm"}
+                  </button>
+                  <button
+                    className="font-mono text-[10px] text-ink-soft"
+                    disabled={deletingId === a.id}
+                    onClick={() => setDeleteConfirmId(null)}
+                  >
+                    Cancel
+                  </button>
                 </span>
-                <span className="font-mono text-xs text-leaf-deep">✓ created</span>
-              </div>
-            ))}
+              ) : (
+                <button
+                  className="font-mono text-[11px] text-chili opacity-60 hover:opacity-100"
+                  onClick={() => setDeleteConfirmId(a.id)}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ))}
+          {deleteError && <p className="font-mono text-[11px] text-chili-deep">{deleteError}</p>}
         </div>
       )}
 
@@ -268,13 +353,18 @@ function AccountsStep({
         )}
       </div>
 
-      <button
-        className="btn btn-primary"
-        disabled={creating || accounts.length < 3}
-        onClick={() => onDone(accounts)}
-      >
-        Continue →
-      </button>
+      <div className="flex gap-2">
+        <button className="btn btn-ghost" disabled={creating} onClick={onBack}>
+          ← Back
+        </button>
+        <button
+          className="btn btn-primary flex-1"
+          disabled={creating || accounts.length < 3}
+          onClick={() => onDone(accounts)}
+        >
+          Continue →
+        </button>
+      </div>
     </div>
   );
 }
@@ -361,10 +451,12 @@ function OptionalAccountForm({
 
 function StaffStep({
   outlet,
+  onBack,
   onDone,
   finishing,
 }: {
   outlet: Outlet;
+  onBack: () => void;
   onDone: () => void;
   finishing: boolean;
 }) {
@@ -438,9 +530,14 @@ function StaffStep({
         {busy ? "Adding…" : "+ Add this staff member"}
       </button>
 
-      <button className="btn btn-primary" disabled={finishing} onClick={onDone}>
-        {finishing ? "Finishing…" : added.length > 0 ? "Finish setup →" : "Skip for now →"}
-      </button>
+      <div className="flex gap-2">
+        <button className="btn btn-ghost" disabled={busy || finishing} onClick={onBack}>
+          ← Back
+        </button>
+        <button className="btn btn-primary flex-1" disabled={finishing} onClick={onDone}>
+          {finishing ? "Finishing…" : added.length > 0 ? "Finish setup →" : "Skip for now →"}
+        </button>
+      </div>
     </div>
   );
 }

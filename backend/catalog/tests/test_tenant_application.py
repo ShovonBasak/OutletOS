@@ -29,6 +29,25 @@ class SubmitTests(APITestCase):
         self.assertNotIn("password_hash", resp.data)
         self.assertNotIn("password", resp.data)
 
+    def test_org_address_is_optional_and_stored(self):
+        client = APIClient()
+        resp = client.post("/api/tenant-applications/submit/", {
+            "org_name": "Golden Bucket", "owner_name": "Rahim Uddin",
+            "owner_phone": "01711111114", "owner_password": "correcthorse",
+            "org_address": "House 12, Road 5, Dhanmondi, Dhaka",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        app = TenantApplication.objects.get(owner_phone="01711111114")
+        self.assertEqual(app.org_address, "House 12, Road 5, Dhanmondi, Dhaka")
+
+        resp = client.post("/api/tenant-applications/submit/", {
+            "org_name": "Golden Bucket", "owner_name": "Rahim Uddin",
+            "owner_phone": "01711111115", "owner_password": "correcthorse",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        app = TenantApplication.objects.get(owner_phone="01711111115")
+        self.assertEqual(app.org_address, "")
+
     def test_short_password_rejected(self):
         client = APIClient()
         resp = client.post("/api/tenant-applications/submit/", {
@@ -62,7 +81,8 @@ class ReviewTests(APITestCase):
         self.owner_client.force_authenticate(user=self.owner)
 
         self.app = TenantApplication.objects.create(
-            org_name="Golden Bucket", owner_name="Rahim Uddin",
+            org_name="Golden Bucket", org_address="House 12, Road 5, Dhanmondi, Dhaka",
+            owner_name="Rahim Uddin",
             owner_phone="01711112222",
             password_hash="pbkdf2_sha256$dummy$not-used-directly",
         )
@@ -89,6 +109,7 @@ class ReviewTests(APITestCase):
         org = self.app.created_organization
         self.assertIsNotNone(org)
         self.assertEqual(org.name, "Golden Bucket")
+        self.assertEqual(org.address, "House 12, Road 5, Dhanmondi, Dhaka")
         self.assertEqual(org.outlets.count(), 0)
 
         owner = User.objects.get(phone="01711112222")
@@ -100,6 +121,21 @@ class ReviewTests(APITestCase):
             "phone": "01711112222", "password": "correcthorse",
         }, format="json")
         self.assertEqual(login.status_code, 200, login.data)
+
+    def test_approve_seeds_channels_from_template(self):
+        from sales.models import SalesChannel
+
+        template_org = Organization.objects.create(
+            name="CP Five Star", slug="cp-five-star-approve-seed-test", is_channel_template=True,
+        )
+        SalesChannel.objects.create(organization=template_org, name="Pathao", commission_rate="0.15")
+
+        resp = self.admin_client.post(f"/api/tenant-applications/{self.app.id}/approve/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        self.app.refresh_from_db()
+        new_channel = SalesChannel.objects.get(organization=self.app.created_organization, name="Pathao")
+        self.assertEqual(str(new_channel.commission_rate), "0.1500")
 
     def test_double_approve_rejected(self):
         resp1 = self.admin_client.post(f"/api/tenant-applications/{self.app.id}/approve/")

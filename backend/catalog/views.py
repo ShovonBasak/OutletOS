@@ -61,6 +61,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         from django.db import IntegrityError, transaction
         from django.utils.text import slugify
         from accounts.models import Role, User
+        from sales.services import seed_channels_from_template
 
         name = (request.data.get("name") or "").strip()
         if not name:
@@ -81,6 +82,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 org = Organization.objects.create(name=name, slug=slug)
+                seed_channels_from_template(org)
                 outlet = Outlet.objects.create(organization=org, name=outlet_name)
                 owner = User.objects.create_user(
                     phone=owner_phone,
@@ -161,6 +163,7 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
 
         application = TenantApplication.objects.create(
             org_name=data["org_name"],
+            org_address=data["org_address"],
             owner_name=data["owner_name"],
             owner_phone=data["owner_phone"],
             password_hash=make_password(data["owner_password"]),
@@ -175,6 +178,7 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
         from django.db import IntegrityError, transaction
         from django.utils.text import slugify
         from accounts.models import Role, User
+        from sales.services import seed_channels_from_template
 
         application = self.get_object()
         if application.status != TenantApplicationStatus.PENDING:
@@ -183,8 +187,10 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 org = Organization.objects.create(
-                    name=application.org_name, slug=slugify(application.org_name)
+                    name=application.org_name, slug=slugify(application.org_name),
+                    address=application.org_address,
                 )
+                seed_channels_from_template(org)
                 owner = User(
                     phone=application.owner_phone, name=application.owner_name,
                     role=Role.OWNER, organization=org,

@@ -21,6 +21,7 @@ export type TenantApplicationStatus = "PENDING" | "APPROVED" | "REJECTED";
 export interface TenantApplication {
   id: number;
   org_name: string;
+  org_address: string;
   owner_name: string;
   owner_phone: string;
   status: TenantApplicationStatus;

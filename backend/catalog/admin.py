@@ -16,7 +16,8 @@ from .models import (
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "is_active", "created_at"]
+    list_display = ["name", "slug", "is_active", "is_channel_template", "created_at"]
+    list_editable = ["is_channel_template"]
     search_fields = ["name", "slug"]
     prepopulated_fields = {"slug": ("name",)}
 
