@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, saveUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import type { User } from "@/lib/types";
 
-type Sheet = "closed" | "menu" | "profile" | "password";
+type Sheet = "closed" | "menu" | "profile" | "password" | "outlet";
 
 function firstWord(name: string) {
   return name.split(" ")[0];
@@ -72,6 +73,7 @@ function Snackbar({ text, onDone }: { text: string; onDone: () => void }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export function UserMenu() {
   const { user, logout, setUser, isOwner, actingAsStaff, enterStaffView } = useAuth();
+  const { outlets, selectedOutlet, selectOutlet } = useOwnerOutlet();
   const router = useRouter();
   const [sheet, setSheet] = useState<Sheet>("closed");
   const [toast, setToast] = useState<string | null>(null);
@@ -234,8 +236,10 @@ export function UserMenu() {
                   </span>
                   <span className="font-mono text-[11px] text-ink-soft">{user.phone}</span>
                 </div>
-                {user.outlet_name && (
-                  <p className="mt-0.5 font-mono text-[10px] text-ink-soft/60 truncate">{user.outlet_name}</p>
+                {(selectedOutlet?.name ?? user.outlet_name) && (
+                  <p className="mt-0.5 font-mono text-[10px] text-ink-soft/60 truncate">
+                    {selectedOutlet?.name ?? user.outlet_name}
+                  </p>
                 )}
               </div>
             </div>
@@ -259,6 +263,17 @@ export function UserMenu() {
               </div>
               <span className="text-ink-soft/40">›</span>
             </button>
+
+            {isOwner && outlets.length > 1 && (
+              <button onClick={() => setSheet("outlet")} className="flex items-center gap-4 px-5 py-4 text-left transition-colors active:bg-[#f5f0e8]">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-chrome/10 text-[18px]">⌂</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-mono text-[13px] font-semibold text-ink">Switch outlet</p>
+                  <p className="font-mono text-[10px] text-ink-soft truncate">{selectedOutlet?.name ?? "Choose an outlet"}</p>
+                </div>
+                <span className="text-ink-soft/40">›</span>
+              </button>
+            )}
 
             {isOwner && !actingAsStaff && (
               <button
@@ -373,6 +388,38 @@ export function UserMenu() {
                 {pwSaving ? "Saving…" : "Update password"}
               </button>
             </form>
+          </div>
+        )}
+
+        {/* ══ SWITCH OUTLET ══ */}
+        {sheet === "outlet" && (
+          <div className="flex flex-col">
+            <div className="flex items-center gap-3 px-5 pb-4 pt-2">
+              <button onClick={() => setSheet("menu")} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f0ebe0] font-mono text-sm text-ink-soft transition-colors active:bg-[#e8e0cc]">
+                ‹
+              </button>
+              <p className="font-display text-[16px] font-bold text-ink">Switch outlet</p>
+            </div>
+
+            <div className="flex flex-col gap-2 px-5 pb-6">
+              {outlets.map((o) => (
+                <button
+                  key={o.id}
+                  onClick={() => { selectOutlet(o.id); close(); }}
+                  className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                    selectedOutlet?.id === o.id
+                      ? "border-chrome/40 bg-chrome/5"
+                      : "border-[#e8e0cc] active:bg-[#f5f0e8]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-mono text-[13px] font-semibold text-ink">{o.name}</p>
+                    {selectedOutlet?.id === o.id && <span className="font-mono text-[10px] text-chrome">✓ current</span>}
+                  </div>
+                  {o.address && <p className="mt-0.5 font-mono text-[11px] text-ink-soft">{o.address}</p>}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

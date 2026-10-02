@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiDownload } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { today } from "@/lib/format";
 import { StockInInvoiceRow } from "@/components/StockInInvoiceRow";
 import type { FinancialAccount, IngredientGroup, IngredientSummary, Paginated, StockInRecord, StockInItem } from "@/lib/types";
@@ -52,8 +52,8 @@ function toEditLines(items: StockInItem[]): DraftLine[] {
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function StockInApprovals() {
-  const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
 
   // list state
   const [records, setRecords] = useState<StockInRecord[]>([]);

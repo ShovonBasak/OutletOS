@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 
 interface SellRow {
   product_id: number;
@@ -36,6 +37,8 @@ function today() {
 }
 
 export default function SellCorrectionsPage() {
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
   const [date, setDate] = useState(today());
   const [rows, setRows] = useState<SellRow[]>([]);
   const [edits, setEdits] = useState<Record<number, string>>({});
@@ -65,6 +68,7 @@ export default function SellCorrectionsPage() {
   const [fixCash, setFixCash] = useState(true);
 
   const load = useCallback(async () => {
+    if (!outlet) return;
     setLoading(true);
     setEdits({});
     setSaveResult(null);
@@ -74,7 +78,7 @@ export default function SellCorrectionsPage() {
     setAddSearch("");
     try {
       const res = await api<DailySellsResponse>(
-        `/reports/daily-sells/?date=${date}`
+        `/reports/daily-sells/?date=${date}&outlet=${outlet}`
       );
       setRows(res.rows);
     } catch (e: unknown) {
@@ -82,7 +86,7 @@ export default function SellCorrectionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, outlet]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -166,7 +170,7 @@ export default function SellCorrectionsPage() {
   );
 
   async function handleSave() {
-    if (changedRows.length === 0) return;
+    if (changedRows.length === 0 || !outlet) return;
     setSaving(true);
     setError(null);
     setSaveResult(null);
@@ -179,7 +183,7 @@ export default function SellCorrectionsPage() {
         "/reports/correct-sells/",
         {
           method: "POST",
-          body: JSON.stringify({ outlet: 1, date, corrections, fix_stock: fixStock, fix_cash: fixCash }),
+          body: JSON.stringify({ outlet, date, corrections, fix_stock: fixStock, fix_cash: fixCash }),
         }
       );
       setSaveResult(res.applied);
@@ -193,6 +197,7 @@ export default function SellCorrectionsPage() {
   }
 
   async function handleRebuild() {
+    if (!outlet) return;
     setRebuilding(true);
     setConfirmRebuild(false);
     setError(null);
@@ -200,7 +205,7 @@ export default function SellCorrectionsPage() {
     try {
       const res = await api<{ ok: boolean; stock: StockRow[] }>(
         "/reports/rebuild-rawstock/",
-        { method: "POST", body: JSON.stringify({ outlet: 1 }) }
+        { method: "POST", body: JSON.stringify({ outlet }) }
       );
       setRebuildStock(res.stock);
     } catch (e: unknown) {

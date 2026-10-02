@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
 import AccountSelect from "@/components/AccountSelect";
 import type { OtherIncomeCategory, OtherIncome, FinancialAccount, Paginated } from "@/lib/types";
 
 export default function OtherIncomePage() {
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
   const [entries, setEntries] = useState<OtherIncome[]>([]);
   const [categories, setCategories] = useState<OtherIncomeCategory[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
@@ -52,13 +55,14 @@ export default function OtherIncomePage() {
       setError("Category and amount are required.");
       return;
     }
+    if (!outlet) { setError("No outlet selected."); return; }
     setSaving(true);
     setError(null);
     try {
       await api("/other-incomes/", {
         method: "POST",
         body: JSON.stringify({
-          outlet: 1,
+          outlet,
           date: today(),
           category: Number(category),
           amount,

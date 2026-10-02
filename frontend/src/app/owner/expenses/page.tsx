@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
 import AccountSelect from "@/components/AccountSelect";
 import type { CostCategory, Expense, FinancialAccount, Paginated } from "@/lib/types";
@@ -27,6 +28,8 @@ function rangeFor(period: Period, custom: { from: string; to: string }) {
 }
 
 export default function ExpensesPage() {
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<CostCategory[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
@@ -50,7 +53,8 @@ export default function ExpensesPage() {
   const range = rangeFor(period, custom);
 
   async function refreshExpenses() {
-    const params = new URLSearchParams({ outlet: "1", date_from: range.from, date_to: range.to });
+    if (!outlet) return;
+    const params = new URLSearchParams({ outlet: String(outlet), date_from: range.from, date_to: range.to });
     const d = await api<Paginated<Expense>>(`/expenses/?${params}`);
     setExpenses(d.results);
   }
@@ -79,7 +83,7 @@ export default function ExpensesPage() {
   useEffect(() => {
     refreshExpenses();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, custom]);
+  }, [period, custom, outlet]);
 
   const rows = useMemo(() => {
     return expenses.filter((e) => {
@@ -116,12 +120,13 @@ export default function ExpensesPage() {
 
   async function saveExpense() {
     if (!category || !amount) { setError("Category and amount are required."); return; }
+    if (!outlet) { setError("No outlet selected."); return; }
     setSaving(true); setError(null);
     try {
       await api("/expenses/", {
         method: "POST",
         body: JSON.stringify({
-          outlet: 1,
+          outlet,
           date: expDate,
           category: Number(category),
           amount,

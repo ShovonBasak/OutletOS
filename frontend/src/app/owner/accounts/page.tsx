@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
 import AccountSelect from "@/components/AccountSelect";
 import type {
@@ -11,7 +12,6 @@ import type {
   AccountTransaction,
   AccountTransfer,
   CapitalTransaction,
-  Outlet,
   Paginated,
 } from "@/lib/types";
 
@@ -86,9 +86,10 @@ export default function AccountsPage() {
   const [accSaving, setAccSaving] = useState(false);
   const [accError, setAccError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
-  // The account form has no per-account outlet picker (single-outlet
-  // assumption) — this is just the caller's own outlet, not a hardcoded id.
-  const [outletId, setOutletId] = useState<number | null>(null);
+  // The account form has no per-account outlet picker — new accounts are
+  // created under whichever outlet the Owner currently has selected.
+  const { selectedOutlet } = useOwnerOutlet();
+  const outletId = selectedOutlet?.id ?? null;
 
   function startEdit(a: FinancialAccount) {
     setEditingAccount(a);
@@ -211,7 +212,6 @@ export default function AccountsPage() {
 
   useEffect(() => {
     loadAccounts();
-    api<Paginated<Outlet>>("/outlets/").then((d) => setOutletId(d.results[0]?.id ?? null));
   }, []);
 
   useEffect(() => {

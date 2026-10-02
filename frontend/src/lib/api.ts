@@ -3,6 +3,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api"
 const ACCESS_KEY = "cp_access";
 const REFRESH_KEY = "cp_refresh";
 const USER_KEY = "cp_user";
+const OWNER_OUTLET_KEY = "cp_owner_outlet";
 
 // "Staff view" toggle — an Owner/Admin browsing /staff/* under their own
 // identity to fix a staff mistake. Purely a client-side lens: no new JWT,
@@ -25,6 +26,20 @@ export function clearSession() {
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(ACTING_ROLE_KEY);
+  localStorage.removeItem(OWNER_OUTLET_KEY);
+}
+
+// An Owner's selected outlet (multi-outlet organizations only) — see
+// lib/ownerOutlet.tsx. Cleared on logout so a shared device never carries a
+// stale selection into a different owner's session.
+export function getSelectedOutletId(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(OWNER_OUTLET_KEY);
+  return raw ? Number(raw) : null;
+}
+
+export function saveSelectedOutletId(id: number) {
+  localStorage.setItem(OWNER_OUTLET_KEY, String(id));
 }
 
 export function getActingRole(): "STAFF" | null {

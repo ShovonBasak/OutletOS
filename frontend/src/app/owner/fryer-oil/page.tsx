@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { shortDate } from "@/lib/format";
 import type { Paginated } from "@/lib/types";
 
@@ -25,12 +25,13 @@ function daysSince(dateStr: string): number {
 }
 
 export default function FryerOilHistoryPage() {
-  const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
   const [records, setRecords] = useState<OilChange[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!outlet) return;
     api<Paginated<OilChange>>(`/fryer-oil-changes/?outlet=${outlet}`)
       .then((res) => setRecords(res.results))
       .finally(() => setLoading(false));

@@ -587,14 +587,15 @@ export default function TeamPage() {
           <h2 className="font-mono text-[11px] uppercase tracking-widest text-ink-soft/60">
             Outlets
           </h2>
-          {isAdmin && (
-            <a
-              href="/owner/team/add-outlet"
-              className="rounded-lg border border-chrome/40 bg-chrome/5 px-3 py-1.5 font-mono text-[11px] text-chrome hover:bg-chrome/10"
-            >
-              + Add outlet
-            </a>
-          )}
+          {/* This page is OWNER-only (ADMIN has its own /admin/* section and
+              never reaches here), so Add outlet is always available — not
+              gated behind isAdmin like the role selector above. */}
+          <a
+            href="/owner/team/add-outlet"
+            className="rounded-lg border border-chrome/40 bg-chrome/5 px-3 py-1.5 font-mono text-[11px] text-chrome hover:bg-chrome/10"
+          >
+            + Add outlet
+          </a>
         </div>
         <div className="flex flex-col gap-2">
           {outlets.map((o) => (

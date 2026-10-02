@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { packBreakdown, shortDate, timeOf } from "@/lib/format";
 import type { DisplayStock, IngredientGroup, PackagingLevel, Paginated, RawStock } from "@/lib/types";
 
@@ -35,8 +35,8 @@ const DISPLAY_GROUPS: { key: string; label: string }[] = [
 ];
 
 export default function StockLevels() {
-  const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const { selectedOutlet } = useOwnerOutlet();
+  const outlet = selectedOutlet?.id;
 
   const [raw, setRaw] = useState<RawStock[]>([]);
   const [ready, setReady] = useState<DisplayStock[]>([]);
@@ -45,6 +45,7 @@ export default function StockLevels() {
   const [search, setSearch] = useState("");
 
   async function load() {
+    if (!outlet) return;
     setLoading(true);
     const [r, d, s] = await Promise.all([
       api<Paginated<RawStock>>(`/raw-stock/?outlet=${outlet}`),

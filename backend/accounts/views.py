@@ -49,8 +49,24 @@ class TeamUserViewSet(viewsets.ModelViewSet):
         if not self.request.user.is_admin:
             self._check_outlet_in_org(serializer)
             serializer.save(role=Role.STAFF, organization=self.request.user.organization)
-        else:
-            serializer.save()
+            return
+
+        data = serializer.validated_data
+        # OWNER/STAFF must always belong to exactly one Organization (see
+        # accounts.models.User) — only ADMIN may have organization=None. An
+        # admin creating a team member who omits it is almost always just
+        # relying on the outlet they picked; derive it from there rather than
+        # silently leaving the user orphaned (invisible on every Owner's
+        # Team page, even though they can still log in via their outlet).
+        if data.get("organization") is None and data.get("role") != Role.ADMIN:
+            outlet = data.get("outlet")
+            if outlet is not None:
+                serializer.save(organization=outlet.organization)
+                return
+            raise ValidationError({
+                "organization": "Required when creating a STAFF or OWNER user (or pass an outlet to derive it from).",
+            })
+        serializer.save()
 
     def perform_update(self, serializer):
         instance = self.get_object()

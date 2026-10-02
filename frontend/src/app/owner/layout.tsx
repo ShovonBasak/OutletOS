@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { useAuth, useRequireRole } from "@/lib/auth";
+import { api, getSelectedOutletId, saveSelectedOutletId } from "@/lib/api";
+import { OwnerOutletContext } from "@/lib/ownerOutlet";
+import type { Outlet, Paginated } from "@/lib/types";
 import {
   OWNER_NAV,
   OWNER_MOBILE_TABS,
@@ -20,6 +23,36 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
   const { user, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+
+  // Which outlet Owner screens are scoped to — resolved once per login,
+  // auto-picked for a single-outlet org, chosen explicitly for a
+  // multi-outlet one. See lib/ownerOutlet.tsx.
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
+  const [selectedOutletId, setSelectedOutletId] = useState<number | null>(null);
+  const [outletsLoading, setOutletsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    api<Paginated<Outlet>>("/outlets/").then((d) => {
+      setOutlets(d.results);
+      const stored = getSelectedOutletId();
+      if (stored && d.results.some((o) => o.id === stored)) {
+        setSelectedOutletId(stored);
+      } else if (d.results.length === 1) {
+        saveSelectedOutletId(d.results[0].id);
+        setSelectedOutletId(d.results[0].id);
+      }
+      setOutletsLoading(false);
+    });
+  }, [user]);
+
+  function selectOutlet(id: number) {
+    saveSelectedOutletId(id);
+    setSelectedOutletId(id);
+  }
+
+  const selectedOutlet = outlets.find((o) => o.id === selectedOutletId) ?? null;
+  const needsOutletSelection = !outletsLoading && outlets.length > 1 && !selectedOutlet;
 
   // Collapsible accordion: groups start collapsed, the active group auto-opens.
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -47,6 +80,35 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     );
   }
 
+  // Multi-outlet gate: Owner picks which outlet to work in before reaching
+  // the rest of the app. A single-outlet org never sees this (auto-selected
+  // above). Re-opens from the user menu's "Switch outlet" any time.
+  if (needsOutletSelection) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="ticket w-full max-w-sm flex flex-col gap-3">
+          <div>
+            <p className="font-display text-sm font-bold text-ink">Select an outlet</p>
+            <p className="mt-0.5 font-mono text-[11px] text-ink-soft">
+              Your organization has more than one outlet. Choose which one to work in —
+              you can switch any time from the menu.
+            </p>
+          </div>
+          {outlets.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => selectOutlet(o.id)}
+              className="rounded-lg border border-[#d8cdb0] px-4 py-3 text-left hover:border-chrome/40 hover:bg-chrome/5"
+            >
+              <p className="font-mono text-[13px] font-semibold text-ink">{o.name}</p>
+              {o.address && <p className="font-mono text-[11px] text-ink-soft">{o.address}</p>}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const isActive = (href: string) =>
     href === "/owner"
       ? pathname === "/owner"
@@ -58,6 +120,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
   const activeMobileTab = mobileTabFor(pathname);
 
   return (
+    <OwnerOutletContext.Provider value={{ outlets, selectedOutlet, selectOutlet, loading: outletsLoading }}>
     <div className="flex min-h-screen flex-col bg-paper-dim md:items-center md:py-8">
       {/* Mobile top bar */}
       <header className="flex items-center justify-between bg-chrome px-4 py-3.5 text-paper md:hidden">
@@ -71,7 +134,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <aside className="sidebar hidden md:flex">
           <div className="sidebrand">
             <span className="inline-block h-3.5 w-3.5 flex-shrink-0 rounded-full bg-red" />
-            <span className="font-display text-[13px] font-bold text-gold">{user?.outlet_name ?? "CP FIVE STAR"}</span>
+            <span className="font-display text-[13px] font-bold text-gold">{selectedOutlet?.name ?? user?.outlet_name ?? "CP FIVE STAR"}</span>
           </div>
           <nav className="flex flex-1 flex-col overflow-y-auto">
             {OWNER_NAV.map((g) =>
@@ -123,7 +186,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="desktoptop hidden md:flex">
             <h1>{titleFor(pathname)}</h1>
-            <div className="date">{user?.outlet_name ?? "Outlet"}</div>
+            <div className="date">{selectedOutlet?.name ?? user?.outlet_name ?? "Outlet"}</div>
           </div>
           <main className="flex-1 overflow-y-auto p-4 pb-24 md:p-6">{children}</main>
         </div>
@@ -153,5 +216,6 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         })}
       </nav>
     </div>
+    </OwnerOutletContext.Provider>
   );
 }
