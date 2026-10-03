@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, saveUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useOwnerOutlet } from "@/lib/ownerOutlet";
+import { BottomSheet } from "./BottomSheet";
+import { Snackbar } from "./Snackbar";
 import type { User } from "@/lib/types";
 
 type Sheet = "closed" | "menu" | "profile" | "password" | "outlet";
@@ -43,33 +45,6 @@ function Avatar({
   );
 }
 
-// ── Snackbar ──────────────────────────────────────────────────────────────────
-function Snackbar({ text, onDone }: { text: string; onDone: () => void }) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    // Animate in next tick so the transition fires
-    const show = setTimeout(() => setVisible(true), 10);
-    const hide = setTimeout(() => setVisible(false), 3000);
-    const done = setTimeout(onDone, 3400);
-    return () => { clearTimeout(show); clearTimeout(hide); clearTimeout(done); };
-  }, [onDone]);
-
-  return (
-    <div
-      className={`fixed bottom-24 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2.5 rounded-2xl bg-[#1a1008] px-5 py-3.5 shadow-xl transition-all duration-400 ${
-        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3"
-      }`}
-      style={{ maxWidth: "calc(100vw - 2rem)" }}
-    >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-leaf text-[10px] text-white">
-        ✓
-      </span>
-      <p className="font-mono text-[12px] font-medium text-white/90 whitespace-nowrap">{text}</p>
-    </div>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 export function UserMenu() {
   const { user, logout, setUser, isOwner, actingAsStaff, enterStaffView } = useAuth();
@@ -92,12 +67,6 @@ export function UserMenu() {
   const [confirm, setConfirm] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
   const [pwErr, setPwErr] = useState<string | null>(null);
-
-  // Lock body scroll when sheet open
-  useEffect(() => {
-    document.body.style.overflow = sheet !== "closed" ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [sheet]);
 
   function showToast(text: string) {
     setToast(null);
@@ -206,23 +175,8 @@ export function UserMenu() {
         <Snackbar key={toast + Date.now()} text={toast} onDone={() => setToast(null)} />
       )}
 
-      {/* ── Backdrop ── */}
-      {sheet !== "closed" && (
-        <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" onClick={close} />
-      )}
-
       {/* ── Bottom sheet ── */}
-      <div
-        className={`fixed bottom-0 left-0 z-50 w-full rounded-t-3xl bg-paper shadow-2xl transition-transform duration-300 ease-out ${
-          sheet !== "closed" ? "translate-y-0" : "translate-y-full"
-        }`}
-        style={{ paddingBottom: "env(safe-area-inset-bottom)", maxHeight: "92dvh", overflowY: "auto" }}
-      >
-        {/* Drag handle */}
-        <div className="sticky top-0 flex justify-center bg-paper pt-3 pb-1 z-10">
-          <div className="h-1 w-10 rounded-full bg-ink-soft/20" />
-        </div>
-
+      <BottomSheet open={sheet !== "closed"} onClose={close}>
         {/* ══ MENU ══ */}
         {sheet === "menu" && (
           <div className="flex flex-col pb-2">
@@ -422,7 +376,7 @@ export function UserMenu() {
             </div>
           </div>
         )}
-      </div>
+      </BottomSheet>
     </>
   );
 }
