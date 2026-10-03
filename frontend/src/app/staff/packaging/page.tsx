@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { timeOf } from "@/lib/format";
 import type { PackagingLevel } from "@/lib/types";
 
 export default function PackagingPage() {
   const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const [items, setItems] = useState<PackagingLevel[]>([]);
   const [recountFor, setRecountFor] = useState<number | null>(null);
   const [recountValue, setRecountValue] = useState("");

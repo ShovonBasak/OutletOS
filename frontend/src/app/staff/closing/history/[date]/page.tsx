@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, groupByCategory, packBreakdown, shortDate } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
@@ -21,7 +21,7 @@ function nextDate(d: string): string {
 
 export default function ClosingDetail() {
   const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const params = useParams();
   const date = params.date as string;
   const [closing, setClosing] = useState<DailyClosing | null>(null);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
@@ -11,7 +11,7 @@ export default function FryerOilChangePage() {
   const router = useRouter();
   const { user } = useAuth();
   const { workDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
 
   const [pan, setPan] = useState<1 | 2 | null>(null);
   const [date, setDate] = useState(workDate || today());

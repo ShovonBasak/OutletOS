@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, shortDate, today } from "@/lib/format";
 import { Stamp } from "@/components/Stamp";
@@ -33,7 +33,7 @@ function nDaysAgo(from: string, n: number): string {
 
 export default function ClosingHistory() {
   const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
 
   const todayStr = today();
   const [dateFrom, setDateFrom] = useState(() => nDaysAgo(todayStr, 30));

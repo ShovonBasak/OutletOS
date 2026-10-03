@@ -275,3 +275,82 @@ class CorrectSellsCashStockTests(APITestCase):
         self.assertEqual(Decimal(by_name["Fried Burger"]["pieces_per_pack"]), Decimal("12"))
         # Burger Combo: two ingredients, no is_primary set -> no pack shown.
         self.assertIsNone(by_name["Burger Combo"]["pieces_per_pack"])
+
+
+class CorrectSellsSkipsPeriodicCountIngredientTests(APITestCase):
+    """PERIODIC_COUNT ingredients (bags, sticks, sachets with no fixed
+    per-product ratio) are never tracked via RawStock — see
+    stock.services.consume_for_preparation, the live path this correction
+    replays. correct_sells's stock-fix must skip them the same way, or it
+    adjusts a RawStock row the live system never reads or writes at all,
+    silently drifting a figure nothing else will ever reconcile.
+
+    Run with: python manage.py test reports.tests.test_correct_sells.CorrectSellsSkipsPeriodicCountIngredientTests
+    """
+
+    def setUp(self):
+        self.org = Organization.objects.create(name="Test Org", slug="test-org-correct-sells-periodic")
+        self.outlet = Outlet.objects.create(name="Test Outlet", organization=self.org)
+        self.staff = User.objects.create_user(
+            phone="01700000601", password="x", name="Test Staff", role="STAFF",
+            outlet=self.outlet, organization=self.org,
+        )
+        self.owner = User.objects.create_user(
+            phone="01700000602", password="x", name="Test Owner", role="OWNER", organization=self.org,
+        )
+        self.walk_in = SalesChannel.objects.create(
+            organization=self.org, name="Walk-in", settlement_type=SettlementType.COLLECTED_AT_OUTLET,
+        )
+
+        self.meat = Ingredient.objects.create(
+            name="Chicken Ball Mix", base_unit="piece", tracking_mode=TrackingMode.RECIPE_LINKED,
+        )
+        self.stick = Ingredient.objects.create(
+            name="Bamboo Stick", base_unit="piece", tracking_mode=TrackingMode.PERIODIC_COUNT,
+        )
+        self.product = Product.objects.create(name="Chicken Ball", requires_preparation=True)
+        Recipe.objects.create(product=self.product, ingredient=self.meat, quantity_per_unit=1, is_primary=True)
+        Recipe.objects.create(product=self.product, ingredient=self.stick, quantity_per_unit=1)
+        ProductPrice.objects.create(
+            product=self.product, price=Decimal("30.00"), effective_from=datetime.date(2026, 1, 1),
+        )
+        RawStock.objects.create(outlet=self.outlet, ingredient=self.meat, quantity_available=Decimal("100"))
+        # Deliberately NO RawStock row for the bamboo stick — exactly the
+        # state of a fresh outlet that's never had one, since nothing in the
+        # live system ever creates it.
+
+        self.closing_date = datetime.date(2026, 2, 10)
+        self.closing = DailyClosing.objects.create(
+            outlet=self.outlet, closing_date=self.closing_date, staff=self.staff,
+        )
+        line = DailyClosingSalesLine(
+            daily_closing=self.closing, product=self.product, channel=self.walk_in,
+            quantity_sold=10, unit_price=Decimal("30.00"), source=LineSource.STAFF_ENTRY,
+        )
+        line.recompute()
+        line.save()
+
+        self.owner_client = APIClient()
+        self.owner_client.force_authenticate(user=self.owner)
+        self.staff_client = APIClient()
+        self.staff_client.force_authenticate(user=self.staff)
+        resp = self.staff_client.post(f"/api/daily-closings/{self.closing.id}/submit/")
+        assert resp.status_code == 200, resp.data
+
+    def test_stock_fix_does_not_touch_or_create_periodic_count_raw_stock(self):
+        resp = self.owner_client.post("/api/reports/correct-sells/", {
+            "outlet": self.outlet.id, "date": str(self.closing_date),
+            "corrections": [{"product_id": self.product.id, "new_qty": 8}],
+        }, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        # The real ingredient was adjusted (10 -> 8 sold means 2 pieces' worth
+        # of meat returned to raw stock).
+        meat_stock = RawStock.objects.get(outlet=self.outlet, ingredient=self.meat)
+        self.assertEqual(meat_stock.quantity_available, Decimal("102"))
+
+        # The PERIODIC_COUNT ingredient must still have no RawStock row at
+        # all — the bug created one via RawStock.adjust's get_or_create.
+        self.assertFalse(
+            RawStock.objects.filter(outlet=self.outlet, ingredient=self.stick).exists()
+        )

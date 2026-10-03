@@ -136,12 +136,20 @@ class IngredientSerializer(serializers.ModelSerializer):
 class RecipeSerializer(serializers.ModelSerializer):
     ingredient_name = serializers.CharField(source="ingredient.name", read_only=True)
     base_unit = serializers.CharField(source="ingredient.base_unit", read_only=True)
+    # A PERIODIC_COUNT ingredient (bags, sticks, sachets with no fixed
+    # per-product ratio) is never tracked via RawStock — see
+    # stock.services.consume_for_preparation. Callers computing "how much of
+    # this product can I prepare from raw stock" (e.g. the Prep page) must
+    # skip these rows the same way, or a product silently becomes
+    # unpreparable the moment its RawStock row for that ingredient is
+    # missing/zero, even though nothing ever deducts or restocks it there.
+    ingredient_tracking_mode = serializers.CharField(source="ingredient.tracking_mode", read_only=True)
 
     class Meta:
         model = Recipe
         fields = [
             "id", "product", "ingredient", "ingredient_name", "base_unit",
-            "quantity_per_unit", "is_primary",
+            "ingredient_tracking_mode", "quantity_per_unit", "is_primary",
         ]
 
 

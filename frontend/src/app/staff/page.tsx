@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, shortDate, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
@@ -21,7 +21,7 @@ interface HomeSummary {
 export default function StaffHome() {
   const { user } = useAuth();
   const { day, refreshDay, workDate, setWorkDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
 
   const [allowDateSelection, setAllowDateSelection] = useState(false);
   const [stockInStatus, setStockInStatus] = useState("None today");

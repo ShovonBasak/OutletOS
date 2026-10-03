@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { bdt, shortDate, today } from "@/lib/format";
@@ -35,7 +35,7 @@ function ClosingHub() {
   const searchParams = useSearchParams();
   const viewYesterday = searchParams.get("view") === "yesterday";
   const { workDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const opDate = viewYesterday ? yesterday() : (workDate || today());
   const [closing, setClosing] = useState<DailyClosing | null>(null);
   const [notFound, setNotFound] = useState(false);

@@ -1286,7 +1286,11 @@ def correct_sells(request):
 
                 for r in product.recipes.all():
                     ing = r.ingredient
-                    if ing.tracking_mode == TrackingMode.ONE_TIME:
+                    # PERIODIC_COUNT ingredients are never tracked via RawStock
+                    # (see stock.services.consume_for_preparation) — adjusting
+                    # them here would drift a count that live prep logging
+                    # never touches in the first place.
+                    if ing.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
                         continue
                     RawStock.adjust(outlet, ing, -(Decimal(str(delta)) * r.quantity_per_unit))
 
@@ -1481,7 +1485,14 @@ def _do_rebuild(outlet: Outlet) -> dict:
     total_sets = total_adds = total_subs = 0
 
     with transaction.atomic():
-        RawStock.objects.filter(outlet=outlet).update(quantity_available=Decimal("0"))
+        # PERIODIC_COUNT ingredients are never tracked via RawStock at all —
+        # excluded here so a rebuild can't zero out (and then only partially
+        # replay) a figure the live system never reads or writes in the
+        # first place. See the matching skips below and
+        # stock.services.consume_for_preparation.
+        RawStock.objects.filter(outlet=outlet).exclude(
+            ingredient__tracking_mode=TrackingMode.PERIODIC_COUNT
+        ).update(quantity_available=Decimal("0"))
 
         for day in all_dates():
             for dsc in DayStartStockCheck.objects.filter(
@@ -1513,7 +1524,7 @@ def _do_rebuild(outlet: Outlet) -> dict:
                 ingredient__isnull=False,
             ).select_related("ingredient", "pack_definition"):
                 ing = item.ingredient
-                if ing.tracking_mode == TrackingMode.ONE_TIME:
+                if ing.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
                     continue
                 delta = item.base_unit_quantity()
                 if delta:
@@ -1528,6 +1539,11 @@ def _do_rebuild(outlet: Outlet) -> dict:
             ).prefetch_related("product__recipes__ingredient"):
                 prepped_pids.add(log.product_id)
                 for r in log.product.recipes.all():
+                    # Mirrors stock.services.consume_for_preparation, the live
+                    # path this is replaying — PERIODIC_COUNT ingredients are
+                    # never deducted from RawStock there either.
+                    if r.ingredient.tracking_mode == TrackingMode.PERIODIC_COUNT:
+                        continue
                     delta = Decimal(str(log.pieces_prepared)) * r.quantity_per_unit
                     if delta:
                         RawStock.adjust(outlet, r.ingredient, -delta)
@@ -1546,7 +1562,7 @@ def _do_rebuild(outlet: Outlet) -> dict:
                 prod = get_product(pid)
                 for r in prod.recipes.all():
                     ing = r.ingredient
-                    if ing.tracking_mode == TrackingMode.ONE_TIME:
+                    if ing.tracking_mode in (TrackingMode.ONE_TIME, TrackingMode.PERIODIC_COUNT):
                         continue
                     delta = Decimal(str(qty)) * r.quantity_per_unit
                     if delta:

@@ -42,6 +42,19 @@ export function saveSelectedOutletId(id: number) {
   localStorage.setItem(OWNER_OUTLET_KEY, String(id));
 }
 
+// Which outlet /staff/* screens should act on. A real STAFF login always has
+// `user.outlet` set. An Owner using "Staff view" (acting under their own
+// identity to fix a staff mistake — see lib/auth.tsx enterStaffView) has no
+// outlet of their own, so this falls back to whichever outlet they'd last
+// selected in the Owner section (lib/ownerOutlet.tsx), persisted here since
+// /staff/* has its own separate layout with no OwnerOutletContext ancestor.
+export function resolveOutlet(user: { outlet: number | null; role: string } | null | undefined): number | null {
+  if (!user) return null;
+  if (user.outlet) return user.outlet;
+  if (user.role === "OWNER") return getSelectedOutletId();
+  return null;
+}
+
 export function getActingRole(): "STAFF" | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(ACTING_ROLE_KEY) === "STAFF" ? "STAFF" : null;

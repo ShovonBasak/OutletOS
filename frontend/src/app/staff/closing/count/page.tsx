@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getOrCreateTodayClosing, invalidateClosingCache } from "@/lib/closing";
 import { today } from "@/lib/format";
@@ -95,7 +95,7 @@ export default function CountScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const { workDate, day } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const opDate = workDate || today();
 
   const [products, setProducts] = useState<Product[]>([]);

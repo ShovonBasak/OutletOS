@@ -122,6 +122,7 @@ export interface Recipe {
   ingredient: number;
   ingredient_name: string;
   base_unit: string;
+  ingredient_tracking_mode: TrackingMode;
   quantity_per_unit: string;
   is_primary: boolean;
 }

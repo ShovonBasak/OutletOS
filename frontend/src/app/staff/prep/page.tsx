@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { bdt, timeOf, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
@@ -36,6 +36,13 @@ function maxPreparablePieces(
   if (product.recipes.length === 0 && product.product_recipe_components.length === 0) return 0;
   let cap = Infinity;
   for (const r of product.recipes) {
+    // PERIODIC_COUNT ingredients (bags, sticks, sachets with no fixed
+    // per-product ratio) are never tracked via RawStock — see
+    // stock.services.consume_for_preparation — so they never have a
+    // meaningful quantity_available here either. Counting them against the
+    // cap would hide a product the moment its outlet has no legacy RawStock
+    // row for one, even though nothing ever reads or writes it there.
+    if (r.ingredient_tracking_mode === "PERIODIC_COUNT") continue;
     const rs = rawByIngredient.get(r.ingredient);
     const available = rs ? Number(rs.quantity_available) : 0;
     const perPiece = Number(r.quantity_per_unit);
@@ -77,6 +84,7 @@ function maxPreparablePacks(
   // Limit by each supporting ingredient
   for (const r of product.recipes) {
     if (r.id === primary.id) continue;
+    if (r.ingredient_tracking_mode === "PERIODIC_COUNT") continue;
     const otherRs = rawByIngredient.get(r.ingredient);
     const available = otherRs ? Number(otherRs.quantity_available) : 0;
     const perUnit = Number(r.quantity_per_unit);
@@ -92,7 +100,7 @@ function maxPreparablePacks(
 export default function PrepPage() {
   const { user } = useAuth();
   const { day, workDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const opDate = workDate || today();
   const [allProducts, setAllProducts] = useState<PrepProduct[]>([]);
   const [logs, setLogs] = useState<PrepLog[]>([]);

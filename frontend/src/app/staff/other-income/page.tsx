@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { shortDate, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
@@ -15,7 +15,7 @@ export default function StaffOtherIncome() {
   const router = useRouter();
   const { user } = useAuth();
   const { workDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const opDate = workDate || today();
   const [categories, setCategories] = useState<OtherIncomeCategory[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccountName[]>([]);

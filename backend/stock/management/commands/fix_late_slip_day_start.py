@@ -61,7 +61,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--date", required=True, help="Operating day to fix (YYYY-MM-DD).")
-        parser.add_argument("--outlet-id", type=int, default=1, help="Outlet id. Default: 1.")
+        parser.add_argument("--outlet-id", type=int, required=True, help="Outlet id.")
         parser.add_argument("--apply", action="store_true", help="Commit changes. Default is dry-run.")
 
     def handle(self, *args, **options):

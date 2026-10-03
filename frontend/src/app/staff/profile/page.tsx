@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Outlet, Paginated } from "@/lib/types";
 
 export default function StaffProfile() {
   const { user, logout } = useAuth();
+  const outlet = resolveOutlet(user);
   const [outletName, setOutletName] = useState("");
 
   // Change-password form state
@@ -20,10 +21,10 @@ export default function StaffProfile() {
 
   useEffect(() => {
     api<Paginated<Outlet>>("/outlets/").then((d) => {
-      const o = d.results.find((x) => x.id === user?.outlet) ?? d.results[0];
+      const o = d.results.find((x) => x.id === outlet);
       if (o) setOutletName(o.name);
     });
-  }, [user?.outlet]);
+  }, [outlet]);
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();

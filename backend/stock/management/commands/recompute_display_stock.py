@@ -1,8 +1,8 @@
 """Recompute DisplayStock for a given operating day from prep logs.
 
 Usage:
-    python manage.py recompute_display_stock            # today
-    python manage.py recompute_display_stock 2026-08-15 # specific date
+    python manage.py recompute_display_stock --outlet 2            # today
+    python manage.py recompute_display_stock 2026-08-15 --outlet 2 # specific date
 
 For each prepared product, DS is set to:
     sum(pieces_prepared for FRESH + CARRIED_FORWARD logs on that date)
@@ -35,8 +35,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--outlet",
             type=int,
-            default=1,
-            help="Outlet ID (default: 1).",
+            required=True,
+            help="Outlet ID.",
         )
         parser.add_argument(
             "--dry-run",

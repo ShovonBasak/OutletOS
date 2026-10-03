@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Brand } from "@/components/Brand";
 import { UserMenu } from "@/components/UserMenu";
 import { useAuth, useRequireRole } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { getTodayOperatingDay, invalidateDayCache } from "@/lib/operatingDay";
 import { OperatingDayContext } from "@/lib/staffDay";
 import { today } from "@/lib/format";
@@ -24,7 +24,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const { user, actingAsStaff, exitStaffView } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const [day, setDay] = useState<OperatingDay | null>(null);
   const [workDate, _setWorkDate] = useState(today());
   const workDateRef = useRef(workDate);

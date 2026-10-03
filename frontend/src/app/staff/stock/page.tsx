@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { packBreakdown } from "@/lib/format";
 import type { DisplayStock, Paginated, RawStock } from "@/lib/types";
 
 export default function StockOverview() {
   const { user } = useAuth();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const [raw, setRaw] = useState<RawStock[]>([]);
   const [ready, setReady] = useState<DisplayStock[]>([]);
 

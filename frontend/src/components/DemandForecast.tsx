@@ -108,7 +108,7 @@ const HIDDEN_CATEGORIES = new Set(["Add-on"]);
  * date-by-date matrix on `md:` up where there's room for it at a glance.
  * Shared between staff and owner.
  */
-export function DemandForecast({ outlet = 1 }: { outlet?: number }) {
+export function DemandForecast({ outlet }: { outlet: number }) {
   const [start, setStart] = useState(daysAgo(14));
   const [end, setEnd] = useState(today());
   const [search, setSearch] = useState("");

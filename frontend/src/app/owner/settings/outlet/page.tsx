@@ -3,22 +3,21 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { Outlet, Paginated } from "@/lib/types";
+import { useOwnerOutlet } from "@/lib/ownerOutlet";
+import type { Outlet } from "@/lib/types";
 
 export default function OutletSettingsPage() {
   const { isOwner } = useAuth();
+  const { selectedOutlet } = useOwnerOutlet();
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const [draft, setDraft] = useState<{ name: string; address: string } | null>(null);
   const [outletSaving, setOutletSaving] = useState(false);
   const [flagSaving, setFlagSaving] = useState(false);
 
   useEffect(() => {
-    api<Paginated<Outlet>>("/outlets/").then((d) => {
-      const o = d.results[0] ?? null;
-      setOutlet(o);
-      if (o) setDraft({ name: o.name, address: o.address });
-    });
-  }, []);
+    setOutlet(selectedOutlet);
+    if (selectedOutlet) setDraft({ name: selectedOutlet.name, address: selectedOutlet.address });
+  }, [selectedOutlet]);
 
   async function saveOutlet() {
     if (!outlet || !draft) return;

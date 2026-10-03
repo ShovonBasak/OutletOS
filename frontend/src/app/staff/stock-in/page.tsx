@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useOperatingDay } from "@/lib/staffDay";
 import { shortDate, today } from "@/lib/format";
@@ -176,7 +176,7 @@ function StockInCard({
 export default function StockInPage() {
   const { user } = useAuth();
   const { day, workDate } = useOperatingDay();
-  const outlet = user?.outlet ?? 1;
+  const outlet = resolveOutlet(user) ?? 1;
   const opDate = workDate || today();
   const fileRef    = useRef<HTMLInputElement>(null);
   const aliasedRef = useRef<Set<string>>(new Set());
