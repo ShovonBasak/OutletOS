@@ -5,7 +5,8 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, today } from "@/lib/format";
-import { BALANCE_COLOR } from "@/lib/accountTypes";
+import { ACCOUNT_TYPE_COLOR, ACCOUNT_TYPE_ICON, ACCOUNT_TYPE_LABELS, BALANCE_COLOR } from "@/lib/accountTypes";
+import { BottomSheet } from "@/components/BottomSheet";
 import type { AccountType, FinancialAccount, Paginated } from "@/lib/types";
 
 const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
@@ -17,6 +18,7 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
 
 export default function ManageAccountsPage() {
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const [editingAccount, setEditingAccount] = useState<FinancialAccount | null>(null);
   const [newAccType, setNewAccType] = useState<AccountType>("CASH");
@@ -40,6 +42,12 @@ export default function ManageAccountsPage() {
     setNewAccOpening(a.opening_balance);
     setNewAccOpeningDate(a.opening_balance_date);
     setAccError(null);
+    setSheetOpen(true);
+  }
+
+  function openAddSheet() {
+    cancelEdit();
+    setSheetOpen(true);
   }
 
   function cancelEdit() {
@@ -50,6 +58,11 @@ export default function ManageAccountsPage() {
     setNewAccOpeningDate(today());
     setNewAccType("CASH");
     setAccError(null);
+  }
+
+  function closeSheet() {
+    cancelEdit();
+    setSheetOpen(false);
   }
 
   async function loadAccounts() {
@@ -76,6 +89,7 @@ export default function ManageAccountsPage() {
         await api("/financial-accounts/", { method: "POST", body: JSON.stringify(body) });
       }
       cancelEdit();
+      setSheetOpen(false);
       await loadAccounts();
     } catch {
       setAccError("Could not save account.");
@@ -136,8 +150,113 @@ export default function ManageAccountsPage() {
 
       {/* Account list */}
       <div className="flex flex-col gap-3">
-        <h2 className="sec">All accounts</h2>
-        <div className="overflow-x-auto">
+        <div className="flex items-center justify-between">
+          <h2 className="sec">All accounts</h2>
+          <button
+            onClick={openAddSheet}
+            className="rounded-lg border border-chrome/40 bg-chrome/5 px-3 py-1.5 font-mono text-[11px] text-chrome hover:bg-chrome/10"
+          >
+            + Add account
+          </button>
+        </div>
+        {/* Mobile: one card per account — the table below needs horizontal
+            scroll to see every column, which doesn't work well on a phone. */}
+        <div className="flex flex-col gap-3 sm:hidden">
+          {accounts.map((a) => {
+            const bal = Number(a.current_balance);
+            return (
+              <div
+                key={a.id}
+                className={`flex flex-col gap-2.5 rounded-lg border-2 px-4 py-3 ${ACCOUNT_TYPE_COLOR[a.account_type] ?? "border-[#d8cdb0]"} ${!a.is_active ? "opacity-60" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="text-base leading-none">{ACCOUNT_TYPE_ICON[a.account_type]}</span>
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-[15px] font-bold text-ink">{a.name}</p>
+                      <p className="font-mono text-[10px] text-ink-soft">
+                        {ACCOUNT_TYPE_LABELS[a.account_type]}{a.provider ? ` · ${a.provider}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <p className={`shrink-0 font-mono text-[18px] font-bold ${BALANCE_COLOR(bal)}`}>
+                    {bdt(bal)}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {a.is_active ? (
+                    <button
+                      onClick={() => toggleActive(a)}
+                      className="font-mono text-[10px] px-2 py-0.5 rounded border border-leaf/40 bg-leaf/10 text-leaf-deep"
+                      title="Click to deactivate"
+                    >
+                      Active
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => toggleActive(a)}
+                      className="font-mono text-[10px] px-2 py-0.5 rounded border border-gold/60 bg-gold/10 text-gold-deep"
+                      title="Click to reactivate"
+                    >
+                      Reactivate
+                    </button>
+                  )}
+                  {a.account_type === "CASH" && (
+                    a.is_primary_cash ? (
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded border border-chrome/40 bg-chrome/10 text-chrome">
+                        ★ Primary
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setPrimaryCash(a)}
+                        className="font-mono text-[10px] px-2 py-0.5 rounded border border-[#d8cdb0] text-ink-soft"
+                        title="Use this account as the computed cash remainder in day closing"
+                      >
+                        Set primary
+                      </button>
+                    )
+                  )}
+                  <span className="ml-auto font-mono text-[10px] text-ink-soft">
+                    Opening {bdt(a.opening_balance)}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 border-t border-dotted border-[#d8cdb0] pt-2">
+                  <button
+                    onClick={() => startEdit(a)}
+                    className="font-mono text-[11px] text-gold-deep underline"
+                  >
+                    Edit
+                  </button>
+                  {deleteConfirm === a.id ? (
+                    <span className="ml-auto flex items-center gap-3">
+                      <button
+                        className="font-mono text-[11px] font-bold text-chili-deep"
+                        onClick={() => deleteAccount(a.id)}
+                      >Confirm delete</button>
+                      <button
+                        className="font-mono text-[11px] text-ink-soft"
+                        onClick={() => setDeleteConfirm(null)}
+                      >Cancel</button>
+                    </span>
+                  ) : (
+                    <button
+                      className="ml-auto font-mono text-[11px] text-chili opacity-60"
+                      onClick={() => setDeleteConfirm(a.id)}
+                    >Delete</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {accounts.length === 0 && (
+            <p className="py-6 text-center font-mono text-xs text-ink-soft">No accounts yet.</p>
+          )}
+        </div>
+
+        {/* Desktop/tablet: full table, every column visible without a mobile-only card layout. */}
+        <div className="hidden overflow-x-auto sm:block">
           <table className="datatable min-w-[640px]">
             <thead>
               <tr>
@@ -238,19 +357,20 @@ export default function ManageAccountsPage() {
         {accError && <p className="font-mono text-[11px] text-chili-deep">{accError}</p>}
       </div>
 
-      {/* Add / edit form */}
-      <div className="flex flex-col gap-3">
-        <h2 className="sec">
-          {editingAccount ? `Editing: ${editingAccount.name}` : "Add account"}
-        </h2>
-        {editingAccount && (
-          <p className="text-xs text-ink-soft">
-            Changing the opening balance will shift the current balance by the same amount.
-            Transactions are not affected.
+      {/* Add / edit account — popup instead of an always-visible inline
+          form, triggered by "+ Add account" above or "Edit" on a row. */}
+      <BottomSheet open={sheetOpen} onClose={closeSheet}>
+        <div className="flex flex-col gap-4 px-5 pb-6">
+          <p className="font-display text-[16px] font-bold text-ink">
+            {editingAccount ? `Editing: ${editingAccount.name}` : "Add account"}
           </p>
-        )}
-        <div className="formgrid">
-          <label className="field">
+          {editingAccount && (
+            <p className="-mt-1 text-xs text-ink-soft">
+              Changing the opening balance will shift the current balance by the same amount.
+              Transactions are not affected.
+            </p>
+          )}
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Account type</span>
             <select
               className="field-input"
@@ -262,7 +382,7 @@ export default function ManageAccountsPage() {
               ))}
             </select>
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Account name</span>
             <input
               className="field-input"
@@ -271,7 +391,7 @@ export default function ManageAccountsPage() {
               onChange={(e) => setNewAccName(e.target.value)}
             />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Provider (optional)</span>
             <input
               className="field-input"
@@ -280,7 +400,7 @@ export default function ManageAccountsPage() {
               onChange={(e) => setNewAccProvider(e.target.value)}
             />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Opening balance (৳)</span>
             <input
               className="field-input"
@@ -290,7 +410,7 @@ export default function ManageAccountsPage() {
               onChange={(e) => setNewAccOpening(e.target.value)}
             />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Opening balance date</span>
             <input
               type="date"
@@ -299,17 +419,15 @@ export default function ManageAccountsPage() {
               onChange={(e) => setNewAccOpeningDate(e.target.value)}
             />
           </label>
+          {accError && <p className="font-mono text-[11px] text-chili-deep">{accError}</p>}
+          <div className="flex gap-2">
+            <button className="btn btn-primary flex-1" disabled={accSaving} onClick={saveAccount}>
+              {accSaving ? "Saving…" : editingAccount ? "Save changes" : "Add account"}
+            </button>
+            <button className="btn btn-ghost flex-1" disabled={accSaving} onClick={closeSheet}>Cancel</button>
+          </div>
         </div>
-        {accError && <p className="font-mono text-[11px] text-chili-deep">{accError}</p>}
-        <div className="flex gap-2">
-          <button className="btn btn-primary w-40" disabled={accSaving} onClick={saveAccount}>
-            {accSaving ? "Saving…" : editingAccount ? "Save changes" : "Add account"}
-          </button>
-          {editingAccount && (
-            <button className="btn btn-ghost w-28" onClick={cancelEdit}>Cancel</button>
-          )}
-        </div>
-      </div>
+      </BottomSheet>
     </div>
   );
 }
