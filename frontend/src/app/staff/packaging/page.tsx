@@ -22,6 +22,7 @@ export default function PackagingPage() {
     const data = await api<PackagingLevel[]>(
       `/periodic-stock-checks/levels/?outlet=${outlet}`
     );
+    data.sort((a, b) => a.ingredient_display_name.localeCompare(b.ingredient_display_name));
     setItems(data);
   }
 
