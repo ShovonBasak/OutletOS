@@ -97,7 +97,7 @@ export default function PackagingPage() {
           return (
             <div key={item.ingredient} className="ticket flex flex-col gap-2">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-display text-sm font-bold">{item.ingredient_name}</span>
+                <span className="font-display text-sm font-bold">{item.ingredient_display_name}</span>
                 <div className="text-right shrink-0">
                   <p className="qty text-ink">
                     {qty} {item.base_unit}
@@ -138,7 +138,7 @@ export default function PackagingPage() {
               {isBundleSizeEdit ? (
                 <div className="rounded bg-paper-dim px-2 py-2">
                   <p className="mb-1.5 font-mono text-[10px] text-ink-soft">
-                    How many {item.base_unit} in one bundle/pack of {item.ingredient_name}?
+                    How many {item.base_unit} in one bundle/pack of {item.ingredient_display_name}?
                   </p>
                   <div className="flex gap-2">
                     <input
