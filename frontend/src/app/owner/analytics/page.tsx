@@ -97,11 +97,12 @@ function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
   const selRev  = sel ? Number(sel.revenue) : 0;
   const selCogs = sel ? Math.min(Number(sel.cogs), selRev) : 0;
   const selGp   = sel ? selRev - selCogs : 0;
+  const selMargin = selRev > 0 ? (selGp / selRev) * 100 : 0;
 
   return (
-    <div>
+    <div className="flex flex-col gap-1.5">
       <div className="overflow-x-auto">
-        <div className="min-w-[380px]">
+        <div className="relative min-w-[380px]">
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
             {/* grid lines + y labels */}
             {ticks.map((tk, i) => (
@@ -148,29 +149,36 @@ function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
               );
             })}
 
-            {/* Tap/click targets — one per day, full plot height, on top of
-                everything else so a bar can be selected even when its own height
-                is 0 (a day with no sales). */}
-            {daily.map((_, i) => {
-              const x = PAD.l + i * groupW;
-              return (
-                <rect
-                  key={i}
-                  x={x} y={PAD.t} width={groupW} height={ph}
-                  fill={selected === i ? "#7A2420" : "transparent"}
-                  opacity={selected === i ? 0.06 : 0}
-                  onClick={() => setSelected(i)}
-                  style={{ cursor: "pointer" }}
-                />
-              );
-            })}
           </svg>
+
+          {/* Tap overlay — one real <button> per day-column (not an SVG
+              shape), so touch gets a proper :active press state, which an
+              SVG rect can't give you on mobile. Percentage widths mirror
+              the SVG's own viewBox math, so each button lines up exactly
+              with its bar regardless of rendered pixel size. */}
+          <div className="absolute inset-0 flex">
+            <div style={{ width: `${(PAD.l / W) * 100}%` }} />
+            {daily.map((d, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setSelected(i)}
+                style={{ width: `${(groupW / W) * 100}%` }}
+                className={`h-full shrink-0 rounded-sm ${selected === i ? "bg-chrome/15" : "active:bg-chrome/10"}`}
+                aria-label={`${d.date}: revenue ${bdt(d.revenue)}, COGS ${bdt(d.cogs)}`}
+              />
+            ))}
+            <div style={{ width: `${(PAD.r / W) * 100}%` }} />
+          </div>
         </div>
       </div>
 
       {sel && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-paper-dim px-2 py-1.5 font-mono text-[10.5px]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-paper-dim px-2 py-1.5 font-mono text-[10.5px]">
           <span className="font-semibold text-ink">{sel.date}</span>
+          <span className="text-ink-soft">
+            Sold <span className="font-semibold text-ink">{sel.units_sold}</span> pcs
+          </span>
           <span className="text-ink-soft">
             Revenue <span className="font-semibold text-ink">{bdt(selRev)}</span>
           </span>
@@ -178,7 +186,10 @@ function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
             COGS <span className="font-semibold text-ink">{bdt(selCogs)}</span>
           </span>
           <span className="text-ink-soft">
-            Gross profit <span className="font-semibold" style={{ color: "#7A2420" }}>{bdt(selGp)}</span>
+            Profit <span className={`font-semibold ${selGp >= 0 ? "text-leaf-deep" : "text-chili-deep"}`}>{bdt(selGp)}</span>
+          </span>
+          <span className="text-ink-soft">
+            Margin <span className="font-semibold text-ink">{selMargin.toFixed(0)}%</span>
           </span>
         </div>
       )}
