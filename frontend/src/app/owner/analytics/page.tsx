@@ -66,7 +66,15 @@ function pct(a: number, b: number) {
 
 // ── SVG: Daily bar chart ──────────────────────────────────────────────────────
 
+/** Tap interaction matches the Sell History page's day-by-day chart
+ * (DemandForecast's ComboChart): a real <button> overlay per day-column
+ * (proper :active press feedback, which an SVG shape can't give you on
+ * mobile), defaulting to the most recent day so a number is visible before
+ * the first tap, and the summary rendered OUTSIDE the horizontal scroll
+ * wrapper so it stays put while the chart itself scrolls left/right. */
 function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
+  const [selected, setSelected] = useState<number | null>(daily.length > 0 ? daily.length - 1 : null);
+
   if (daily.length === 0) {
     return <p className="py-6 text-center font-mono text-xs text-ink-soft italic">No closed days in this period.</p>;
   }
@@ -91,53 +99,99 @@ function DailyBarChart({ daily }: { daily: DashboardData["daily"] }) {
 
   const step = daily.length <= 10 ? 1 : Math.ceil(daily.length / 9);
 
+  const sel = selected !== null ? daily[selected] : null;
+  const selRev = sel ? Number(sel.revenue) : 0;
+  const selCogs = sel ? Math.min(Number(sel.cogs), selRev) : 0;
+  const selGp = selRev - selCogs;
+  const selMargin = selRev > 0 ? (selGp / selRev) * 100 : 0;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {/* grid lines + y labels */}
-      {ticks.map((tk, i) => (
-        <g key={i}>
-          <line x1={PAD.l} y1={tk.y} x2={W - PAD.r} y2={tk.y}
-                stroke="#e8dfc8" strokeWidth={i === 0 ? "0.8" : "0.4"} />
-          <text x={PAD.l - 5} y={tk.y + 3} textAnchor="end"
-                fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
-            {tk.label}
-          </text>
-        </g>
-      ))}
+    <div className="flex flex-col gap-2">
+      <div className="overflow-x-auto">
+        <div className="relative min-w-[380px]">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+            {/* grid lines + y labels */}
+            {ticks.map((tk, i) => (
+              <g key={i}>
+                <line x1={PAD.l} y1={tk.y} x2={W - PAD.r} y2={tk.y}
+                      stroke="#e8dfc8" strokeWidth={i === 0 ? "0.8" : "0.4"} />
+                <text x={PAD.l - 5} y={tk.y + 3} textAnchor="end"
+                      fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
+                  {tk.label}
+                </text>
+              </g>
+            ))}
 
-      {/* bars */}
-      {daily.map((d, i) => {
-        const x   = PAD.l + i * groupW + barOff;
-        const rev = Number(d.revenue);
-        const cogs = Math.min(Number(d.cogs), rev);
-        const gp  = rev - cogs;
-        const revH  = rev  * scale;
-        const cogsH = cogs * scale;
-        const gpH   = gp   * scale;
-        const baseY = PAD.t + ph;
+            {/* bars */}
+            {daily.map((d, i) => {
+              const x   = PAD.l + i * groupW + barOff;
+              const rev = Number(d.revenue);
+              const cogs = Math.min(Number(d.cogs), rev);
+              const gp  = rev - cogs;
+              const revH  = rev  * scale;
+              const cogsH = cogs * scale;
+              const gpH   = gp   * scale;
+              const baseY = PAD.t + ph;
+              const isSel = selected === i;
 
-        return (
-          <g key={i}>
-            <title>{`${d.date}  Rev: ${bdt(rev)}  COGS: ${bdt(cogs)}  GP: ${bdt(gp)}`}</title>
-            {gpH   > 0 && <rect x={x} y={baseY - revH}        width={barW} height={gpH}   fill="#7A2420" opacity="0.82" rx="1.5" />}
-            {cogsH > 0 && <rect x={x} y={baseY - cogsH}       width={barW} height={cogsH} fill="#C9A227" opacity="0.75" rx="1.5" />}
-          </g>
-        );
-      })}
+              return (
+                <g key={i}>
+                  <title>{`${d.date}  Rev: ${bdt(rev)}  COGS: ${bdt(cogs)}  GP: ${bdt(gp)}`}</title>
+                  {gpH   > 0 && <rect x={x} y={baseY - revH}  width={barW} height={gpH}   fill="#7A2420" opacity={isSel ? "1" : "0.82"} rx="1.5" />}
+                  {cogsH > 0 && <rect x={x} y={baseY - cogsH} width={barW} height={cogsH} fill="#C9A227" opacity={isSel ? "1" : "0.75"} rx="1.5" />}
+                </g>
+              );
+            })}
 
-      {/* x-axis date labels */}
-      {daily.map((d, i) => {
-        if (i % step !== 0 && i !== daily.length - 1) return null;
-        const cx = PAD.l + i * groupW + groupW / 2;
-        const label = d.date.slice(5).replace("-", "/");
-        return (
-          <text key={i} x={cx} y={H - 6} textAnchor="middle"
-                fontFamily="monospace" fontSize="7.5" fill="#9B8A78">
-            {label}
-          </text>
-        );
-      })}
-    </svg>
+            {/* x-axis date labels — the selected day's label stands out,
+                same as ComboChart highlights its selected weekday/date. */}
+            {daily.map((d, i) => {
+              if (i % step !== 0 && i !== daily.length - 1) return null;
+              const cx = PAD.l + i * groupW + groupW / 2;
+              const label = d.date.slice(5).replace("-", "/");
+              const isSel = selected === i;
+              return (
+                <text key={i} x={cx} y={H - 6} textAnchor="middle"
+                      fontFamily="monospace" fontSize="7.5" fontWeight={isSel ? "bold" : "normal"}
+                      fill={isSel ? "#7A2420" : "#9B8A78"}>
+                  {label}
+                </text>
+              );
+            })}
+          </svg>
+
+          {/* Tap overlay — one real <button> per day-column (not an SVG
+              shape), so touch gets a proper press state. Percentage widths
+              mirror the SVG's own viewBox math, so each button lines up
+              exactly with its bar regardless of rendered pixel size. */}
+          <div className="absolute inset-0 flex">
+            <div style={{ width: `${(PAD.l / W) * 100}%` }} />
+            {daily.map((d, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setSelected(i)}
+                style={{ width: `${(groupW / W) * 100}%` }}
+                className={`h-full shrink-0 rounded-sm ${selected === i ? "bg-chrome/15" : "active:bg-chrome/10"}`}
+                aria-label={`${d.date}: revenue ${bdt(d.revenue)}, COGS ${bdt(d.cogs)}`}
+              />
+            ))}
+            <div style={{ width: `${(PAD.r / W) * 100}%` }} />
+          </div>
+        </div>
+      </div>
+
+      {sel && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded bg-paper-dim px-2.5 py-1.5 font-mono text-[10.5px]">
+          <span className="font-semibold text-ink">{sel.date}</span>
+          <span className="text-ink-soft">Sold <strong className="text-ink">{sel.units_sold}</strong> pcs</span>
+          <span className="text-ink-soft">Revenue <strong className="text-leaf-deep">{bdt(selRev)}</strong></span>
+          <span className="text-ink-soft">COGS <strong className="text-chili">{bdt(selCogs)}</strong></span>
+          <span className="text-ink-soft">Profit <strong className={selGp >= 0 ? "text-leaf-deep" : "text-chili-deep"}>{bdt(selGp)}</strong></span>
+          <span className="text-ink-soft">Margin <strong className="text-ink">{selMargin.toFixed(0)}%</strong></span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -535,11 +589,7 @@ export default function OwnerDashboard() {
               </div>
             }
           >
-            <div className="overflow-x-auto">
-              <div className="min-w-[380px]">
-                <DailyBarChart daily={data.daily} />
-              </div>
-            </div>
+            <DailyBarChart daily={data.daily} />
           </Card>
 
           {/* ── Two-column: Products + P&L ────────────────────────────── */}
