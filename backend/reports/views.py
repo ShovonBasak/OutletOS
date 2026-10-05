@@ -288,8 +288,10 @@ def compute_pnl(start, end, outlet=None):
     lines = DailyClosingSalesLine.objects.filter(
         daily_closing__closing_date__gte=start, daily_closing__closing_date__lte=end
     )
-    expenses = Expense.objects.filter(date__gte=start, date__lte=end).select_related("category")
-    other_incomes = OtherIncome.objects.filter(date__gte=start, date__lte=end)
+    expenses = Expense.objects.filter(
+        date__gte=start, date__lte=end, is_deleted=False
+    ).select_related("category")
+    other_incomes = OtherIncome.objects.filter(date__gte=start, date__lte=end, is_deleted=False)
     if outlet:
         lines = lines.filter(daily_closing__outlet_id=outlet)
         expenses = expenses.filter(outlet_id=outlet)

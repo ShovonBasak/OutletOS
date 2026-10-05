@@ -30,6 +30,7 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
     entered_by_name = serializers.CharField(source="entered_by.name", read_only=True)
     account_name = serializers.CharField(source="account.name", read_only=True)
     transaction_type_display = serializers.CharField(source="get_transaction_type_display", read_only=True)
+    counterpart_account_name = serializers.SerializerMethodField()
 
     # Fields locked once a transaction is posted — real accounting software
     # doesn't edit posted ledger entries in place (that would require
@@ -42,10 +43,24 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "account", "account_name", "transaction_type", "transaction_type_display",
             "amount", "date", "source_type", "source_id",
-            "entered_by", "entered_by_name", "note",
+            "entered_by", "entered_by_name", "note", "counterpart_account_name",
             "balance_before", "balance_after", "created_at",
         ]
         read_only_fields = ["entered_by", "balance_before", "balance_after", "created_at"]
+
+    def get_counterpart_account_name(self, obj):
+        # A transfer posts two linked legs (same source_type/source_id, see
+        # finance.services.post_transfer_pair) — one leg can't show "this
+        # moved money" without naming the account on the other end.
+        if obj.transaction_type not in ("TRANSFER_IN", "TRANSFER_OUT") or not obj.source_id:
+            return None
+        sibling = (
+            AccountTransaction.objects
+            .filter(source_type=obj.source_type, source_id=obj.source_id)
+            .exclude(pk=obj.pk).exclude(account_id=obj.account_id)
+            .select_related("account").first()
+        )
+        return sibling.account.name if sibling else None
 
     def update(self, instance, validated_data):
         changed = [

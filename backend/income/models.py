@@ -31,6 +31,17 @@ class OtherIncome(models.Model):
     description = models.TextField(blank=True)
     entered_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
 
+    # Soft-delete — "deleting" an entry keeps the row (and its audit trail)
+    # instead of erasing it; the linked AccountTransaction is still voided so
+    # it stops affecting balances/P&L. See OtherIncomeViewSet.perform_destroy.
+    # Mirrors costs.models.Expense.
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="deleted_other_incomes",
+    )
+
     class Meta:
         ordering = ["-date"]
 

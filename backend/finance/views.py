@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -131,6 +132,15 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         return Response(FinancialAccountSerializer(created, many=True).data, status=201)
 
 
+class AccountTransactionPagination(PageNumberPagination):
+    # 100 default keeps today's callers (the full transaction log, which
+    # fetches one page and has no pager UI) unchanged; the Accounts
+    # dashboard's "Recent activity" explicitly asks for page_size=10.
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+
 class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """
     Read/write for owner; admin reads for support. destroy is the one
@@ -140,6 +150,7 @@ class AccountTransactionViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     """
     queryset = AccountTransaction.objects.select_related("account", "entered_by")
     serializer_class = AccountTransactionSerializer
+    pagination_class = AccountTransactionPagination
     org_lookup = "account__organization"
 
     def get_permissions(self):

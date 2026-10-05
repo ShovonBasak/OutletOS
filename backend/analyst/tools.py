@@ -345,7 +345,7 @@ def _get_expenses(inputs: dict, outlet_id) -> str:
     start, end = _parse(inputs["start_date"]), _parse(inputs["end_date"])
     qs = (
         Expense.objects
-        .filter(date__range=(start, end))
+        .filter(date__range=(start, end), is_deleted=False)
         .select_related("category")
         .order_by("date", "category__name")
     )

@@ -7,7 +7,12 @@ import { bdt, shortDate } from "@/lib/format";
 import { ACCOUNT_TYPE_COLOR, ACCOUNT_TYPE_ICON, ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_ORDER, BALANCE_COLOR } from "@/lib/accountTypes";
 import { MoveMoneySheet } from "@/components/MoveMoneySheet";
 import { Snackbar } from "@/components/Snackbar";
+import TransactionCard from "@/components/TransactionCard";
 import type { AccountTransaction, AccountType, FinancialAccount, Paginated } from "@/lib/types";
+
+// Fixed-size preview, not paginated — "View all →" is the way to browse
+// further; this is just the most recent handful at a glance.
+const RECENT_LIMIT = 10;
 
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
@@ -25,7 +30,7 @@ export default function AccountsPage() {
   }
 
   async function loadRecent() {
-    const d = await api<Paginated<AccountTransaction>>("/account-transactions/?limit=8");
+    const d = await api<Paginated<AccountTransaction>>(`/account-transactions/?page_size=${RECENT_LIMIT}`);
     setRecent(d.results);
   }
 
@@ -71,8 +76,11 @@ export default function AccountsPage() {
         </div>
       </button>
 
-      {/* ── Account cards grouped by type — one global expand/collapse on mobile ── */}
-      <section className="flex flex-col gap-4">
+      {/* ── Account cards grouped by type — one global expand/collapse on mobile ──
+          Hidden (not just empty) on mobile when collapsed — a `flex` section with
+          every child `hidden` still has zero height, but the parent's `gap-6` still
+          counts it as a sibling, doubling up the space above and below it. */}
+      <section className={`${accountsExpanded ? "flex" : "hidden"} sm:flex flex-col gap-4`}>
         {ACCOUNT_TYPE_ORDER.map((type) => (
           <CategorySection
             key={type}
@@ -81,13 +89,6 @@ export default function AccountsPage() {
             open={accountsExpanded}
           />
         ))}
-        <Link
-          href="/owner/accounts/manage"
-          className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-[#d8cdb0] py-3 text-ink-soft transition hover:border-chrome-soft hover:text-chrome-soft"
-        >
-          <span className="text-base leading-none">+</span>
-          <span className="font-mono text-[11px]">Add account</span>
-        </Link>
       </section>
 
       {/* ── Quick actions ── */}
@@ -117,23 +118,14 @@ export default function AccountsPage() {
             View all →
           </Link>
         </div>
-        <div className="flex flex-col rounded-lg border border-[#d8cdb0] bg-[#fffdf7] overflow-hidden">
-          {recent.map((t) => {
-            const amt = Number(t.amount);
-            return (
-              <div key={t.id} className="flex items-center gap-3 border-b border-dotted border-[#e8dfc8] px-4 py-2.5 last:border-0">
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono text-[12.5px] text-ink">{t.transaction_type_display} · {t.account_name}</p>
-                  <p className="mt-0.5 font-mono text-[10.5px] text-ink-soft">{shortDate(t.date)}</p>
-                </div>
-                <p className={`shrink-0 font-mono text-[13px] font-semibold ${amt >= 0 ? "text-leaf-deep" : "text-chili-deep"}`}>
-                  {amt >= 0 ? "+" : ""}{bdt(amt)}
-                </p>
-              </div>
-            );
-          })}
+        <div className="flex flex-col gap-2.5">
+          {recent.map((t) => (
+            <TransactionCard key={t.id} t={t} />
+          ))}
           {recent.length === 0 && (
-            <p className="px-4 py-6 text-center font-mono text-xs text-ink-soft">No activity yet.</p>
+            <p className="rounded-lg border border-[#d8cdb0] bg-[#fffdf7] px-4 py-6 text-center font-mono text-xs text-ink-soft">
+              No activity yet.
+            </p>
           )}
         </div>
       </section>

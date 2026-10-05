@@ -10,5 +10,5 @@ class OtherIncomeCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(OtherIncome)
 class OtherIncomeAdmin(admin.ModelAdmin):
-    list_display = ["date", "category", "amount", "outlet", "entered_by"]
-    list_filter = ["category", "outlet", "date"]
+    list_display = ["date", "category", "amount", "outlet", "entered_by", "is_deleted", "deleted_at"]
+    list_filter = ["category", "outlet", "date", "is_deleted"]

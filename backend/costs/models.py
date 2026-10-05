@@ -46,6 +46,16 @@ class Expense(models.Model):
     entered_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     recurring = models.BooleanField(default=False)
 
+    # Soft-delete — "deleting" an expense keeps the row (and its audit trail)
+    # instead of erasing it; the linked AccountTransaction is still voided so
+    # it stops affecting balances/P&L. See ExpenseViewSet.perform_destroy.
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="deleted_expenses",
+    )
+
     class Meta:
         ordering = ["-date"]
 

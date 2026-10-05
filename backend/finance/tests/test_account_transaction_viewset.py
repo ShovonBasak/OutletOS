@@ -14,7 +14,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from catalog.models import Organization
 from finance.models import AccountTransaction, FinancialAccount
-from finance.services import post_transaction
+from finance.services import post_transaction, post_transfer_pair
 
 User = get_user_model()
 
@@ -132,3 +132,29 @@ class AccountTransactionViewSetTests(APITestCase):
         t3.refresh_from_db()
         self.assertEqual(t3.balance_before, Decimal("1100"))  # shifted down by 30
         self.assertEqual(t3.balance_after, Decimal("1150"))
+
+    def test_transfer_legs_expose_each_others_account_as_counterpart(self):
+        """A transfer posts two linked AccountTransaction rows (one per
+        account) — each leg's API representation must name the OTHER
+        account, since neither leg alone tells the whole story."""
+        other = FinancialAccount.objects.create(
+            account_type="BANK", name="Test Bank", organization=self.org,
+            opening_balance=Decimal("0"), opening_balance_date=datetime.date(2026, 1, 1),
+        )
+        leg_out, leg_in = post_transfer_pair(
+            from_account=self.acct, to_account=other, amount=Decimal("200"),
+            date=datetime.date(2026, 1, 5), entered_by=self.owner,
+            source_type="ACCOUNT_TRANSFER", source_id=1,
+        )
+
+        resp_out = self.client.get(f"/api/account-transactions/{leg_out.id}/")
+        self.assertEqual(resp_out.data["counterpart_account_name"], "Test Bank")
+
+        resp_in = self.client.get(f"/api/account-transactions/{leg_in.id}/")
+        self.assertEqual(resp_in.data["counterpart_account_name"], "Test Cash")
+
+    def test_non_transfer_transaction_has_no_counterpart(self):
+        txn = post_transaction(account=self.acct, transaction_type="ADJUSTMENT", amount=Decimal("10"),
+                                date=datetime.date(2026, 1, 5), entered_by=self.owner)
+        resp = self.client.get(f"/api/account-transactions/{txn.id}/")
+        self.assertIsNone(resp.data["counterpart_account_name"])

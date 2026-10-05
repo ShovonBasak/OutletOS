@@ -173,7 +173,7 @@ export default function ManageAccountsPage() {
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="text-base leading-none">{ACCOUNT_TYPE_ICON[a.account_type]}</span>
                     <div className="min-w-0">
-                      <p className="truncate font-display text-[15px] font-bold text-ink">{a.name}</p>
+                      <p className="font-display text-[15px] font-bold text-ink">{a.name}</p>
                       <p className="font-mono text-[10px] text-ink-soft">
                         {ACCOUNT_TYPE_LABELS[a.account_type]}{a.provider ? ` · ${a.provider}` : ""}
                       </p>
@@ -185,23 +185,16 @@ export default function ManageAccountsPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {a.is_active ? (
-                    <button
-                      onClick={() => toggleActive(a)}
-                      className="font-mono text-[10px] px-2 py-0.5 rounded border border-leaf/40 bg-leaf/10 text-leaf-deep"
-                      title="Click to deactivate"
-                    >
-                      Active
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => toggleActive(a)}
-                      className="font-mono text-[10px] px-2 py-0.5 rounded border border-gold/60 bg-gold/10 text-gold-deep"
-                      title="Click to reactivate"
-                    >
-                      Reactivate
-                    </button>
-                  )}
+                  {/* Plain status badge — not itself clickable, so it reads
+                      correctly even on touch where a `title` tooltip never
+                      shows. The actual toggle is the explicit action below. */}
+                  <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                    a.is_active
+                      ? "border-leaf/40 bg-leaf/10 text-leaf-deep"
+                      : "border-gold/60 bg-gold/10 text-gold-deep"
+                  }`}>
+                    {a.is_active ? "Active" : "Inactive"}
+                  </span>
                   {a.account_type === "CASH" && (
                     a.is_primary_cash ? (
                       <span className="font-mono text-[10px] px-2 py-0.5 rounded border border-chrome/40 bg-chrome/10 text-chrome">
@@ -228,6 +221,12 @@ export default function ManageAccountsPage() {
                     className="font-mono text-[11px] text-gold-deep underline"
                   >
                     Edit
+                  </button>
+                  <button
+                    onClick={() => toggleActive(a)}
+                    className={`font-mono text-[11px] underline ${a.is_active ? "text-chili" : "text-leaf-deep"}`}
+                  >
+                    {a.is_active ? "Deactivate" : "Reactivate"}
                   </button>
                   {deleteConfirm === a.id ? (
                     <span className="ml-auto flex items-center gap-3">
@@ -267,8 +266,7 @@ export default function ManageAccountsPage() {
                 <th className="text-right">Balance</th>
                 <th>Status</th>
                 <th>Day-closing cash</th>
-                <th></th>
-                <th></th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -282,23 +280,15 @@ export default function ManageAccountsPage() {
                     {bdt(a.current_balance)}
                   </td>
                   <td>
-                    {a.is_active ? (
-                      <button
-                        onClick={() => toggleActive(a)}
-                        className="font-mono text-[10px] px-2 py-0.5 rounded border border-leaf/40 bg-leaf/10 text-leaf-deep hover:bg-chili/10 hover:text-chili hover:border-chili/40 transition-colors"
-                        title="Click to deactivate"
-                      >
-                        Active
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => toggleActive(a)}
-                        className="font-mono text-[10px] px-2 py-0.5 rounded border border-gold/60 bg-gold/10 text-gold-deep hover:bg-leaf/10 hover:text-leaf-deep hover:border-leaf/40 transition-colors"
-                        title="Click to reactivate"
-                      >
-                        Reactivate
-                      </button>
-                    )}
+                    {/* Plain status badge — the toggle is the explicit
+                        "Deactivate"/"Reactivate" action in the Actions column. */}
+                    <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                      a.is_active
+                        ? "border-leaf/40 bg-leaf/10 text-leaf-deep"
+                        : "border-gold/60 bg-gold/10 text-gold-deep"
+                    }`}>
+                      {a.is_active ? "Active" : "Inactive"}
+                    </span>
                   </td>
                   <td>
                     {a.account_type === "CASH" && (
@@ -318,37 +308,43 @@ export default function ManageAccountsPage() {
                     )}
                   </td>
                   <td>
-                    <button
-                      onClick={() => startEdit(a)}
-                      className="font-mono text-[11px] text-gold-deep underline"
-                    >
-                      Edit
-                    </button>
-                  </td>
-                  <td>
-                    {deleteConfirm === a.id ? (
-                      <span className="flex items-center gap-1">
-                        <button
-                          className="font-mono text-[10px] text-chili-deep font-bold"
-                          onClick={() => deleteAccount(a.id)}
-                        >Confirm</button>
-                        <button
-                          className="font-mono text-[10px] text-ink-soft"
-                          onClick={() => setDeleteConfirm(null)}
-                        >Cancel</button>
-                      </span>
-                    ) : (
+                    <div className="flex items-center gap-3">
                       <button
-                        className="font-mono text-[11px] text-chili opacity-40 hover:opacity-100"
-                        onClick={() => setDeleteConfirm(a.id)}
-                      >✕</button>
-                    )}
+                        onClick={() => startEdit(a)}
+                        className="font-mono text-[11px] text-gold-deep underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => toggleActive(a)}
+                        className={`font-mono text-[11px] underline ${a.is_active ? "text-chili" : "text-leaf-deep"}`}
+                      >
+                        {a.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
+                      {deleteConfirm === a.id ? (
+                        <span className="flex items-center gap-1">
+                          <button
+                            className="font-mono text-[10px] text-chili-deep font-bold"
+                            onClick={() => deleteAccount(a.id)}
+                          >Confirm</button>
+                          <button
+                            className="font-mono text-[10px] text-ink-soft"
+                            onClick={() => setDeleteConfirm(null)}
+                          >Cancel</button>
+                        </span>
+                      ) : (
+                        <button
+                          className="font-mono text-[11px] text-chili opacity-40 hover:opacity-100"
+                          onClick={() => setDeleteConfirm(a.id)}
+                        >✕</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="text-ink-soft">No accounts yet.</td>
+                  <td colSpan={8} className="text-ink-soft">No accounts yet.</td>
                 </tr>
               )}
             </tbody>

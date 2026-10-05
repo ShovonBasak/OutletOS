@@ -4,28 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
-import AccountSelect from "@/components/AccountSelect";
-import type { CostCategory, Expense, FinancialAccount, Paginated } from "@/lib/types";
+import { type Period, monthLabel, rangeFor } from "@/lib/periodFilter";
+import AccountPicker from "@/components/AccountPicker";
+import SearchablePicker from "@/components/SearchablePicker";
+import { BottomSheet } from "@/components/BottomSheet";
+import FilterChip from "@/components/FilterChip";
+import BreakdownList from "@/components/BreakdownList";
+import type { CostCategory, Expense, ExpenseSummary, FinancialAccount, Paginated } from "@/lib/types";
 
-type Period = "today" | "week" | "month" | "custom";
+const PAGE_SIZE = 10;
 
-const COST_TYPES: { value: CostCategory["cost_type"]; label: string }[] = [
-  { value: "FIXED", label: "Fixed" },
-  { value: "VARIABLE", label: "Variable" },
-  { value: "ADHOC", label: "Adhoc" },
+const COST_TYPE_OPTIONS = [
+  { id: "FIXED", name: "Fixed" },
+  { id: "VARIABLE", name: "Variable" },
+  { id: "ADHOC", name: "Adhoc" },
 ];
-
-function rangeFor(period: Period, custom: { from: string; to: string }) {
-  const end = today();
-  if (period === "today") return { from: end, to: end };
-  if (period === "week") {
-    const d = new Date();
-    d.setDate(d.getDate() - 6);
-    return { from: d.toISOString().slice(0, 10), to: end };
-  }
-  if (period === "month") return { from: end.slice(0, 8) + "01", to: end };
-  return custom;
-}
 
 export default function ExpensesPage() {
   const { selectedOutlet } = useOwnerOutlet();
@@ -33,15 +26,31 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<CostCategory[]>([]);
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
+  const [summary, setSummary] = useState<ExpenseSummary | null>(null);
 
-  // Filters
+  // Date-range filters
   const [period, setPeriod] = useState<Period>("month");
+  const [monthValue, setMonthValue] = useState(today().slice(0, 7));
   const [custom, setCustom] = useState({ from: today().slice(0, 8) + "01", to: today() });
+
+  // Category/type/account filters — live inside a sheet now instead of 3
+  // dropdowns in a row; chips below the trigger show what's active.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [catFilter, setCatFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
 
-  // Add-expense form
+  // Pagination — the list is server-paginated now, so totals can no longer
+  // be summed from `expenses`; they come from /expenses/summary/ instead.
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [hasPrev, setHasPrev] = useState(false);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  // Add-expense form (lives inside the popup sheet)
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [category, setCategory] = useState("");
   const [amount, setAmount] = useState("");
   const [expDate, setExpDate] = useState(today());
@@ -50,13 +59,31 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const range = rangeFor(period, custom);
+  function filterParams(): Record<string, string> {
+    const range = rangeFor(period, monthValue, custom);
+    const p: Record<string, string> = { date_from: range.from, date_to: range.to };
+    if (outlet) p.outlet = String(outlet);
+    if (catFilter) p.category = catFilter;
+    if (typeFilter) p.cost_type = typeFilter;
+    if (accountFilter) p.account = accountFilter;
+    return p;
+  }
 
-  async function refreshExpenses() {
+  async function refreshExpenses(p = page) {
     if (!outlet) return;
-    const params = new URLSearchParams({ outlet: String(outlet), date_from: range.from, date_to: range.to });
+    const params = new URLSearchParams({ ...filterParams(), page: String(p), page_size: String(PAGE_SIZE) });
     const d = await api<Paginated<Expense>>(`/expenses/?${params}`);
     setExpenses(d.results);
+    setTotalCount(d.count);
+    setHasNext(!!d.next);
+    setHasPrev(!!d.previous);
+  }
+
+  async function refreshSummary() {
+    if (!outlet) return;
+    const params = new URLSearchParams(filterParams());
+    const d = await api<ExpenseSummary>(`/expenses/summary/?${params}`);
+    setSummary(d);
   }
 
   async function refreshCategories() {
@@ -69,7 +96,10 @@ export default function ExpensesPage() {
     const d = await api<Paginated<FinancialAccount>>("/financial-accounts/");
     setAccounts(d.results);
     if (!accountId) {
-      const def = d.results.find((a) => a.is_primary_cash) ?? d.results[0];
+      // This page is the Owner's own expense log — default to the Owner's
+      // personal cash account, not the shop's (that's the staff default).
+      const ownerCash = d.results.find((a) => a.name.trim().toLowerCase() === "owner cash");
+      const def = ownerCash ?? d.results.find((a) => a.is_primary_cash) ?? d.results[0];
       if (def) setAccountId(String(def.id));
     }
   }
@@ -80,43 +110,59 @@ export default function ExpensesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Any filter change goes back to page 1 — a stale page number from a wider
+  // result set could otherwise land past the end of a narrower one.
   useEffect(() => {
-    refreshExpenses();
+    setPage(1);
+    refreshExpenses(1);
+    refreshSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, custom, outlet]);
+  }, [period, monthValue, custom, catFilter, typeFilter, accountFilter, outlet]);
 
-  const rows = useMemo(() => {
-    return expenses.filter((e) => {
-      if (catFilter && String(e.category) !== catFilter) return false;
-      if (typeFilter && e.cost_type !== typeFilter) return false;
-      if (accountFilter) {
-        if (e.paid_from_account !== null) {
-          if (String(e.paid_from_account) !== accountFilter) return false;
-        } else {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [expenses, catFilter, typeFilter, accountFilter]);
+  function goToPage(p: number) {
+    setPage(p);
+    refreshExpenses(p);
+  }
 
-  const total = useMemo(() => rows.reduce((s, e) => s + Number(e.amount), 0), [rows]);
+  const periodLabel = useMemo(() => {
+    if (period === "today") return "Today";
+    if (period === "week") return "Last 7 days";
+    if (period === "month") return monthLabel(monthValue);
+    return `${shortDate(custom.from)} – ${shortDate(custom.to)}`;
+  }, [period, monthValue, custom]);
 
-  const byAccount = useMemo(() => {
-    const m: Record<string, { name: string; amount: number }> = {};
-    for (const e of rows) {
-      const key = e.paid_from_account_name ?? e.source;
-      const display = e.paid_from_account_name ?? (e.source === "BKASH" ? "bKash" : "Cash");
-      m[key] = { name: display, amount: (m[key]?.amount ?? 0) + Number(e.amount) };
-    }
-    return Object.values(m);
-  }, [rows]);
+  const byAccount = useMemo(
+    () => (summary?.by_account ?? []).map((r) => ({ name: r.name, amount: Number(r.amount) })),
+    [summary]
+  );
+  const byType = useMemo(
+    () => (summary?.by_type ?? []).map((r) => ({
+      name: COST_TYPE_OPTIONS.find((t) => t.id === r.cost_type)?.name ?? r.cost_type,
+      amount: Number(r.amount),
+    })),
+    [summary]
+  );
+  const total = Number(summary?.total ?? 0);
+  const expenseCount = summary?.count ?? 0;
 
-  const byType = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const e of rows) m[e.cost_type] = (m[e.cost_type] ?? 0) + Number(e.amount);
-    return m;
-  }, [rows]);
+  const accountFilterName = accounts.find((a) => String(a.id) === accountFilter)?.name;
+  const typeFilterName = COST_TYPE_OPTIONS.find((t) => t.id === typeFilter)?.name;
+  const catFilterName = categories.find((c) => String(c.id) === catFilter)?.name;
+  const activeFilterCount = [accountFilter, typeFilter, catFilter].filter(Boolean).length;
+
+  function clearAllFilters() {
+    setAccountFilter(""); setTypeFilter(""); setCatFilter("");
+  }
+
+  function openAddSheet() {
+    setError(null);
+    setSheetOpen(true);
+  }
+
+  function closeSheet() {
+    setError(null);
+    setSheetOpen(false);
+  }
 
   async function saveExpense() {
     if (!category || !amount) { setError("Category and amount are required."); return; }
@@ -135,7 +181,9 @@ export default function ExpensesPage() {
         }),
       });
       setAmount(""); setNote("");
-      await refreshExpenses();
+      setSheetOpen(false);
+      await Promise.all([refreshExpenses(1), refreshSummary()]);
+      setPage(1);
     } catch { setError("Could not save expense."); }
     finally { setSaving(false); }
   }
@@ -143,8 +191,16 @@ export default function ExpensesPage() {
   async function deleteExpense(id: number) {
     try {
       await api(`/expenses/${id}/`, { method: "DELETE" });
-      await refreshExpenses();
-    } catch { setError("Could not delete expense."); }
+      setDeleteConfirm(null);
+      // Deleting the last row on a page past the first bounces back one page
+      // instead of showing an empty page with "Prev" still clickable.
+      const landingPage = expenses.length === 1 && page > 1 ? page - 1 : page;
+      setPage(landingPage);
+      await Promise.all([refreshExpenses(landingPage), refreshSummary()]);
+    } catch {
+      setError("Could not delete expense.");
+      setDeleteConfirm(null);
+    }
   }
 
   function paidFromLabel(e: Expense): string {
@@ -155,188 +211,336 @@ export default function ExpensesPage() {
   return (
     <div className="flex flex-col gap-6">
 
-      {/* ── period tabs ── */}
-      <div className="flex flex-wrap gap-2">
-        {(["today", "week", "month", "custom"] as Period[]).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`font-mono text-[11px] px-3 py-1.5 rounded border transition-colors ${
-              period === p
-                ? "bg-ink text-paper border-ink"
-                : "border-[#d8cdb0] text-ink-soft hover:border-ink"
-            }`}
-          >
-            {p === "today" ? "Today" : p === "week" ? "Last 7 days" : p === "month" ? "This month" : "Custom"}
-          </button>
-        ))}
+      {/* ── period selector ── */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap gap-2">
+          {(["today", "week", "month", "custom"] as Period[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`font-mono text-[11px] px-3 py-1.5 rounded border transition-colors ${
+                period === p
+                  ? "bg-ink text-paper border-ink"
+                  : "border-[#d8cdb0] text-ink-soft hover:border-ink"
+              }`}
+            >
+              {p === "today" ? "Today" : p === "week" ? "Last 7 days" : p === "month" ? "Month" : "Custom"}
+            </button>
+          ))}
+        </div>
+
+        {period === "month" && (
+          <label className="field max-w-[220px]">
+            <span className="field-label">Select month</span>
+            <input
+              type="month"
+              className="field-input"
+              value={monthValue}
+              max={today().slice(0, 7)}
+              onChange={(e) => setMonthValue(e.target.value)}
+            />
+          </label>
+        )}
+
+        {period === "custom" && (
+          <div className="flex flex-wrap gap-3">
+            <label className="field flex-1 min-w-[140px]">
+              <span className="field-label">From</span>
+              <input type="date" className="field-input" value={custom.from} max={custom.to}
+                onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
+            </label>
+            <label className="field flex-1 min-w-[140px]">
+              <span className="field-label">To</span>
+              <input type="date" className="field-input" value={custom.to} min={custom.from}
+                onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
+            </label>
+          </div>
+        )}
       </div>
 
-      {period === "custom" && (
-        <div className="flex flex-wrap gap-3">
-          <label className="field flex-1 min-w-[140px]">
-            <span className="field-label">From</span>
-            <input type="date" className="field-input" value={custom.from} max={custom.to}
-              onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} />
-          </label>
-          <label className="field flex-1 min-w-[140px]">
-            <span className="field-label">To</span>
-            <input type="date" className="field-input" value={custom.to} min={custom.from}
-              onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} />
-          </label>
+      {/* ── total hero ── */}
+      <div className="ticket flex flex-col gap-1">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-ink-soft">
+          Total expenses · {periodLabel}
+        </p>
+        <p className="font-display text-[34px] font-bold leading-none text-chili-deep">
+          {bdt(total)}
+        </p>
+        <p className="mt-1 font-mono text-[11px] text-ink-soft">
+          {expenseCount} expense{expenseCount === 1 ? "" : "s"}
+        </p>
+      </div>
+
+      {/* ── breakdown — organized as two short ranked lists with proportion
+          bars, instead of an unbounded row of wrapping chips ── */}
+      {(byAccount.length > 0 || byType.length > 0) && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <BreakdownList title="By account" rows={byAccount} total={total} />
+          <BreakdownList title="By type" rows={byType} total={total} />
         </div>
       )}
 
-      {/* ── summary chips ── */}
-      <div className="flex flex-wrap gap-2">
-        <div className="ticket-chip">
-          <span className="font-mono text-[10px] uppercase text-ink-soft">Total</span>
-          <span className="font-mono text-[14px] font-bold text-ink">{bdt(total)}</span>
-        </div>
-        {byAccount.map((a) => (
-          <div key={a.name} className="ticket-chip">
-            <span className="font-mono text-[10px] uppercase text-ink-soft">{a.name}</span>
-            <span className="font-mono text-[13px] font-semibold text-ink">{bdt(a.amount)}</span>
-          </div>
-        ))}
-        {Object.entries(byType).map(([type, amt]) => (
-          <div key={type} className="ticket-chip">
-            <span className="font-mono text-[10px] uppercase text-ink-soft capitalize">{type.toLowerCase()}</span>
-            <span className="font-mono text-[13px] font-semibold text-ink">{bdt(amt)}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* ── filter bar ── */}
-      <div className="filterbar">
-        <AccountSelect
-          accounts={accounts}
-          value={accountFilter}
-          onChange={setAccountFilter}
-          placeholder="All accounts"
-          className="rounded border border-[#d8cdb0] bg-[#fffdf7] px-2 py-1.5 font-mono text-[11px] text-ink outline-none focus:border-chrome"
-        />
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-          <option value="">All types</option>
-          {COST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-        <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-          <option value="">All categories</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </div>
-
-      {/* ── expense table ── */}
-      <div className="overflow-x-auto">
-        <table className="datatable min-w-[600px]">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Category</th>
-              <th>Type</th>
-              <th>Paid from</th>
-              <th className="text-right">Amount</th>
-              <th>Note</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((e) => (
-              <tr key={e.id}>
-                <td>{shortDate(e.date)}</td>
-                <td>{e.category_name}</td>
-                <td className="capitalize text-ink-soft">{e.cost_type.toLowerCase()}</td>
-                <td>
-                  <span className="font-mono text-[11px] font-semibold text-ink-soft">
-                    {paidFromLabel(e)}
-                  </span>
-                </td>
-                <td className="text-right font-mono">{bdt(e.amount)}</td>
-                <td className="text-ink-soft">{e.description || "—"}</td>
-                <td>
-                  <button
-                    className="font-mono text-[11px] text-chili opacity-40 hover:opacity-100"
-                    title="Delete"
-                    onClick={() => deleteExpense(e.id)}
-                  >✕</button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={7} className="text-ink-soft">No expenses in this period.</td></tr>
-            )}
-            {rows.length > 0 && (
-              <tr className="font-semibold border-t border-[#d8cdb0]">
-                <td colSpan={4} className="font-mono text-[11px] text-ink-soft uppercase">Total</td>
-                <td className="text-right font-mono">{bdt(total)}</td>
-                <td colSpan={2}></td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── add expense ── */}
+      {/* ── expenses ── */}
       <div className="flex flex-col gap-3">
-        <h2 className="sec">Add expense</h2>
-        <div className="formgrid">
-          <label className="field">
+        <div className="flex items-center justify-between">
+          <h2 className="sec">Expenses</h2>
+          <button
+            onClick={openAddSheet}
+            className="rounded-lg border border-chrome/40 bg-chrome/5 px-3 py-1.5 font-mono text-[11px] text-chrome hover:bg-chrome/10"
+          >
+            + Add expense
+          </button>
+        </div>
+
+        {/* filters — one trigger instead of 3 dropdowns in a row; active
+            picks show as removable chips underneath. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setFiltersOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-[#d8cdb0] bg-[#fffdf7] px-3 py-1.5 font-mono text-[11px] text-ink-soft hover:border-chrome-soft hover:text-chrome-soft"
+          >
+            <span>⚙ Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-chrome font-mono text-[9px] font-bold text-paper">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+          {accountFilterName && (
+            <FilterChip label={accountFilterName} onClear={() => setAccountFilter("")} />
+          )}
+          {typeFilterName && (
+            <FilterChip label={typeFilterName} onClear={() => setTypeFilter("")} />
+          )}
+          {catFilterName && (
+            <FilterChip label={catFilterName} onClear={() => setCatFilter("")} />
+          )}
+          {activeFilterCount > 0 && (
+            <button onClick={clearAllFilters} className="font-mono text-[10px] text-ink-soft underline">
+              Clear all
+            </button>
+          )}
+        </div>
+
+        {/* Mobile: one card per expense — the table needs horizontal scroll
+            to see every column, which doesn't work well on a phone. */}
+        <div className="flex flex-col gap-2.5 sm:hidden">
+          {expenses.map((e) => (
+            <div key={e.id} className="flex flex-col gap-2 rounded-lg border-2 border-[#d8cdb0] bg-[#fffdf7] px-4 py-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-display text-[14px] font-bold text-ink">{e.category_name}</p>
+                  <p className="font-mono text-[10px] capitalize text-ink-soft">
+                    {e.cost_type.toLowerCase()} · {shortDate(e.date)}
+                  </p>
+                </div>
+                <p className="shrink-0 font-mono text-[16px] font-bold text-chili-deep">{bdt(e.amount)}</p>
+              </div>
+              {e.description && (
+                <p className="font-mono text-[11px] text-ink-soft">{e.description}</p>
+              )}
+              <div className="flex items-center justify-between border-t border-dotted border-[#d8cdb0] pt-2">
+                <span className="font-mono text-[11px] font-semibold text-ink-soft">{paidFromLabel(e)}</span>
+                {deleteConfirm === e.id ? (
+                  <span className="flex items-center gap-3">
+                    <button
+                      className="font-mono text-[11px] font-bold text-chili-deep"
+                      onClick={() => deleteExpense(e.id)}
+                    >Confirm delete</button>
+                    <button
+                      className="font-mono text-[11px] text-ink-soft"
+                      onClick={() => setDeleteConfirm(null)}
+                    >Cancel</button>
+                  </span>
+                ) : (
+                  <button
+                    className="font-mono text-[11px] text-chili opacity-60"
+                    onClick={() => setDeleteConfirm(e.id)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {expenses.length === 0 && (
+            <p className="py-6 text-center font-mono text-xs text-ink-soft">No expenses in this period.</p>
+          )}
+        </div>
+
+        {/* Desktop/tablet: full table. */}
+        <div className="hidden overflow-x-auto sm:block">
+          <table className="datatable min-w-[600px]">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Category</th>
+                <th>Type</th>
+                <th>Paid from</th>
+                <th className="text-right">Amount</th>
+                <th>Note</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {expenses.map((e) => (
+                <tr key={e.id}>
+                  <td>{shortDate(e.date)}</td>
+                  <td>{e.category_name}</td>
+                  <td className="capitalize text-ink-soft">{e.cost_type.toLowerCase()}</td>
+                  <td>
+                    <span className="font-mono text-[11px] font-semibold text-ink-soft">
+                      {paidFromLabel(e)}
+                    </span>
+                  </td>
+                  <td className="text-right font-mono">{bdt(e.amount)}</td>
+                  <td className="text-ink-soft">{e.description || "—"}</td>
+                  <td>
+                    {deleteConfirm === e.id ? (
+                      <span className="flex items-center gap-1">
+                        <button
+                          className="font-mono text-[10px] text-chili-deep font-bold"
+                          onClick={() => deleteExpense(e.id)}
+                        >Confirm</button>
+                        <button
+                          className="font-mono text-[10px] text-ink-soft"
+                          onClick={() => setDeleteConfirm(null)}
+                        >Cancel</button>
+                      </span>
+                    ) : (
+                      <button
+                        className="font-mono text-[11px] text-chili opacity-40 hover:opacity-100"
+                        title="Delete"
+                        onClick={() => setDeleteConfirm(e.id)}
+                      >✕</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {expenses.length === 0 && (
+                <tr><td colSpan={7} className="text-ink-soft">No expenses in this period.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination — 10 per page; totals above come from the server, not
+            from summing these rows. */}
+        {(hasPrev || hasNext) && (
+          <div className="flex items-center justify-between border-t border-[#d8cdb0] pt-3">
+            <p className="font-mono text-[10px] text-ink-soft">
+              {totalCount} total · page {page} of {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
+            </p>
+            <div className="flex gap-2">
+              <button
+                className="btn btn-ghost !px-3 !py-1 font-mono text-[11px] disabled:opacity-40"
+                disabled={!hasPrev}
+                onClick={() => goToPage(page - 1)}
+              >
+                ← Prev
+              </button>
+              <button
+                className="btn btn-ghost !px-3 !py-1 font-mono text-[11px] disabled:opacity-40"
+                disabled={!hasNext}
+                onClick={() => goToPage(page + 1)}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── filters sheet ── */}
+      <BottomSheet open={filtersOpen} onClose={() => setFiltersOpen(false)}>
+        <div className="flex flex-col gap-4 px-5 pb-6">
+          <div className="flex items-center justify-between">
+            <p className="font-display text-[16px] font-bold text-ink">Filters</p>
+            {activeFilterCount > 0 && (
+              <button onClick={clearAllFilters} className="font-mono text-[11px] text-chili-deep">
+                Clear all
+              </button>
+            )}
+          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className="field-label">Account</span>
+            <AccountPicker
+              accounts={accounts}
+              value={accountFilter}
+              onChange={setAccountFilter}
+              placeholder="All accounts"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="field-label">Type</span>
+            <SearchablePicker
+              options={COST_TYPE_OPTIONS}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              placeholder="All types"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="field-label">Category</span>
+            <SearchablePicker
+              options={categories}
+              value={catFilter}
+              onChange={setCatFilter}
+              placeholder="All categories"
+              searchPlaceholder="Search categories…"
+            />
+          </label>
+          <button className="btn btn-primary" onClick={() => setFiltersOpen(false)}>Done</button>
+        </div>
+      </BottomSheet>
+
+      {/* ── add expense — popup, triggered by "+ Add expense" above ── */}
+      <BottomSheet open={sheetOpen} onClose={closeSheet}>
+        <div className="flex flex-col gap-4 px-5 pb-6">
+          <p className="font-display text-[16px] font-bold text-ink">Add expense</p>
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Date</span>
             <input type="date" className="field-input" value={expDate} max={today()}
               onChange={(e) => setExpDate(e.target.value)} />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Category</span>
-            <select className="field-input" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name} · {c.cost_type.toLowerCase()}</option>
-              ))}
-            </select>
+            <SearchablePicker
+              options={categories.map((c) => ({ id: c.id, name: `${c.name} · ${c.cost_type.toLowerCase()}` }))}
+              value={category}
+              onChange={setCategory}
+              placeholder="Select category"
+              searchPlaceholder="Search categories…"
+            />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Amount (৳)</span>
             <input className="field-input" type="number" min="0" value={amount}
               onChange={(e) => setAmount(e.target.value)} />
           </label>
-          <label className="field">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Paid from</span>
-            <AccountSelect
+            <AccountPicker
               accounts={accounts}
               value={accountId}
               onChange={setAccountId}
               showBalance
-              placeholder=""
+              placeholder="Select account"
             />
           </label>
-          <label className="field sm:col-span-2">
+          <label className="flex flex-col gap-1.5">
             <span className="field-label">Note</span>
             <input className="field-input" value={note} onChange={(e) => setNote(e.target.value)} />
           </label>
+          {error && <p className="font-mono text-[11px] text-chili-deep">{error}</p>}
+          <div className="flex gap-2">
+            <button className="btn btn-primary flex-1" disabled={saving} onClick={saveExpense}>
+              {saving ? "Saving…" : "Save expense"}
+            </button>
+            <button className="btn btn-ghost flex-1" disabled={saving} onClick={closeSheet}>Cancel</button>
+          </div>
         </div>
-        {error && <p className="font-mono text-[11px] text-chili-deep">{error}</p>}
-        <button className="btn btn-primary w-40" disabled={saving} onClick={saveExpense}>
-          {saving ? "Saving…" : "Save expense"}
-        </button>
-      </div>
-
-      {/* ── categories (view-only — same list for every franchise outlet;
-          add/edit/delete lives in the platform admin's Types console) ── */}
-      <div className="flex flex-col gap-3">
-        <h2 className="sec">Categories</h2>
-        <div className="rounded border border-[#d8cdb0]">
-          {categories.map((c, i) => (
-            <div key={c.id} className={`flex items-center justify-between px-3 py-2 font-mono text-[12px] ${
-              i < categories.length - 1 ? "border-b border-dotted border-[#d8cdb0]" : ""
-            }`}>
-              <span className="text-ink">{c.name}</span>
-              <span className="text-ink-soft capitalize">{c.cost_type.toLowerCase()}</span>
-            </div>
-          ))}
-          {categories.length === 0 && (
-            <p className="px-3 py-3 font-mono text-[11px] text-ink-soft">No categories yet.</p>
-          )}
-        </div>
-      </div>
+      </BottomSheet>
     </div>
   );
 }

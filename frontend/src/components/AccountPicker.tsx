@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { bdt } from "@/lib/format";
 
 export interface AccountPickerOption {
@@ -141,8 +142,13 @@ function AccountPickerSheet({
 
   if (!isOpen || !pos) return null;
 
-  return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
+  // Portaled to <body> — rendered inline, this `fixed` panel would position
+  // itself relative to the nearest transformed ancestor instead of the
+  // viewport the moment it's nested inside a BottomSheet (any non-"none"
+  // CSS `transform`, including BottomSheet's translate-y slide, makes that
+  // ancestor the containing block for `position: fixed` descendants).
+  return createPortal(
+    <div className="fixed inset-0 z-[60]" onClick={onClose}>
       <div className="absolute inset-0 bg-ink/20" />
       <div
         className="absolute flex flex-col overflow-hidden rounded-xl border border-[#d8cdb0] bg-paper shadow-xl"
@@ -204,6 +210,7 @@ function AccountPickerSheet({
           <div className="h-4" />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

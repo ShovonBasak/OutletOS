@@ -692,6 +692,16 @@ export interface Expense {
   recurring: boolean;
 }
 
+/** Server-computed totals for the current filter set — the expense list is
+ * paginated, so client-side summing over `results` would silently only
+ * cover one page. See ExpenseViewSet.summary. */
+export interface ExpenseSummary {
+  total: string | number;
+  count: number;
+  by_type: { cost_type: string; amount: string | number }[];
+  by_account: { name: string; amount: string | number }[];
+}
+
 // ---- Financial Accounts ----------------------------------------------------
 
 export type AccountType = "BANK" | "MOBILE_WALLET" | "CASH" | "SUPPLIER_CREDIT";
@@ -742,6 +752,9 @@ export interface AccountTransaction {
   entered_by: number;
   entered_by_name: string;
   note: string;
+  /** The other leg's account name — only set for TRANSFER_IN/TRANSFER_OUT,
+   * since a transfer always touches two accounts. */
+  counterpart_account_name: string | null;
   balance_before: string;
   balance_after: string;
   created_at: string;
@@ -803,6 +816,16 @@ export interface OtherIncome {
   received_into_account: number | null;
   received_into_account_name: string | null;
   description: string;
+}
+
+/** Server-computed totals for the current filter set — the list is
+ * paginated, so client-side summing over `results` would silently only
+ * cover one page. See OtherIncomeViewSet.summary. */
+export interface OtherIncomeSummary {
+  total: string | number;
+  count: number;
+  by_category: { name: string; amount: string | number }[];
+  by_account: { name: string; amount: string | number }[];
 }
 
 export interface PurchaseSummaryRecord {

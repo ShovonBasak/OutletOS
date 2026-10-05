@@ -10,5 +10,5 @@ class CostCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
-    list_display = ["date", "category", "amount", "outlet", "recurring"]
-    list_filter = ["category", "outlet", "recurring"]
+    list_display = ["date", "category", "amount", "outlet", "recurring", "is_deleted", "deleted_at"]
+    list_filter = ["category", "outlet", "recurring", "is_deleted"]

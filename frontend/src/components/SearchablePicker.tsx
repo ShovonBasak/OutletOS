@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 
 export interface SearchablePickerOption {
-  id: number;
+  id: number | string;
   name: string;
 }
 
@@ -104,8 +105,13 @@ function PickerSheet({
 
   if (!isOpen || !pos) return null;
 
-  return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
+  // Portaled to <body> — see AccountPicker.tsx for why: rendered inline,
+  // this `fixed` panel would position itself relative to the nearest
+  // transformed ancestor instead of the viewport once nested inside a
+  // BottomSheet (its translate-y slide is a `transform`, which makes it
+  // the containing block for `position: fixed` descendants).
+  return createPortal(
+    <div className="fixed inset-0 z-[60]" onClick={onClose}>
       <div className="absolute inset-0 bg-ink/20" />
       <div
         className="absolute flex flex-col overflow-hidden rounded-xl border border-[#d8cdb0] bg-paper shadow-xl"
@@ -149,6 +155,7 @@ function PickerSheet({
           <div className="h-4" />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
