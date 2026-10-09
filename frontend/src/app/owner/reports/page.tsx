@@ -64,6 +64,7 @@ export default function ReportsPage() {
   const [showInvoices, setShowInvoices] = useState(false);
   const [showStockDetail, setShowStockDetail] = useState(false);
   const [showShrinkage, setShowShrinkage] = useState(false);
+  const [showTrend, setShowTrend] = useState(false);
 
   const [pnl, setPnl] = useState<Pnl | null>(null);
   const [products, setProducts] = useState<ProductPerformanceRow[]>([]);
@@ -192,7 +193,7 @@ export default function ReportsPage() {
       </div>
 
       {/* ── Quick links to sub-report pages ── */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[
           { href: "/owner/pnl",              label: "P&L statement" },
           { href: "/owner/sell-history",     label: "Sell history" },
@@ -204,7 +205,7 @@ export default function ReportsPage() {
           <Link
             key={l.href}
             href={l.href}
-            className="flex items-center justify-center rounded border border-[#d8cdb0] bg-paper px-2 py-2.5 text-center font-mono text-[10px] text-ink-soft leading-tight hover:border-action/40 hover:text-ink transition-colors"
+            className="flex items-center justify-center rounded border border-[#d8cdb0] bg-paper px-2 py-3 text-center font-mono text-[11px] text-ink-soft leading-tight hover:border-action/40 hover:text-ink transition-colors"
           >
             {l.label}
           </Link>
@@ -245,13 +246,29 @@ export default function ReportsPage() {
       {loading && <p className="font-mono text-[11px] text-ink-soft">Loading…</p>}
 
       {/* ══════════════════════════════════════════════
-          KPI CARDS
+          KPI CARDS — one hero (net profit/loss), then a
+          scannable grid: 2-up on mobile, 3-up on desktop.
       ══════════════════════════════════════════════ */}
       {pnl && (
         <section className="flex flex-col gap-2">
 
-          {/* Row 1 — Revenue split */}
-          <div className="grid grid-cols-3 gap-2">
+          {/* Hero — the single number that matters most, full-width and big
+              so it doesn't get lost among 11 equally-sized small cards. */}
+          <div className="ticket flex flex-col gap-1">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-ink-soft">
+              {isProfit ? "Net profit" : "Net loss"}
+            </p>
+            <p className={`font-display text-[32px] font-bold leading-none ${isProfit ? "text-leaf-deep" : "text-chili-deep"}`}>
+              {bdt(Math.abs(netProfit ?? 0))}
+            </p>
+            {grossMargin !== null && (
+              <p className="mt-1 font-mono text-[11px] text-ink-soft">
+                {pct(grossMargin)} gross margin · {bdt(pnl.gross_revenue)} revenue
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <KpiCard
               label="Total revenue"
               value={bdt(pnl.gross_revenue)}
@@ -267,10 +284,6 @@ export default function ReportsPage() {
               value={bdt(onlineRev)}
               sub={totalRev > 0 ? `${pct(onlineRev / totalRev * 100)} of rev` : undefined}
             />
-          </div>
-
-          {/* Row 2 — Profitability */}
-          <div className="grid grid-cols-3 gap-2">
             <KpiCard
               label="Gross profit"
               value={bdt(pnl.gross_profit)}
@@ -278,20 +291,13 @@ export default function ReportsPage() {
               accent="pos"
             />
             <KpiCard
-              label={isProfit ? "Net profit" : "Net loss"}
-              value={bdt(Math.abs(netProfit ?? 0))}
-              accent={isProfit ? "pos" : "neg"}
-            />
-            <KpiCard
               label="COGS"
               value={bdt(pnl.cogs)}
               sub={cogsRatio !== null ? `${pct(cogsRatio)} of rev` : undefined}
               accent="neg"
             />
-          </div>
-
-          {/* Row 3 — Purchases + losses */}
-          <div className="grid grid-cols-3 gap-2">
+            <KpiCard label="Wastage" value={bdt(pnl.wastage_cost)} accent="neg" />
+            <KpiCard label="Shrinkage" value={bdt(pnl.shrinkage_cost)} accent="neg" />
             {purchase !== null && (
               <KpiCard
                 label="Purchases paid"
@@ -299,12 +305,6 @@ export default function ReportsPage() {
                 sub={`${purchase.record_count} invoice${purchase.record_count !== 1 ? "s" : ""}`}
               />
             )}
-            <KpiCard label="Wastage" value={bdt(pnl.wastage_cost)} accent="neg" />
-            <KpiCard label="Shrinkage" value={bdt(pnl.shrinkage_cost)} accent="neg" />
-          </div>
-
-          {/* Row 4 — Costs */}
-          <div className="grid grid-cols-3 gap-2">
             <KpiCard label="Fixed costs" value={bdt(pnl.fixed_costs)} accent="neg" />
             <KpiCard
               label="Variable + adhoc"
@@ -351,7 +351,7 @@ export default function ReportsPage() {
       {pnl && (
         <section className="flex flex-col gap-2">
           <h2 className="sec">Profit & Loss</h2>
-          <table className="ledger max-w-[520px]">
+          <table className="ledger sm:max-w-[520px]">
             <tbody>
               <tr><td>Revenue (actual sell value)</td><td>{bdt(pnl.gross_revenue)}</td></tr>
               {Number(pnl.commission_total) > 0 && (
@@ -396,33 +396,55 @@ export default function ReportsPage() {
                     ) : shrinkage.rows.length === 0 ? (
                       <p className="px-3 py-2 font-mono text-[11px] text-ink-soft/60 italic">No shrinkage events in this period.</p>
                     ) : (
-                      <table className="w-full text-[11px] font-mono border-t border-dashed border-[#d8cdb0]">
-                        <thead>
-                          <tr className="bg-[#f5f0e8]">
-                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Date</th>
-                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Ingredient</th>
-                            <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Shortfall</th>
-                            <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Cost</th>
-                            <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Reason</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-dashed divide-[#e8dfc8]">
+                      <>
+                        {/* Mobile: compact list — a 5-column table needs
+                            horizontal scroll that doesn't work well in a
+                            nested cell on a phone. */}
+                        <div className="flex flex-col gap-1.5 border-t border-dashed border-[#d8cdb0] px-3 py-2 sm:hidden">
                           {shrinkage.rows.map((r, i) => (
-                            <tr key={i} className="bg-paper">
-                              <td className="px-3 py-1.5 text-ink-soft">{r.date}</td>
-                              <td className="px-3 py-1.5 text-ink">{r.ingredient}</td>
-                              <td className="px-3 py-1.5 text-right text-chili">
-                                −{Number(r.shortfall_qty).toFixed(2)} {r.base_unit}
-                              </td>
-                              <td className="px-3 py-1.5 text-right text-chili">− {bdt(r.cost)}</td>
-                              <td className="px-3 py-1.5 text-ink-soft capitalize">
-                                {r.reason ? r.reason.toLowerCase().replace(/_/g, " ") : "—"}
-                                {r.note && <span className="ml-1 text-ink-soft/50">· {r.note}</span>}
-                              </td>
-                            </tr>
+                            <div key={i} className="flex flex-col gap-0.5 border-b border-dotted border-[#e8dfc8] pb-1.5 last:border-0 last:pb-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-mono text-[11px] text-ink">{r.ingredient}</span>
+                                <span className="shrink-0 font-mono text-[11px] font-semibold text-chili">− {bdt(r.cost)}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
+                                <span>{r.date} · −{Number(r.shortfall_qty).toFixed(2)} {r.base_unit}</span>
+                                <span className="shrink-0 capitalize">
+                                  {r.reason ? r.reason.toLowerCase().replace(/_/g, " ") : "—"}
+                                </span>
+                              </div>
+                              {r.note && <p className="font-mono text-[10px] text-ink-soft/70">{r.note}</p>}
+                            </div>
                           ))}
-                        </tbody>
-                      </table>
+                        </div>
+                        <table className="hidden w-full text-[11px] font-mono border-t border-dashed border-[#d8cdb0] sm:table">
+                          <thead>
+                            <tr className="bg-[#f5f0e8]">
+                              <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Date</th>
+                              <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Ingredient</th>
+                              <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Shortfall</th>
+                              <th className="px-3 py-1.5 text-right font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Cost</th>
+                              <th className="px-3 py-1.5 text-left font-mono text-[10px] uppercase tracking-wide text-ink-soft/60">Reason</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-dashed divide-[#e8dfc8]">
+                            {shrinkage.rows.map((r, i) => (
+                              <tr key={i} className="bg-paper">
+                                <td className="px-3 py-1.5 text-ink-soft">{r.date}</td>
+                                <td className="px-3 py-1.5 text-ink">{r.ingredient}</td>
+                                <td className="px-3 py-1.5 text-right text-chili">
+                                  −{Number(r.shortfall_qty).toFixed(2)} {r.base_unit}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-chili">− {bdt(r.cost)}</td>
+                                <td className="px-3 py-1.5 text-ink-soft capitalize">
+                                  {r.reason ? r.reason.toLowerCase().replace(/_/g, " ") : "—"}
+                                  {r.note && <span className="ml-1 text-ink-soft/50">· {r.note}</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
                     )}
                   </td>
                 </tr>
@@ -477,7 +499,34 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <div className="overflow-x-auto">
+          {/* Mobile: one card per channel — the table needs horizontal
+              scroll to see every column, which doesn't work well on a phone. */}
+          <div className="flex flex-col gap-2 sm:hidden">
+            {channels.map((c) => {
+              const share = totalRev > 0 ? Number(c.gross_revenue) / totalRev * 100 : null;
+              return (
+                <div key={c.channel_id} className="flex flex-col gap-1.5 rounded-lg border-2 border-[#d8cdb0] bg-[#fffdf7] px-4 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-display text-[14px] font-bold text-ink">{c.channel_name}</p>
+                    <p className="shrink-0 font-mono text-[15px] font-bold text-ink">{bdt(c.net_revenue)}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[10px] text-ink-soft">
+                    <span>{num(c.units_sold)} units</span>
+                    <span>gross {bdt(c.gross_revenue)}</span>
+                    {Number(c.commission) > 0 && (
+                      <span className="text-chili">− {bdt(c.commission)} cmm</span>
+                    )}
+                    {Number(c.platform_discount) > 0 && (
+                      <span>− {bdt(c.platform_discount)} disc</span>
+                    )}
+                    {share !== null && <span className="ml-auto">{pct(share)} of rev</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-x-auto sm:block">
             <table className="datatable min-w-[520px]">
               <thead>
                 <tr>
@@ -530,7 +579,39 @@ export default function ReportsPage() {
               Full sales report →
             </Link>
           </div>
-          <div className="overflow-x-auto">
+
+          {/* Mobile: one card per product — margin as a colored badge instead
+              of a 7th table column, which forces horizontal scroll on a phone. */}
+          <div className="flex flex-col gap-2 sm:hidden">
+            {visibleProducts.map((p) => {
+              const margin = Number(p.margin_pct);
+              const mColor = margin >= 30 ? "text-leaf-deep" : margin >= 15 ? "text-gold-deep" : "text-chili";
+              const mBg = margin >= 30 ? "bg-leaf/10" : margin >= 15 ? "bg-gold/10" : "bg-chili/10";
+              return (
+                <div key={p.product_id} className="flex flex-col gap-1.5 rounded-lg border-2 border-[#d8cdb0] bg-[#fffdf7] px-4 py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-[14px] font-bold text-ink">{p.product_name}</p>
+                      <p className="font-mono text-[10px] text-ink-soft">{p.category}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-mono text-[15px] font-bold text-ink">{bdt(p.gross_revenue)}</p>
+                      <span className={`mt-0.5 inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${mColor} ${mBg}`}>
+                        {pct(margin)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 border-t border-dotted border-[#d8cdb0] pt-1.5 font-mono text-[10px] text-ink-soft">
+                    <span>{num(p.units_sold)} sold</span>
+                    <span>COGS {bdt(p.cogs)}</span>
+                    <span>profit {bdt(p.gross_profit)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden overflow-x-auto sm:block">
             <table className="datatable min-w-[640px]">
               <thead>
                 <tr>
@@ -595,40 +676,78 @@ export default function ReportsPage() {
       )}
 
       {/* ══════════════════════════════════════════════
-          DAILY REVENUE TREND
+          DAILY REVENUE TREND (collapsible — can run to 30+ rows
+          for a month, the longest list on this page)
       ══════════════════════════════════════════════ */}
       {trend.length > 1 && (
         <section className="flex flex-col gap-2">
-          <h2 className="sec">Daily revenue trend</h2>
-          <div className="overflow-x-auto">
-            <table className="datatable min-w-[360px]">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th className="text-right">Units</th>
-                  <th className="text-right">Revenue</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
+          <button
+            className="flex items-center gap-2 text-left"
+            onClick={() => setShowTrend((v) => !v)}
+          >
+            <h2 className="sec">
+              Daily revenue trend
+              <span className="ml-2 font-mono text-[11px] font-normal text-ink-soft">
+                {trend.length} days
+              </span>
+            </h2>
+            <span className="ml-auto font-mono text-[10px] text-ink-soft">
+              {showTrend ? "▲ hide" : "▼ show"}
+            </span>
+          </button>
+          {showTrend && (
+            <>
+              {/* Mobile: plain list — a 4-column table (incl. a bar) just
+                  needs to reflow here, not scroll sideways. */}
+              <div className="flex flex-col gap-1 sm:hidden">
                 {trend.map((row) => {
                   const barW = Math.round((Number(row.revenue) / maxRevenue) * 100);
                   return (
-                    <tr key={row.date}>
-                      <td className="font-mono text-xs">{row.date}</td>
-                      <td className="text-right font-mono text-xs">{num(row.units_sold)}</td>
-                      <td className="text-right font-mono text-xs font-medium">{bdt(row.revenue)}</td>
-                      <td className="w-28 pl-2">
-                        <div className="h-2 rounded-full bg-paper-dim">
-                          <div className="h-2 rounded-full bg-chrome" style={{ width: `${barW}%` }} />
-                        </div>
-                      </td>
-                    </tr>
+                    <div key={row.date} className="flex items-center gap-3 border-b border-dotted border-[#e8dfc8] py-1.5 last:border-0">
+                      <span className="w-16 shrink-0 font-mono text-[10.5px] text-ink-soft">{row.date}</span>
+                      <div className="h-2 flex-1 rounded-full bg-paper-dim">
+                        <div className="h-2 rounded-full bg-chrome" style={{ width: `${barW}%` }} />
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-mono text-[12px] font-semibold text-ink">{bdt(row.revenue)}</p>
+                        <p className="font-mono text-[9px] text-ink-soft">{num(row.units_sold)} units</p>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="datatable min-w-[360px]">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th className="text-right">Units</th>
+                      <th className="text-right">Revenue</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trend.map((row) => {
+                      const barW = Math.round((Number(row.revenue) / maxRevenue) * 100);
+                      return (
+                        <tr key={row.date}>
+                          <td className="font-mono text-xs">{row.date}</td>
+                          <td className="text-right font-mono text-xs">{num(row.units_sold)}</td>
+                          <td className="text-right font-mono text-xs font-medium">{bdt(row.revenue)}</td>
+                          <td className="w-28 pl-2">
+                            <div className="h-2 rounded-full bg-paper-dim">
+                              <div className="h-2 rounded-full bg-chrome" style={{ width: `${barW}%` }} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </section>
       )}
 
@@ -652,30 +771,49 @@ export default function ReportsPage() {
             </span>
           </button>
           {showInvoices && (
-            <div className="overflow-x-auto">
-              <table className="datatable min-w-[360px]">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Invoice #</th>
-                    <th className="text-right">Amount paid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchase.records.map((r) => (
-                    <tr key={r.id}>
-                      <td className="font-mono text-xs">{r.date}</td>
-                      <td className="font-mono text-xs text-ink-soft">{r.invoice_number || "—"}</td>
-                      <td className="text-right font-mono text-xs font-semibold">{bdt(r.amount)}</td>
+            <>
+              {/* Mobile: plain list. */}
+              <div className="flex flex-col gap-0.5 sm:hidden">
+                {purchase.records.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 border-b border-dotted border-[#e8dfc8] py-1.5 last:border-0">
+                    <div className="min-w-0">
+                      <p className="font-mono text-[11.5px] text-ink">{r.date}</p>
+                      <p className="truncate font-mono text-[10px] text-ink-soft">{r.invoice_number || "—"}</p>
+                    </div>
+                    <p className="shrink-0 font-mono text-[12.5px] font-semibold text-ink">{bdt(r.amount)}</p>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2 font-mono text-[12.5px] font-bold text-ink">
+                  <span>Total paid</span>
+                  <span>{bdt(purchase.total)}</span>
+                </div>
+              </div>
+
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="datatable min-w-[360px]">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Invoice #</th>
+                      <th className="text-right">Amount paid</th>
                     </tr>
-                  ))}
-                  <tr className="subtotal">
-                    <td colSpan={2}>Total paid</td>
-                    <td className="text-right font-mono font-semibold">{bdt(purchase.total)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {purchase.records.map((r) => (
+                      <tr key={r.id}>
+                        <td className="font-mono text-xs">{r.date}</td>
+                        <td className="font-mono text-xs text-ink-soft">{r.invoice_number || "—"}</td>
+                        <td className="text-right font-mono text-xs font-semibold">{bdt(r.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="subtotal">
+                      <td colSpan={2}>Total paid</td>
+                      <td className="text-right font-mono font-semibold">{bdt(purchase.total)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
@@ -699,42 +837,68 @@ export default function ReportsPage() {
             Current inventory valued at latest pack cost — capital tied up in storage (live, not filtered by date).
           </p>
           {showStockDetail && (
-            <div className="overflow-x-auto">
-              <table className="datatable min-w-[400px]">
-                <thead>
-                  <tr>
-                    <th>Ingredient</th>
-                    <th className="text-right">Qty on hand</th>
-                    <th className="text-right">Cost / unit</th>
-                    <th className="text-right">Value</th>
-                    <th className="text-right">% of total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stock.rows.map((r) => {
-                    const share = Number(stock.total_value) > 0
-                      ? Number(r.value) / Number(stock.total_value) * 100
-                      : 0;
-                    return (
-                      <tr key={r.ingredient_id}>
-                        <td>
-                          <p className="font-medium leading-tight">{r.display_name}</p>
-                          {r.display_name !== r.ingredient_name && (
-                            <p className="font-mono text-[9px] text-ink-soft/50">{r.ingredient_name}</p>
-                          )}
-                        </td>
-                        <td className="text-right font-mono text-xs">
-                          {num(r.quantity)} {r.base_unit}
-                        </td>
-                        <td className="text-right font-mono text-xs text-ink-soft">৳{r.cost_per_unit}</td>
-                        <td className="text-right font-mono text-xs font-semibold">{bdt(r.value)}</td>
-                        <td className="text-right font-mono text-xs text-ink-soft">{pct(share)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Mobile: compact rows — a 5-column table needs horizontal
+                  scroll that doesn't work well on a phone. */}
+              <div className="flex flex-col gap-1.5 sm:hidden">
+                {stock.rows.map((r) => {
+                  const share = Number(stock.total_value) > 0
+                    ? Number(r.value) / Number(stock.total_value) * 100
+                    : 0;
+                  return (
+                    <div key={r.ingredient_id} className="flex items-center justify-between gap-2 rounded-lg border border-[#d8cdb0] bg-[#fffdf7] px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="font-mono text-[12px] font-medium text-ink">{r.display_name}</p>
+                        <p className="font-mono text-[10px] text-ink-soft">
+                          {num(r.quantity)} {r.base_unit} · ৳{r.cost_per_unit}/unit
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-mono text-[12.5px] font-semibold text-ink">{bdt(r.value)}</p>
+                        <p className="font-mono text-[9px] text-ink-soft">{pct(share)}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="datatable min-w-[400px]">
+                  <thead>
+                    <tr>
+                      <th>Ingredient</th>
+                      <th className="text-right">Qty on hand</th>
+                      <th className="text-right">Cost / unit</th>
+                      <th className="text-right">Value</th>
+                      <th className="text-right">% of total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stock.rows.map((r) => {
+                      const share = Number(stock.total_value) > 0
+                        ? Number(r.value) / Number(stock.total_value) * 100
+                        : 0;
+                      return (
+                        <tr key={r.ingredient_id}>
+                          <td>
+                            <p className="font-medium leading-tight">{r.display_name}</p>
+                            {r.display_name !== r.ingredient_name && (
+                              <p className="font-mono text-[9px] text-ink-soft/50">{r.ingredient_name}</p>
+                            )}
+                          </td>
+                          <td className="text-right font-mono text-xs">
+                            {num(r.quantity)} {r.base_unit}
+                          </td>
+                          <td className="text-right font-mono text-xs text-ink-soft">৳{r.cost_per_unit}</td>
+                          <td className="text-right font-mono text-xs font-semibold">{bdt(r.value)}</td>
+                          <td className="text-right font-mono text-xs text-ink-soft">{pct(share)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
@@ -756,9 +920,9 @@ function KpiCard({
   const valColor =
     accent === "pos" ? "text-leaf-deep" : accent === "neg" ? "text-chili" : "text-ink";
   return (
-    <div className="rounded border border-[#d8cdb0] bg-paper px-2.5 py-2">
+    <div className="rounded border border-[#d8cdb0] bg-paper px-3 py-2.5">
       <p className="font-mono text-[9px] uppercase tracking-wide text-ink-soft">{label}</p>
-      <p className={`font-mono text-[13px] font-bold leading-tight ${valColor}`}>{value}</p>
+      <p className={`font-mono text-sm font-bold leading-tight ${valColor}`}>{value}</p>
       {sub && <p className="font-mono text-[9px] text-ink-soft/70">{sub}</p>}
     </div>
   );
