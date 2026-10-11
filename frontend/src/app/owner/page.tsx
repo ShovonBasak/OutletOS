@@ -40,6 +40,16 @@ function nextDay(dateStr: string) {
   return localIso(d);
 }
 
+const AUTO_REFRESH_MS = 10 * 60 * 1000;
+
+function relativeTime(then: Date, now: Date): string {
+  const diffSec = Math.max(0, Math.round((now.getTime() - then.getTime()) / 1000));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  return `${Math.round(diffMin / 60)}h ago`;
+}
+
 const DAY_STATUS_CONFIG = {
   NOT_STARTED: {
     label: "Not started",
@@ -142,40 +152,88 @@ export default function OwnerHome() {
   const [data, setData] = useState<DayOverview | null>(null);
   const [periodicLevels, setPeriodicLevels] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [showZeroQty, setShowZeroQty] = useState(false);
   const [notifState, setNotifState] = useState<"default" | "granted" | "denied" | "busy">(
     "default"
   );
 
+  const isToday = date === today();
+
   useEffect(() => {
     setNotifState(pushPermissionState() as typeof notifState);
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setData(null);
-    try {
-      const [d, pl] = await Promise.all([
-        api<DayOverview>(`/reports/day-overview/?date=${date}`),
-        api<PackagingLevel[]>(`/periodic-stock-checks/levels/`),
-      ]);
-      setData(d);
-      setPeriodicLevels(pl);
-    } finally {
-      setLoading(false);
-    }
+  const fetchData = useCallback(async () => {
+    const [d, pl] = await Promise.all([
+      api<DayOverview>(`/reports/day-overview/?date=${date}`),
+      api<PackagingLevel[]>(`/periodic-stock-checks/levels/`),
+    ]);
+    setData(d);
+    setPeriodicLevels(pl);
+    setLastLoadedAt(new Date());
   }, [date]);
 
+  // Switching days (or the very first mount) — clear the old day's data and
+  // show the full-page loading state while the new one comes in.
   useEffect(() => {
-    load();
-  }, [load]);
+    setLoading(true);
+    setData(null);
+    fetchData().finally(() => setLoading(false));
+  }, [fetchData]);
+
+  // Reloading the SAME date — e.g. the manual refresh button, or the
+  // auto-refresh below — keeps the current data on screen while it fetches,
+  // instead of blanking the whole page out every time.
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchData]);
+
+  // Tick every 30s just to keep the "updated Xm ago" label current.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Auto-refresh every 10 minutes while viewing today, so a staff edit made
+  // on another page (e.g. a prep log entry) shows up here without needing
+  // to leave and come back. Past days are static once closed, so this only
+  // runs for today.
+  useEffect(() => {
+    if (!isToday) return;
+    const id = setInterval(refresh, AUTO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [isToday, refresh]);
+
+  // If the tab was backgrounded/suspended past the 10-minute mark, refresh
+  // the moment it's visible again instead of waiting for the next interval
+  // tick — mobile browsers routinely throttle/suspend timers in the
+  // background, so the interval above can't be relied on alone.
+  useEffect(() => {
+    if (!isToday) return;
+    function onVisible() {
+      if (document.visibilityState !== "visible") return;
+      if (!lastLoadedAt || Date.now() - lastLoadedAt.getTime() >= AUTO_REFRESH_MS) {
+        refresh();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isToday, lastLoadedAt, refresh]);
 
   async function actStockIn(id: number, action: "approve" | "reject") {
     setActionBusy(`si-${id}`);
     try {
       await api(`/stock-in/${id}/${action}/`, { method: "POST" });
-      await load();
+      await refresh();
     } finally {
       setActionBusy(null);
     }
@@ -185,7 +243,7 @@ export default function OwnerHome() {
     setActionBusy(`cl-${id}`);
     try {
       await api(`/daily-closings/${id}/lock/`, { method: "POST" });
-      await load();
+      await refresh();
     } finally {
       setActionBusy(null);
     }
@@ -201,7 +259,6 @@ async function enableNotifications() {
     }
   }
 
-  const isToday = date === today();
   const opDay = data?.operating_day;
   const statusCfg = opDay
     ? DAY_STATUS_CONFIG[opDay.status]
@@ -272,6 +329,21 @@ async function enableNotifications() {
           ›
         </button>
       </div>
+
+      {/* ── Manual refresh — also doubles as a freshness indicator; this
+          page otherwise only ever reloaded on first mount or when the date
+          changed, so a staff edit made elsewhere (e.g. a prep log entry)
+          never showed up without leaving and coming back. ── */}
+      <button
+        onClick={() => refresh()}
+        disabled={loading || refreshing}
+        className="-mt-2 flex items-center justify-center gap-1.5 self-center font-mono text-[10px] text-ink-soft disabled:opacity-60"
+      >
+        <span className={refreshing ? "inline-block animate-spin" : "inline-block"}>↻</span>
+        <span>
+          {refreshing ? "Refreshing…" : lastLoadedAt ? `Updated ${relativeTime(lastLoadedAt, now)} · tap to refresh` : "Refresh"}
+        </span>
+      </button>
 
       {loading && (
         <p className="py-6 text-center font-mono text-xs text-ink-soft">Loading…</p>
