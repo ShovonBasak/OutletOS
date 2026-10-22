@@ -22,7 +22,9 @@ server {
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;
+        # Matches gunicorn's --timeout in backend/Dockerfile — a multi-page
+        # slip extraction (Claude vision call over 2+ images) can take a while.
+        proxy_read_timeout 150s;
     }
 
     # Admin → Django backend

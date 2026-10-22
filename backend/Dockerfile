@@ -18,4 +18,8 @@ RUN chmod +x /app/entrypoint.sh
 EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--access-logfile", "-", "--log-level", "info"]
+# --timeout 150: gunicorn's sync-worker default is 30s, well under how long a
+# multi-page slip extraction can take (one Claude vision call reading 2+ full
+# invoice pages) — without this, gunicorn kills the worker mid-request and the
+# client sees a bare connection failure. Matches nginx's proxy_read_timeout.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "150", "--access-logfile", "-", "--log-level", "info"]
