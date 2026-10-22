@@ -12,7 +12,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.mixins import OrgScopedQuerySetMixin
-from accounts.permissions import IsOwner, IsStaffOwnerFullAdminReadOnly
+from accounts.permissions import IsOwner, IsOwnerOrAdmin, IsStaffOwnerFullAdminReadOnly
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Ingredient, SupplierProductAlias, TrackingMode
 from .extraction import ExtractedLine
@@ -1470,6 +1470,15 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         since = prev.checked_at if prev else None
         stock_in = stock_in_since(outlet, ingredient, since)
         prev_qty = prev.counted_qty if prev else Decimal("0")
+        # Counting can only ever lower the quantity — increases must come
+        # through an approved Stock In, never a recount or bundle subtraction.
+        max_allowed = prev_qty + stock_in
+        if counted_qty > max_allowed:
+            raise ValidationError(
+                f"Count can't exceed the current level ({max_allowed} "
+                f"{ingredient.base_unit}). To increase quantity, record it "
+                "through Stock In."
+            )
         consumed = prev_qty + stock_in - counted_qty
         return PeriodicStockCheck.objects.create(
             outlet=outlet,
@@ -1498,8 +1507,9 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="bundle-finished")
     def bundle_finished(self, request, pk=None):
-        """One-tap 'used the last of a bundle' — subtracts the bundle size from
-        the last count. Body: {outlet, ingredient}.
+        """One-tap 'used up N full bundles' — subtracts bundles × bundle size
+        from the last count. Body: {outlet, ingredient, bundles?} (bundles
+        defaults to 1 and must be a positive whole number).
 
         Uses Ingredient.bundle_size, NOT PackDefinition.pieces_per_pack — those
         are deliberately different numbers. pieces_per_pack is the stock-in
@@ -1512,24 +1522,37 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         outlet = _outlet_obj(resolve_outlet_param(request, source="data"))
         if outlet is None:
             raise ValidationError("Could not resolve an outlet for this request.")
+        try:
+            bundles = Decimal(str(request.data.get("bundles", 1)))
+        except (ValueError, TypeError):
+            raise ValidationError("bundles must be a number.")
+        if bundles <= 0 or bundles % 1 != 0:
+            raise ValidationError("bundles must be a positive whole number.")
         prev = (
             PeriodicStockCheck.objects.filter(outlet=outlet, ingredient=ingredient)
             .order_by("-checked_at")
             .first()
         )
         bundle = ingredient.bundle_size or Decimal("0")
-        prev_qty = prev.counted_qty if prev else bundle
-        counted = max(Decimal("0"), prev_qty - bundle)
-        obj = self._record(
-            outlet, ingredient, counted, "Bundle finished (−1 bundle)", request.user
-        )
+        # Bootstrap case (no PeriodicStockCheck yet): the real starting point
+        # is everything approved via Stock In so far, same derivation
+        # levels() and _record() use — not a single bundle.
+        prev_qty = prev.counted_qty if prev else stock_in_since(outlet, ingredient, None)
+        counted = max(Decimal("0"), prev_qty - bundle * bundles)
+        note = f"Bundle finished (−{bundles:.0f} bundle{'s' if bundles != 1 else ''})"
+        obj = self._record(outlet, ingredient, counted, note, request.user)
         return Response(self.get_serializer(obj).data, status=201)
 
-    @action(detail=False, methods=["post"], url_path="set-bundle-size")
+    @action(
+        detail=False, methods=["post"], url_path="set-bundle-size",
+        permission_classes=[IsOwnerOrAdmin],
+    )
     def set_bundle_size(self, request):
-        """Staff-configurable bundle size for a PERIODIC_COUNT ingredient — how
-        many pieces make up one physical bundle, i.e. what 'bundle finished'
-        (− 1 bundle) subtracts. Body: {ingredient, bundle_size}.
+        """Owner/admin-configurable bundle size for a PERIODIC_COUNT ingredient —
+        how many pieces make up one physical bundle, i.e. what 'bundle finished'
+        (− 1 bundle) subtracts. Body: {ingredient, bundle_size}. Owner/admin
+        only — staff count down against whatever bundle size is already set,
+        they don't define it.
 
         This is Ingredient.bundle_size, a plain field with no price-versioning —
         deliberately separate from PackDefinition.pieces_per_pack (the stock-in
@@ -1548,14 +1571,14 @@ class PeriodicStockCheckViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             bundle_size = Decimal(str(request.data["bundle_size"]))
         except (KeyError, ValueError, TypeError):
             raise ValidationError("bundle_size is required and must be a number.")
-        if bundle_size <= 0:
-            raise ValidationError("Bundle size must be greater than zero.")
+        if bundle_size <= 0 or bundle_size % 1 != 0:
+            raise ValidationError("Bundle size must be a whole number greater than zero.")
 
-        ingredient.bundle_size = bundle_size
+        ingredient.bundle_size = int(bundle_size)
         ingredient.save(update_fields=["bundle_size"])
         return Response({
             "ingredient": ingredient.id,
-            "bundle_size": str(ingredient.bundle_size),
+            "bundle_size": ingredient.bundle_size,
         }, status=201)
 
     @action(detail=False, methods=["get"], url_path="levels")
