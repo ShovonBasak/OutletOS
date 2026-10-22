@@ -32,8 +32,9 @@ export default function StaffAddExpense() {
       if (d.results[0]) setCategory(String(d.results[0].id));
     });
     api<Paginated<FinancialAccountName>>("/financial-accounts/").then((d) => {
-      // Staff sees names only — backend returns FinancialAccountNameSerializer
-      const active = d.results.filter((a) => a.is_active);
+      // Staff sees names only — backend returns FinancialAccountNameSerializer.
+      // Holding accounts aren't a payment method, so they're excluded here too.
+      const active = d.results.filter((a) => a.is_active && a.account_type !== "SALES_CHANNEL");
       setAccounts(active);
       const def = active.find((a) => a.is_primary_cash) ?? active[0];
       if (def) setAccountId(String(def.id));

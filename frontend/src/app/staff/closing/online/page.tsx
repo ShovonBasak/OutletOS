@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -20,11 +20,14 @@ export default function OnlineSellScreen() {
   const outlet = resolveOutlet(user) ?? 1;
   const opDate = workDate || today();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [channel, setChannel] = useState<SalesChannel | null>(null);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [channels, setChannels] = useState<SalesChannel[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(null);
   const [closing, setClosing] = useState<DailyClosing | null>(null);
-  const [qty, setQty] = useState<Record<number, number>>({});
   const [maxQty, setMaxQty] = useState<Record<number, number>>({});
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [qty, setQty] = useState<Record<number, number>>({});
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [busy, setBusy] = useState(false);
 
@@ -33,11 +36,35 @@ export default function OnlineSellScreen() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const closingRef = useRef<DailyClosing | null>(null);
-  const channelRef = useRef<SalesChannel | null>(null);
+  const channelIdRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCtx = useRef({ outlet: 0, opDate: "" });
 
-  async function loadData(existingChannel?: SalesChannel | null) {
+  const selectedChannel = useMemo(
+    () => channels.find((c) => c.id === selectedChannelId) ?? null,
+    [channels, selectedChannelId]
+  );
+
+  function seedForChannel(
+    channelId: number,
+    c: DailyClosing,
+    productsList: Product[],
+    productMap: Record<number, Product>,
+    dsMap: Record<number, number>
+  ) {
+    const lines = c.sales_lines.filter((l) => l.source === "STAFF_ENTRY" && l.channel === channelId);
+    const seed: Record<number, number> = {};
+    if (c.status !== "DRAFT") {
+      setProducts(lines.map((l) => productMap[l.product]).filter(Boolean) as Product[]);
+      lines.forEach((l) => { seed[l.product] = l.quantity_sold; });
+    } else {
+      setProducts(productsList.filter((p) => (dsMap[p.id] ?? 0) > 0));
+      lines.forEach((l) => { seed[l.product] = l.quantity_sold; });
+    }
+    setQty(seed);
+  }
+
+  async function loadData(preferChannelId?: number | null) {
     const c = await getOrCreateTodayClosing(outlet, opDate);
     setClosing(c);
     closingRef.current = c;
@@ -51,45 +78,47 @@ export default function OnlineSellScreen() {
     const dsMap: Record<number, number> = {};
     ds.results.forEach((d) => { dsMap[d.product] = d.pieces_available; });
     setMaxQty(dsMap);
+    setAllProducts(p.results);
 
-    const fp =
-      existingChannel ??
-      ch.results.find((x) => x.is_active && x.name.toLowerCase().includes("foodpanda")) ??
+    const onlineChannels = ch.results.filter(
+      (x) => x.is_active && x.name.toLowerCase() !== "walk-in"
+    );
+    setChannels(onlineChannels);
+
+    const channelIdsWithLines = new Set(
+      c.sales_lines.filter((l) => l.source === "STAFF_ENTRY").map((l) => l.channel)
+    );
+    const chosen =
+      onlineChannels.find((x) => x.id === preferChannelId) ??
+      onlineChannels.find((x) => channelIdsWithLines.has(x.id)) ??
+      onlineChannels.find((x) => x.name.toLowerCase().includes("foodpanda")) ??
+      onlineChannels[0] ??
       null;
-    setChannel(fp);
-    channelRef.current = fp;
-
+    setSelectedChannelId(chosen?.id ?? null);
+    channelIdRef.current = chosen?.id ?? null;
 
     const productMap: Record<number, Product> = {};
     p.results.forEach((prod) => { productMap[prod.id] = prod; });
 
-    if (fp) {
-      const fpLines = c.sales_lines.filter(
-        (l) => l.source === "STAFF_ENTRY" && l.channel === fp.id
-      );
-      const seed: Record<number, number> = {};
-
-      if (c.status !== "DRAFT") {
-        setProducts(
-          fpLines.map((l) => productMap[l.product]).filter(Boolean) as Product[]
-        );
-        fpLines.forEach((l) => { seed[l.product] = l.quantity_sold; });
-      } else {
-        setProducts(p.results.filter((prod) => (dsMap[prod.id] ?? 0) > 0));
-        for (const l of fpLines) {
-          if ((dsMap[l.product] ?? 0) > 0) {
-            seed[l.product] = l.quantity_sold;
-          } else {
+    if (chosen) {
+      // Zero out any staff-entered line for a product no longer in stock —
+      // same reconciliation the old single-channel screen did on load.
+      if (c.status === "DRAFT") {
+        for (const l of c.sales_lines.filter((x) => x.source === "STAFF_ENTRY" && x.channel === chosen.id)) {
+          if ((dsMap[l.product] ?? 0) <= 0) {
             await api(`/daily-closings/${c.id}/online-sell/`, {
               method: "POST",
               body: JSON.stringify({
-                items: [{ product: l.product, channel: fp.id, quantity_sold: 0 }],
+                items: [{ product: l.product, channel: chosen.id, quantity_sold: 0 }],
               }),
             });
           }
         }
       }
-      setQty(seed);
+      seedForChannel(chosen.id, c, p.results, productMap, dsMap);
+    } else {
+      setProducts([]);
+      setQty({});
     }
   }
 
@@ -100,15 +129,29 @@ export default function OnlineSellScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet, opDate]);
 
+  function switchChannel(channelId: number) {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const c = closingRef.current;
+    if (!c) return;
+    channelIdRef.current = channelId;
+    setSelectedChannelId(channelId);
+    setUnresolved([]);
+    setUploadStatus("idle");
+
+    const productMap: Record<number, Product> = {};
+    allProducts.forEach((p) => { productMap[p.id] = p; });
+    seedForChannel(channelId, c, allProducts, productMap, maxQty);
+  }
+
   async function persist(currentQty: Record<number, number>) {
     const c = closingRef.current;
-    const ch = channelRef.current;
-    if (!c || !ch || c.status !== "DRAFT") return;
+    const chId = channelIdRef.current;
+    if (!c || !chId || c.status !== "DRAFT") return;
     setSaveStatus("saving");
     try {
       const items = Object.entries(currentQty).map(([pid, v]) => ({
         product: Number(pid),
-        channel: ch.id,
+        channel: chId,
         quantity_sold: v,
       }));
       await api(`/daily-closings/${c.id}/online-sell/`, {
@@ -149,8 +192,8 @@ export default function OnlineSellScreen() {
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     const c = closingRef.current;
-    const ch = channelRef.current;
-    if (!file || !c || !ch) return;
+    const chId = channelIdRef.current;
+    if (!file || !c || !chId) return;
 
     setUploadStatus("uploading");
     setUnresolved([]);
@@ -158,7 +201,7 @@ export default function OnlineSellScreen() {
     try {
       const form = new FormData();
       form.append("file", file);
-      form.append("channel", String(ch.id));
+      form.append("channel", String(chId));
 
       const result = await api<{
         mapped: { product_id: number; product_name: string; quantity: number }[];
@@ -167,7 +210,7 @@ export default function OnlineSellScreen() {
       }>(`/daily-closings/${c.id}/import-online-sells/`, { method: "POST", body: form });
 
       // Refresh the page data so quantities reflect the upload
-      await loadData(ch);
+      await loadData(chId);
       setUnresolved(result.unresolved);
       setUploadStatus("done");
     } catch {
@@ -191,13 +234,14 @@ export default function OnlineSellScreen() {
     0
   );
   const isReadOnly = closing ? closing.status !== "DRAFT" : false;
+  const supportsUpload = !!selectedChannel?.name.toLowerCase().includes("foodpanda");
 
-  if (!channel) {
+  if (channels.length === 0) {
     return (
       <div className="flex flex-col gap-3">
         <h1 className="font-display text-xl font-bold">Online sell</h1>
         <p className="font-mono text-xs text-ink-soft">
-          No Foodpanda channel found. Ask the owner to add it in settings.
+          No online sales channels found. Ask the owner to add one in Settings → Sales channels.
         </p>
       </div>
     );
@@ -209,7 +253,7 @@ export default function OnlineSellScreen() {
         <div>
           <h1 className="font-display text-xl font-bold">Online sell</h1>
           <p className="text-xs text-ink-soft">
-            {isReadOnly ? `View only · ${closing?.status}` : "Foodpanda · enter qty sold per item"}
+            {isReadOnly ? `View only · ${closing?.status}` : "Enter qty sold per item"}
           </p>
         </div>
         <span
@@ -225,11 +269,30 @@ export default function OnlineSellScreen() {
         </span>
       </div>
 
-      {/* Excel upload */}
-      {!isReadOnly && (
+      {/* Channel tabs */}
+      {channels.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {channels.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => switchChannel(c.id)}
+              className={`font-mono text-[11px] px-3 py-1.5 rounded border transition-colors ${
+                selectedChannelId === c.id
+                  ? "bg-ink text-paper border-ink"
+                  : "border-[#d8cdb0] text-ink-soft hover:border-ink"
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Excel upload — only for channels that provide a parseable report */}
+      {!isReadOnly && supportsUpload && (
         <div className="rounded border border-dashed border-[#d8cdb0] bg-paper-dim px-3 py-2.5">
           <p className="font-mono text-[10px] uppercase tracking-wide text-ink-soft mb-2">
-            Upload Foodpanda report
+            Upload {selectedChannel?.name} report
           </p>
           <label
             className={`btn btn-sm inline-flex cursor-pointer items-center gap-1.5 font-mono text-xs ${

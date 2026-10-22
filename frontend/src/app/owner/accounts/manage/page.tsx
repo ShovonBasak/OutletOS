@@ -13,6 +13,7 @@ const ACCOUNT_TYPES: { value: AccountType; label: string }[] = [
   { value: "CASH", label: "Cash" },
   { value: "MOBILE_WALLET", label: "Mobile Wallet" },
   { value: "BANK", label: "Bank" },
+  { value: "SALES_CHANNEL", label: "Sales Channel Holding" },
   { value: "SUPPLIER_CREDIT", label: "Supplier Credit" },
 ];
 

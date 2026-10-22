@@ -182,6 +182,15 @@ class ChannelSettlement(models.Model):
     expected_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     received_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     received_date = models.DateField(null=True, blank=True)
+    # Which real account the payout actually landed in (Bank/Mobile Wallet/
+    # Cash) — set when marking received. The money is moved there FROM the
+    # channel's holding account (holding_account) as a transfer, not
+    # posted fresh, so the holding account's balance drops by exactly what
+    # left it.
+    deposit_account = models.ForeignKey(
+        "finance.FinancialAccount", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="channel_settlements_received",
+    )
     status = models.CharField(
         max_length=10, choices=SettlementStatus.choices, default=SettlementStatus.PENDING
     )

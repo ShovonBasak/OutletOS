@@ -2,9 +2,18 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from sales.models import SalesChannel
+from sales.models import SalesChannel, SettlementType
 from sales.pricing import resolve_price
-from .models import DailyClosing, DailyClosingSalesLine, DailyClosingStockCount, LineSource, PaymentEntry
+from .models import (
+    ChannelSettlement,
+    ClosingStatus,
+    DailyClosing,
+    DailyClosingSalesLine,
+    DailyClosingStockCount,
+    LineSource,
+    PaymentEntry,
+    SettlementStatus,
+)
 
 
 def _walk_in_channel():
@@ -17,7 +26,6 @@ def recompute_closing(closing):
     Idempotent: safe to call after each step (stock count, online sell). Walk-in
     quantity for each product = derived_walkin_sold when > 0.
     """
-    from .models import ClosingStatus
     from stock.models import DisplayStock
 
     walk_in = _walk_in_channel()
@@ -116,13 +124,23 @@ def sync_cash_payment_entry(closing):
 
 
 def record_account_transactions(closing, user):
-    """Idempotently (re-)write SALES_COLLECTION transactions for each payment
-    entry on this closing — voids whatever was posted before and re-posts from
-    the current PaymentEntry amounts. Safe to call any number of times while
-    the day is still being finalized (submit() re-running before the owner's
-    lock(), or lock() itself re-syncing a flagged day) — at that point nothing
-    has been reported as "settled" yet, so silently replacing the entry is
-    just finishing a draft, not rewriting history.
+    """Idempotently (re-)write SALES_COLLECTION transactions for this closing —
+    voids whatever was posted before and re-posts fresh. Two kinds of legs:
+
+    1. One per payment entry (cash/bKash/card) — from the current PaymentEntry
+       amounts, as before.
+    2. One per Direct-to-account channel that sold anything today, into that
+       channel's holding account (SalesChannel.holding_account) — the net
+       revenue the platform now owes the outlet, tracked there until it's
+       actually settled (see mark_channel_settlement_received). A channel with
+       no holding account configured is silently skipped — there's nowhere to
+       post it, and generate/mark-received will surface that gap to the owner.
+
+    Safe to call any number of times while the day is still being finalized
+    (submit() re-running before the owner's lock(), or lock() itself
+    re-syncing a flagged day) — at that point nothing has been reported as
+    "settled" yet, so silently replacing these legs is just finishing a draft,
+    not rewriting history.
 
     NOT used for post-lock corrections (see post_cash_correction below) — once
     a day is closed and time has passed, a later fix should never silently
@@ -140,6 +158,21 @@ def record_account_transactions(closing, user):
             amount=payment.amount, date=closing.closing_date, entered_by=user,
             source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
             note=f"Day closing — {closing.closing_date}",
+        )
+
+    channel_totals = defaultdict(Decimal)
+    for line in closing.sales_lines.select_related("channel").filter(
+        channel__settlement_type=SettlementType.DIRECT_TO_ACCOUNT
+    ):
+        channel_totals[line.channel] += line.net_amount
+    for channel, amount in channel_totals.items():
+        if amount <= 0 or not channel.holding_account:
+            continue
+        finance_services.post_transaction(
+            account=channel.holding_account, transaction_type=TransactionType.SALES_COLLECTION,
+            amount=amount, date=closing.closing_date, entered_by=user,
+            source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
+            note=f"{channel.name} online sales — {closing.closing_date}",
         )
 
 
@@ -188,3 +221,95 @@ def post_cash_correction(closing, user, note=""):
         source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
         note=note or f"Sell correction for {closing.closing_date} closing",
     )
+
+
+def compute_channel_settlement_expected(outlet, channel, period_start, period_end):
+    """Σ net_amount of this channel's sales lines, for closings in
+    [period_start, period_end] at this outlet, that have actually been
+    finalized (SUBMITTED or LOCKED) — a still-open DRAFT day's lines can
+    still change, so counting them would make "expected" drift under the
+    owner's feet before the day is even done."""
+    lines = DailyClosingSalesLine.objects.filter(
+        channel=channel,
+        daily_closing__outlet=outlet,
+        daily_closing__closing_date__gte=period_start,
+        daily_closing__closing_date__lte=period_end,
+        daily_closing__status__in=[ClosingStatus.SUBMITTED, ClosingStatus.LOCKED],
+    )
+    return sum((l.net_amount for l in lines), Decimal("0"))
+
+
+def generate_channel_settlement(outlet, channel, period_start, period_end):
+    """Get-or-create the settlement period and (re-)stamp its expected_amount
+    from actual sales lines. Safe to call again on the same period before it's
+    received — e.g. to pull in a late-submitted day's lines — but once money
+    has actually arrived (received_amount is set) the expected figure is left
+    alone so it can't silently drift out from under a finished reconciliation."""
+    if channel.settlement_type != SettlementType.DIRECT_TO_ACCOUNT:
+        raise ValueError(f"{channel.name} is not a Direct-to-account channel.")
+
+    settlement, _ = ChannelSettlement.objects.get_or_create(
+        outlet=outlet, channel=channel, period_start=period_start, period_end=period_end,
+    )
+    if settlement.received_amount is None:
+        settlement.expected_amount = compute_channel_settlement_expected(
+            outlet, channel, period_start, period_end
+        )
+        settlement.save(update_fields=["expected_amount"])
+    return settlement
+
+
+def mark_channel_settlement_received(
+    settlement, *, received_amount, received_date, deposit_account, user, notes=None, status=None
+):
+    """Record the actual payout as a TRANSFER out of the channel's holding
+    account into wherever it really landed (`deposit_account` — a Bank/Mobile
+    Wallet/Cash account picked by the owner), dated the day it actually
+    arrived (not the sales period). The holding account already carries the
+    full expected revenue (posted day-by-day at close, see
+    record_account_transactions) — moving only `received_amount` out of it
+    deliberately leaves any gap vs. expected_amount sitting in the holding
+    balance, visible as money still owed rather than silently absorbed.
+
+    Idempotent: re-calling (to correct a typo'd amount/date/account) voids
+    whatever this settlement posted before and re-posts fresh, so the ledger
+    never carries two legs for the same settlement."""
+    from finance import services as finance_services
+    from finance.models import AccountTransaction, SourceType
+
+    channel = settlement.channel
+    if received_amount and not channel.holding_account:
+        raise ValueError(
+            f"{channel.name} has no holding account configured — "
+            "set one in Settings → Sales channels before recording a receipt."
+        )
+    if received_amount and not deposit_account:
+        raise ValueError("deposit_account is required — pick where the payout actually landed.")
+
+    for t in AccountTransaction.objects.filter(
+        source_type=SourceType.CHANNEL_SETTLEMENT, source_id=settlement.id,
+    ):
+        finance_services.void_transaction(t.id)
+
+    settlement.received_amount = received_amount
+    settlement.received_date = received_date
+    settlement.deposit_account = deposit_account if received_amount else None
+    if notes is not None:
+        settlement.notes = notes
+    if status:
+        settlement.status = status
+    elif received_amount < settlement.expected_amount:
+        settlement.status = SettlementStatus.PARTIAL
+    else:
+        settlement.status = SettlementStatus.RECEIVED
+    settlement.save()
+
+    if received_amount:
+        finance_services.post_transfer_pair(
+            from_account=channel.holding_account, to_account=deposit_account,
+            amount=received_amount, date=received_date, entered_by=user,
+            source_type=SourceType.CHANNEL_SETTLEMENT, source_id=settlement.id,
+            note_out=f"{channel.name} settlement {settlement.period_start}–{settlement.period_end}",
+            note_in=f"{channel.name} payout received",
+        )
+    return settlement

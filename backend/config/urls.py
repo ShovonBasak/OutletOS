@@ -57,7 +57,6 @@ from finance.views import (
 from income.views import OtherIncomeCategoryViewSet, OtherIncomeViewSet
 from reports.views import (
     pnl_report,
-    settlement_report,
     dashboard_summary,
     packaging_report,
     product_performance,
@@ -126,7 +125,6 @@ urlpatterns = [
     path("api/home-summary/", StaffHomeSummaryView.as_view(), name="home_summary"),
     path("api/price-resolve/", price_resolve, name="price_resolve"),
     path("api/reports/pnl/", pnl_report, name="pnl_report"),
-    path("api/reports/settlements/", settlement_report, name="settlement_report"),
     path("api/reports/dashboard/", dashboard_summary, name="dashboard_summary"),
     path("api/reports/packaging/", packaging_report, name="packaging_report"),
     path("api/reports/product-performance/", product_performance, name="product_performance"),

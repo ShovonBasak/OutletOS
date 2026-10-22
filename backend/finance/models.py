@@ -9,6 +9,13 @@ class AccountType(models.TextChoices):
     MOBILE_WALLET = "MOBILE_WALLET", "Mobile Wallet"
     CASH = "CASH", "Cash"
     SUPPLIER_CREDIT = "SUPPLIER_CREDIT", "Supplier Credit"
+    # Per-channel clearing account: a Direct-to-account SalesChannel's net
+    # revenue is posted here the moment each day closes — money the platform
+    # now owes the outlet but hasn't actually paid out yet. Settling later
+    # (closing.services.mark_channel_settlement_received) transfers out of
+    # this account into wherever the payout actually landed, so its running
+    # balance always reads as "what Foodpanda/Pathao/etc. currently owes us."
+    SALES_CHANNEL = "SALES_CHANNEL", "Sales Channel Holding"
 
 
 class FinancialAccount(models.Model):
@@ -87,6 +94,7 @@ class SourceType(models.TextChoices):
     EXPENSE = "EXPENSE", "Expense"
     ACCOUNT_TRANSFER = "ACCOUNT_TRANSFER", "Account Transfer"
     CAPITAL_TRANSACTION = "CAPITAL_TRANSACTION", "Capital Transaction"
+    CHANNEL_SETTLEMENT = "CHANNEL_SETTLEMENT", "Channel Settlement"
     ACCOUNT_BALANCE_CHECK = "ACCOUNT_BALANCE_CHECK", "Account Balance Check"
     STOCK_IN_RECORD = "STOCK_IN_RECORD", "Stock In Record"
     OTHER_INCOME = "OTHER_INCOME", "Other Income"

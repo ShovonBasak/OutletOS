@@ -231,7 +231,7 @@ export default function StockInPage() {
       api<Paginated<FinancialAccountName>>("/financial-accounts/"),
     ]);
     setIngredients(ing.results);
-    const activeAccounts = acc.results.filter((a) => a.is_active);
+    const activeAccounts = acc.results.filter((a) => a.is_active && a.account_type !== "SALES_CHANNEL");
     setAccounts(activeAccounts);
     const defAcc = activeAccounts.find((a) => a.is_primary_cash) ?? activeAccounts[0];
     if (defAcc) setAccountId(String(defAcc.id));

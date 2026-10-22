@@ -605,7 +605,89 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
 
 
 class ChannelSettlementViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
-    queryset = ChannelSettlement.objects.select_related("channel", "outlet")
+    queryset = ChannelSettlement.objects.select_related(
+        "channel", "channel__holding_account", "deposit_account", "outlet"
+    )
     serializer_class = ChannelSettlementSerializer
     permission_classes = [IsOwnerOrReadOnly]
     org_lookup = "outlet__organization"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        outlet = resolve_outlet_param(self.request)
+        if outlet:
+            qs = qs.filter(outlet_id=outlet)
+        channel = self.request.query_params.get("channel")
+        if channel:
+            qs = qs.filter(channel_id=channel)
+        return qs
+
+    @action(detail=False, methods=["post"])
+    def generate(self, request):
+        """Body: {outlet, channel, period_start, period_end} — get-or-create
+        the settlement period, with expected_amount freshly computed from
+        actual sales lines for that span."""
+        from catalog.models import Outlet
+
+        try:
+            outlet = Outlet.objects.get(pk=request.data["outlet"])
+            channel = SalesChannel.objects.get(pk=request.data["channel"])
+        except (KeyError, Outlet.DoesNotExist, SalesChannel.DoesNotExist):
+            raise ValidationError("outlet and channel are required.")
+        user = request.user
+        if not user.is_admin and (
+            outlet.organization_id != user.organization_id
+            or channel.organization_id != user.organization_id
+        ):
+            raise ValidationError("outlet and channel must belong to your organization.")
+        period_start = request.data.get("period_start")
+        period_end = request.data.get("period_end")
+        if not period_start or not period_end:
+            raise ValidationError("period_start and period_end are required.")
+
+        try:
+            settlement = closing_services.generate_channel_settlement(
+                outlet, channel, period_start, period_end
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc))
+        return Response(self.get_serializer(settlement).data)
+
+    @action(detail=True, methods=["post"], url_path="mark-received")
+    def mark_received(self, request, pk=None):
+        """Body: {received_amount, received_date, deposit_account, notes?,
+        status?} — records the actual payout as a transfer from the channel's
+        holding account into deposit_account (wherever it really landed),
+        dated when it actually arrived."""
+        from finance.models import FinancialAccount
+
+        settlement = self.get_object()
+        received_amount = request.data.get("received_amount")
+        received_date = request.data.get("received_date")
+        if received_amount is None or not received_date:
+            raise ValidationError("received_amount and received_date are required.")
+
+        deposit_account = None
+        deposit_account_id = request.data.get("deposit_account")
+        if deposit_account_id:
+            try:
+                deposit_account = FinancialAccount.objects.get(pk=deposit_account_id)
+            except FinancialAccount.DoesNotExist:
+                raise ValidationError("deposit_account not found.")
+            user = request.user
+            if not user.is_admin and deposit_account.organization_id != user.organization_id:
+                raise ValidationError("deposit_account must belong to your organization.")
+
+        try:
+            settlement = closing_services.mark_channel_settlement_received(
+                settlement,
+                received_amount=Decimal(str(received_amount)),
+                received_date=received_date,
+                deposit_account=deposit_account,
+                user=request.user,
+                notes=request.data.get("notes"),
+                status=request.data.get("status"),
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc))
+        return Response(self.get_serializer(settlement).data)

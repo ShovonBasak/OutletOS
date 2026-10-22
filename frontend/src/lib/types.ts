@@ -203,7 +203,32 @@ export interface SalesChannel {
   settlement_type: SettlementType;
   integration_type: "API_SYNC" | "MANUAL";
   commission_basis: string;
+  /** For DIRECT_TO_ACCOUNT channels: the FinancialAccount (type SALES_CHANNEL)
+   * that holds this channel's revenue until it's actually settled. */
+  holding_account: number | null;
+  holding_account_name: string | null;
   is_active: boolean;
+}
+
+export type ChannelSettlementStatus = "PENDING" | "RECEIVED" | "PARTIAL" | "DISPUTED";
+
+export interface ChannelSettlement {
+  id: number;
+  outlet: number;
+  channel: number;
+  channel_name: string;
+  holding_account_name: string | null;
+  period_start: string;
+  period_end: string;
+  expected_amount: string;
+  received_amount: string | null;
+  received_date: string | null;
+  /** Which real account the payout actually landed in — set via mark-received. */
+  deposit_account: number | null;
+  deposit_account_name: string | null;
+  status: ChannelSettlementStatus;
+  notes: string;
+  variance: string | null;
 }
 
 // ---- Operating day (gated staff flow) -------------------------------------
@@ -704,7 +729,7 @@ export interface ExpenseSummary {
 
 // ---- Financial Accounts ----------------------------------------------------
 
-export type AccountType = "BANK" | "MOBILE_WALLET" | "CASH" | "SUPPLIER_CREDIT";
+export type AccountType = "BANK" | "MOBILE_WALLET" | "CASH" | "SUPPLIER_CREDIT" | "SALES_CHANNEL";
 
 export interface FinancialAccount {
   id: number;
@@ -737,7 +762,8 @@ export type TransactionType =
   | "OWNER_WITHDRAWAL"
   | "ADJUSTMENT"
   | "SUPPLIER_ORDER_DEDUCTION"
-  | "OTHER_INCOME";
+  | "OTHER_INCOME"
+  | "CHANNEL_SETTLEMENT";
 
 export interface AccountTransaction {
   id: number;

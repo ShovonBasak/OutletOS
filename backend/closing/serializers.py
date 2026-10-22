@@ -155,10 +155,25 @@ class DailyClosingListSerializer(serializers.ModelSerializer):
 
 class ChannelSettlementSerializer(serializers.ModelSerializer):
     channel_name = serializers.CharField(source="channel.name", read_only=True)
+    holding_account_name = serializers.CharField(
+        source="channel.holding_account.name", read_only=True, default=None
+    )
+    deposit_account_name = serializers.CharField(
+        source="deposit_account.name", read_only=True, default=None
+    )
+    variance = serializers.SerializerMethodField()
 
     class Meta:
         model = ChannelSettlement
         fields = [
-            "id", "outlet", "channel", "channel_name", "period_start", "period_end",
-            "expected_amount", "received_amount", "received_date", "status", "notes",
+            "id", "outlet", "channel", "channel_name", "holding_account_name",
+            "period_start", "period_end", "expected_amount", "received_amount",
+            "received_date", "deposit_account", "deposit_account_name", "status",
+            "notes", "variance",
         ]
+        read_only_fields = ["received_amount", "received_date", "deposit_account", "status"]
+
+    def get_variance(self, obj):
+        if obj.received_amount is None:
+            return None
+        return obj.received_amount - obj.expected_amount

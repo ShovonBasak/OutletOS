@@ -14,6 +14,7 @@ const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   MOBILE_WALLET: "Mobile Wallet",
   BANK: "Bank",
   SUPPLIER_CREDIT: "Supplier Credit",
+  SALES_CHANNEL: "Sales Channel Holding",
 };
 
 export default function PaymentsScreen() {
@@ -31,9 +32,15 @@ export default function PaymentsScreen() {
 
   const prevCtx = useRef({ outlet: 0, opDate: "" });
 
-  // Accounts the staff can manually enter (non-primary-cash, non-supplier-credit)
+  // Accounts the staff can manually enter — excludes primary cash (computed),
+  // supplier credit (not a payment method), and SALES_CHANNEL holding
+  // accounts (those are posted automatically from online sales at day-close,
+  // never typed in here — see closing.services.record_account_transactions).
   const payableAccounts = useMemo(
-    () => accounts.filter((a) => a.is_active && !a.is_primary_cash && a.account_type !== "SUPPLIER_CREDIT"),
+    () => accounts.filter(
+      (a) => a.is_active && !a.is_primary_cash
+        && a.account_type !== "SUPPLIER_CREDIT" && a.account_type !== "SALES_CHANNEL"
+    ),
     [accounts]
   );
 

@@ -5,13 +5,16 @@ import type { AccountTransaction, AccountType } from "./types";
 // dashboard, MoveMoneySheet, and the manage/transactions pages all need
 // the same mapping.
 
-export const ACCOUNT_TYPE_ORDER: AccountType[] = ["CASH", "MOBILE_WALLET", "BANK", "SUPPLIER_CREDIT"];
+export const ACCOUNT_TYPE_ORDER: AccountType[] = [
+  "CASH", "MOBILE_WALLET", "BANK", "SALES_CHANNEL", "SUPPLIER_CREDIT",
+];
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   CASH: "Cash",
   MOBILE_WALLET: "Mobile Wallet",
   BANK: "Bank",
   SUPPLIER_CREDIT: "Supplier Credit",
+  SALES_CHANNEL: "Sales Channel Holding",
 };
 
 export const ACCOUNT_TYPE_ICON: Record<AccountType, string> = {
@@ -19,6 +22,7 @@ export const ACCOUNT_TYPE_ICON: Record<AccountType, string> = {
   MOBILE_WALLET: "📱",
   BANK: "🏦",
   SUPPLIER_CREDIT: "🏭",
+  SALES_CHANNEL: "🛵",
 };
 
 export const ACCOUNT_TYPE_COLOR: Record<AccountType, string> = {
@@ -26,6 +30,7 @@ export const ACCOUNT_TYPE_COLOR: Record<AccountType, string> = {
   MOBILE_WALLET: "border-gold/40 bg-gold/5",
   BANK: "border-leaf/40 bg-leaf/5",
   SUPPLIER_CREDIT: "border-chili/30 bg-chili/5",
+  SALES_CHANNEL: "border-ink/30 bg-ink/5",
 };
 
 export const BALANCE_COLOR = (n: number): string =>

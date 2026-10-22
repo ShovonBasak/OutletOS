@@ -9,11 +9,16 @@ from .models import (
 
 
 class SalesChannelSerializer(serializers.ModelSerializer):
+    holding_account_name = serializers.CharField(
+        source="holding_account.name", read_only=True, default=None
+    )
+
     class Meta:
         model = SalesChannel
         fields = [
             "id", "name", "commission_rate", "settlement_type",
-            "integration_type", "commission_basis", "is_active",
+            "integration_type", "commission_basis",
+            "holding_account", "holding_account_name", "is_active",
         ]
 
 

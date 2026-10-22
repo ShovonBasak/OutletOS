@@ -94,12 +94,15 @@ export default function ExpensesPage() {
 
   async function refreshAccounts() {
     const d = await api<Paginated<FinancialAccount>>("/financial-accounts/");
-    setAccounts(d.results);
+    // Holding accounts aren't a payment method — their balance is posted
+    // automatically from online sales, never spent out of manually.
+    const payable = d.results.filter((a) => a.account_type !== "SALES_CHANNEL");
+    setAccounts(payable);
     if (!accountId) {
       // This page is the Owner's own expense log — default to the Owner's
       // personal cash account, not the shop's (that's the staff default).
-      const ownerCash = d.results.find((a) => a.name.trim().toLowerCase() === "owner cash");
-      const def = ownerCash ?? d.results.find((a) => a.is_primary_cash) ?? d.results[0];
+      const ownerCash = payable.find((a) => a.name.trim().toLowerCase() === "owner cash");
+      const def = ownerCash ?? payable.find((a) => a.is_primary_cash) ?? payable[0];
       if (def) setAccountId(String(def.id));
     }
   }

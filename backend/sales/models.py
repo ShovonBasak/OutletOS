@@ -36,6 +36,18 @@ class SalesChannel(models.Model):
         max_length=20, choices=CommissionBasis.choices,
         default=CommissionBasis.DISCOUNTED_PRICE,
     )
+    # For DIRECT_TO_ACCOUNT channels: the FinancialAccount (AccountType.SALES_CHANNEL)
+    # that HOLDS this channel's revenue until the platform actually pays out —
+    # each day's net sales for this channel post here on close (see
+    # closing.services.record_account_transactions), so its balance always
+    # reads as "what this channel currently owes the outlet." Settling later
+    # transfers out of it into wherever the payout landed (mark_channel_settlement_received).
+    # Optional — COLLECTED_AT_OUTLET channels don't need one since that cash is
+    # already part of the day's normal cash/payments math.
+    holding_account = models.ForeignKey(
+        "finance.FinancialAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="sales_channels",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

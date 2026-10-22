@@ -86,9 +86,12 @@ export default function OtherIncomePage() {
 
   async function refreshAccounts() {
     const d = await api<Paginated<FinancialAccount>>("/financial-accounts/");
-    setAccounts(d.results);
+    // Holding accounts fill from online sales automatically — not somewhere
+    // other income gets manually received into.
+    const receivable = d.results.filter((a) => a.account_type !== "SALES_CHANNEL");
+    setAccounts(receivable);
     if (!accountId) {
-      const def = d.results.find((a) => a.is_primary_cash) ?? d.results[0];
+      const def = receivable.find((a) => a.is_primary_cash) ?? receivable[0];
       if (def) setAccountId(String(def.id));
     }
   }

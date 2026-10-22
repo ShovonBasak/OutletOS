@@ -11,7 +11,10 @@ from .models import (
 
 @admin.register(SalesChannel)
 class SalesChannelAdmin(admin.ModelAdmin):
-    list_display = ["name", "commission_rate", "settlement_type", "integration_type", "is_active"]
+    list_display = [
+        "name", "commission_rate", "settlement_type", "holding_account",
+        "integration_type", "is_active",
+    ]
 
 
 

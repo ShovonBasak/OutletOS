@@ -21,7 +21,6 @@ from accounts.permissions import IsOwner
 from accounts.scoping import resolve_outlet_param
 from catalog.models import Outlet, Product, ProductType, TrackingMode
 from closing.models import (
-    ChannelSettlement,
     ClosingStatus,
     DailyChannelDiscount,
     DailyClosing,
@@ -358,30 +357,6 @@ def pnl_report(request):
     outlet = resolve_outlet_param(request)
     return Response(compute_pnl(start, end, outlet))
 
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def settlement_report(request):
-    """Settlement variance per channel/period for DIRECT_TO_ACCOUNT channels."""
-    qs = ChannelSettlement.objects.select_related("channel")
-    outlet = resolve_outlet_param(request)
-    if outlet:
-        qs = qs.filter(outlet_id=outlet)
-    rows = []
-    for s in qs:
-        received = s.received_amount or Decimal("0")
-        rows.append({
-            "id": s.id,
-            "channel": s.channel.name,
-            "period_start": s.period_start,
-            "period_end": s.period_end,
-            "expected_amount": s.expected_amount,
-            "received_amount": s.received_amount,
-            "variance": received - s.expected_amount,
-            "status": s.status,
-            "notes": s.notes,
-        })
-    return Response(rows)
 
 
 @api_view(["GET"])
