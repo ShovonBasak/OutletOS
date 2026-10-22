@@ -43,6 +43,9 @@ export default function StockLevels() {
   const [supplies, setSupplies] = useState<PackagingLevel[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [bundleSizeFor, setBundleSizeFor] = useState<number | null>(null);
+  const [bundleSizeValue, setBundleSizeValue] = useState("");
+  const [savingBundleSize, setSavingBundleSize] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -58,6 +61,23 @@ export default function StockLevels() {
   }
 
   useEffect(() => { load(); }, [outlet]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveBundleSize(ingredientId: number) {
+    const n = parseInt(bundleSizeValue, 10);
+    if (!n || n <= 0) return;
+    setSavingBundleSize(true);
+    try {
+      await api("/periodic-stock-checks/set-bundle-size/", {
+        method: "POST",
+        body: JSON.stringify({ ingredient: ingredientId, bundle_size: n }),
+      });
+      setBundleSizeFor(null);
+      setBundleSizeValue("");
+      load();
+    } finally {
+      setSavingBundleSize(false);
+    }
+  }
 
   const q = search.toLowerCase();
 
@@ -201,44 +221,82 @@ export default function StockLevels() {
                 ? packBreakdown(s.current_qty, s.bundle_size, s.base_unit)
                 : null;
               const isEstimated = s.source === "stock_in_derived";
+              const isEditingBundle = bundleSizeFor === s.ingredient;
               return (
                 <div
                   key={s.ingredient}
-                  className={`flex items-center justify-between gap-3 rounded border px-3 py-2 ${
+                  className={`flex flex-col gap-2 rounded border px-3 py-2 ${
                     zero ? "border-chili/30 bg-chili/5"
                     : low ? "border-gold/30 bg-gold/5"
                     : "border-[#d8cdb0] bg-paper"
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="font-mono text-[12px] font-medium text-ink truncate">
-                        {s.ingredient_display_name}
-                      </p>
-                      {isEstimated && (
-                        <span className="shrink-0 rounded-full bg-ink-soft/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wide text-ink-soft/60">
-                          est.
-                        </span>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-mono text-[12px] font-medium text-ink truncate">
+                          {s.ingredient_display_name}
+                        </p>
+                        {isEstimated && (
+                          <span className="shrink-0 rounded-full bg-ink-soft/10 px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wide text-ink-soft/60">
+                            est.
+                          </span>
+                        )}
+                      </div>
+                      {s.last_checked_at ? (
+                        <p className="font-mono text-[10px] text-ink-soft/60">
+                          Counted {shortDate(s.last_checked_at)} · {timeOf(s.last_checked_at)}
+                        </p>
+                      ) : (
+                        <p className="font-mono text-[10px] text-ink-soft/40 italic">Never counted — based on stock-in</p>
                       )}
                     </div>
-                    {s.last_checked_at ? (
-                      <p className="font-mono text-[10px] text-ink-soft/60">
-                        Counted {shortDate(s.last_checked_at)} · {timeOf(s.last_checked_at)}
+                    <div className="shrink-0 text-right">
+                      <p className={`font-mono text-[14px] font-bold leading-tight ${
+                        zero ? "text-chili" : low ? "text-gold-deep" : "text-ink"
+                      }`}>
+                        {qty} <span className="text-[10px] font-normal text-ink-soft">{s.base_unit}</span>
                       </p>
-                    ) : (
-                      <p className="font-mono text-[10px] text-ink-soft/40 italic">Never counted — based on stock-in</p>
-                    )}
+                      {packs && (
+                        <p className="font-mono text-[9px] text-ink-soft/50">{packs}</p>
+                      )}
+                    </div>
                   </div>
-                  <div className="shrink-0 text-right">
-                    <p className={`font-mono text-[14px] font-bold leading-tight ${
-                      zero ? "text-chili" : low ? "text-gold-deep" : "text-ink"
-                    }`}>
-                      {qty} <span className="text-[10px] font-normal text-ink-soft">{s.base_unit}</span>
-                    </p>
-                    {packs && (
-                      <p className="font-mono text-[9px] text-ink-soft/50">{packs}</p>
-                    )}
-                  </div>
+
+                  {isEditingBundle ? (
+                    <div className="flex gap-2">
+                      <input
+                        className="field-input flex-1"
+                        inputMode="numeric"
+                        placeholder={`${s.base_unit} per bundle`}
+                        value={bundleSizeValue}
+                        onChange={(e) => setBundleSizeValue(e.target.value.replace(/[^0-9]/g, ""))}
+                        autoFocus
+                      />
+                      <button className="btn btn-ghost" onClick={() => setBundleSizeFor(null)}>
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={savingBundleSize}
+                        onClick={() => saveBundleSize(s.ingredient)}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="self-start font-mono text-[9px] text-ink-soft underline decoration-dotted"
+                      onClick={() => {
+                        setBundleSizeFor(s.ingredient);
+                        setBundleSizeValue(s.bundle_size ?? "");
+                      }}
+                    >
+                      {s.bundle_size
+                        ? `Bundle: ${s.bundle_size} ${s.base_unit} · edit`
+                        : "Bundle size not set · tap to configure"}
+                    </button>
+                  )}
                 </div>
               );
             })}

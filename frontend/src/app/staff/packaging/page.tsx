@@ -4,18 +4,82 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { timeOf } from "@/lib/format";
+import { shortDate, timeOf } from "@/lib/format";
 import type { PackagingLevel } from "@/lib/types";
+
+/** Quantity field — can only move down from `max` (the current confirmed
+ * level); increases only ever happen via Stock In. Mirrors the Stepper
+ * pattern from staff/closing/count/page.tsx: steppable via ±, always
+ * directly editable too. `integer` rounds typed values (used for whole
+ * bundles — staff count bundles, never fractions of one). */
+function QtyField({
+  value,
+  max,
+  step,
+  unit,
+  integer,
+  onChange,
+}: {
+  value: number;
+  max: number;
+  step: number;
+  unit: string;
+  integer?: boolean;
+  onChange: (v: number) => void;
+}) {
+  const atZero = value <= 0;
+  const clamp = (n: number) => {
+    const v = Math.min(max, Math.max(0, n));
+    return integer ? Math.round(v) : v;
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {step > 0 && (
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded border border-[#d8cdb0] bg-paper font-mono text-base text-ink active:bg-paper-dim disabled:opacity-40"
+          onClick={() => onChange(clamp(value - step))}
+          disabled={value <= 0}
+        >
+          −
+        </button>
+      )}
+      <input
+        className={`field-input h-9 !w-20 !px-0 text-center font-mono text-sm font-semibold ${
+          atZero ? "!border-chili/50 !bg-chili/5" : ""
+        }`}
+        inputMode={integer ? "numeric" : "decimal"}
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === "") return onChange(0);
+          const n = Number(e.target.value);
+          if (!isNaN(n)) onChange(clamp(n));
+        }}
+      />
+      {unit && <span className="font-mono text-[11px] text-ink-soft">{unit}</span>}
+      {step > 0 && (
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded border border-[#d8cdb0] bg-paper font-mono text-base text-ink active:bg-paper-dim disabled:opacity-40"
+          onClick={() => onChange(clamp(value + step))}
+          disabled={value >= max}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function PackagingPage() {
   const { user } = useAuth();
   const outlet = user?.outlet ?? 1;
   const [items, setItems] = useState<PackagingLevel[]>([]);
-  const [recountFor, setRecountFor] = useState<number | null>(null);
-  const [recountValue, setRecountValue] = useState("");
-  const [pendingBundle, setPendingBundle] = useState<number | null>(null);
-  const [bundleSizeFor, setBundleSizeFor] = useState<number | null>(null);
-  const [bundleSizeValue, setBundleSizeValue] = useState("");
+  // Working (not-yet-saved) displayed value per ingredient — in whole bundles
+  // for items with a bundle size, in base_unit for items without one. Only
+  // present while that row has an unsaved change pending.
+  const [pending, setPending] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -31,46 +95,56 @@ export default function PackagingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [outlet]);
 
-  async function saveRecount(ingredientId: number) {
-    if (recountValue === "") return;
-    setBusy(true);
-    try {
-      await api("/periodic-stock-checks/", {
-        method: "POST",
-        body: JSON.stringify({ outlet, ingredient: ingredientId, counted_qty: recountValue }),
-      });
-      setRecountFor(null);
-      setRecountValue("");
-      refresh();
-    } finally {
-      setBusy(false);
-    }
+  function bundleStep(item: PackagingLevel) {
+    return Number(item.bundle_size ?? 0);
   }
 
-  async function confirmBundle(ingredientId: number) {
-    setBusy(true);
-    try {
-      await api("/periodic-stock-checks/bundle-finished/", {
-        method: "POST",
-        body: JSON.stringify({ outlet, ingredient: ingredientId }),
-      });
-      setPendingBundle(null);
-      refresh();
-    } finally {
-      setBusy(false);
-    }
+  // Staff count whole bundles, not pieces — so the on-screen number is
+  // "bundles left" (floor: a part-bundle isn't a countable unit) whenever a
+  // bundle size is configured. Items without one fall back to the raw
+  // base-unit count (there's no higher unit to hide pieces behind).
+  function originalDisplay(item: PackagingLevel) {
+    const step = bundleStep(item);
+    const qty = Number(item.current_qty);
+    return step > 0 ? Math.floor(qty / step) : qty;
   }
 
-  async function saveBundleSize(ingredientId: number) {
-    if (bundleSizeValue === "" || Number(bundleSizeValue) <= 0) return;
+  function workingDisplay(item: PackagingLevel) {
+    return pending[item.ingredient] ?? originalDisplay(item);
+  }
+
+  function clearPending(ingredientId: number) {
+    setPending((p) => {
+      if (!(ingredientId in p)) return p;
+      const next = { ...p };
+      delete next[ingredientId];
+      return next;
+    });
+  }
+
+  async function saveAdjustment(item: PackagingLevel) {
+    const original = originalDisplay(item);
+    const working = workingDisplay(item);
+    if (working === original) {
+      clearPending(item.ingredient);
+      return;
+    }
+    const step = bundleStep(item);
+
     setBusy(true);
     try {
-      await api("/periodic-stock-checks/set-bundle-size/", {
-        method: "POST",
-        body: JSON.stringify({ ingredient: ingredientId, bundle_size: bundleSizeValue }),
-      });
-      setBundleSizeFor(null);
-      setBundleSizeValue("");
+      if (step > 0) {
+        await api("/periodic-stock-checks/bundle-finished/", {
+          method: "POST",
+          body: JSON.stringify({ outlet, ingredient: item.ingredient, bundles: original - working }),
+        });
+      } else {
+        await api("/periodic-stock-checks/", {
+          method: "POST",
+          body: JSON.stringify({ outlet, ingredient: item.ingredient, counted_qty: working }),
+        });
+      }
+      clearPending(item.ingredient);
       refresh();
     } finally {
       setBusy(false);
@@ -84,142 +158,80 @@ export default function PackagingPage() {
       </Link>
       <div>
         <h1 className="font-display text-xl font-bold">Packaging &amp; supplies</h1>
-        <p className="text-xs text-ink-soft">Current quantities — recount or deduct as needed</p>
+        <p className="text-xs text-ink-soft">Tap − to count down what&apos;s left, then save</p>
       </div>
 
       <div className="flex flex-col gap-3">
         {items.map((item) => {
-          const qty = Number(item.current_qty);
+          const original = originalDisplay(item);
+          const working = workingDisplay(item);
+          const hasPendingChange = working !== original;
           const isDerived = item.source === "stock_in_derived";
-          const isRecount = recountFor === item.ingredient;
-          const isPending = pendingBundle === item.ingredient;
-          const isBundleSizeEdit = bundleSizeFor === item.ingredient;
+          const isOut = !hasPendingChange && working <= 0;
+          const step = bundleStep(item);
+          const hasBundle = step > 0;
+          const diff = original - working;
+          const unit = hasBundle ? (working === 1 ? "bundle" : "bundles") : item.base_unit;
+          const diffUnit = hasBundle ? (diff === 1 ? "bundle" : "bundles") : item.base_unit;
 
           return (
-            <div key={item.ingredient} className="ticket flex flex-col gap-2">
-              <div className="flex items-start justify-between gap-2">
+            <div
+              key={item.ingredient}
+              className={`ticket flex flex-col gap-2 ${isOut ? "!border-chili/40 !bg-chili/5" : ""}`}
+            >
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-display text-sm font-bold">{item.ingredient_display_name}</span>
-                <div className="text-right shrink-0">
-                  <p className="qty text-ink">
-                    {qty} {item.base_unit}
-                  </p>
-                  {isDerived ? (
-                    <p className="font-mono text-[9px] text-gold-deep uppercase tracking-wide">
-                      from stock-in · unconfirmed
-                    </p>
-                  ) : item.last_checked_at ? (
-                    <p className="font-mono text-[9px] text-ink-soft/60">
-                      counted {timeOf(item.last_checked_at)}
-                    </p>
-                  ) : null}
-                </div>
+                {hasPendingChange ? (
+                  <span className="font-mono text-[9px] text-chili uppercase tracking-wide">
+                    was {original}
+                  </span>
+                ) : isDerived ? (
+                  <span className="font-mono text-[9px] text-gold-deep uppercase tracking-wide">
+                    unconfirmed
+                  </span>
+                ) : item.last_checked_at ? (
+                  <span className="font-mono text-[9px] text-ink-soft/60">
+                    {shortDate(item.last_checked_at)} · {timeOf(item.last_checked_at)}
+                  </span>
+                ) : null}
               </div>
 
-              {/* Bundle size — configurable, this is what "− 1 bundle" subtracts */}
-              {!isBundleSizeEdit && (
-                <button
-                  className="self-start font-mono text-[10px] text-ink-soft underline decoration-dotted"
-                  onClick={() => {
-                    setBundleSizeFor(item.ingredient);
-                    setBundleSizeValue(item.bundle_size ?? "");
-                  }}
-                >
-                  {item.bundle_size
-                    ? `Bundle size: ${item.bundle_size} ${item.base_unit} · edit`
-                    : "Bundle size not set · tap to configure"}
-                </button>
-              )}
-
-              {isDerived && (
-                <p className="font-mono text-[10px] text-gold-deep bg-gold/10 rounded px-2 py-1">
-                  Quantity loaded from approved stock-in records. Tap Recount to confirm the actual amount on hand.
-                </p>
-              )}
-
-              {isBundleSizeEdit ? (
-                <div className="rounded bg-paper-dim px-2 py-2">
-                  <p className="mb-1.5 font-mono text-[10px] text-ink-soft">
-                    How many {item.base_unit} in one bundle/pack of {item.ingredient_display_name}?
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      className="field-input flex-1"
-                      inputMode="decimal"
-                      placeholder={`${item.base_unit} per bundle`}
-                      value={bundleSizeValue}
-                      onChange={(e) => setBundleSizeValue(e.target.value)}
-                      autoFocus
-                    />
-                    <button className="btn btn-ghost" onClick={() => setBundleSizeFor(null)}>
-                      Cancel
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      disabled={busy}
-                      onClick={() => saveBundleSize(item.ingredient)}
-                    >
-                      Save
-                    </button>
+              <div className="flex items-center justify-between gap-2">
+                <QtyField
+                  value={working}
+                  max={original}
+                  step={hasBundle ? 1 : 0}
+                  unit={hasBundle ? "" : unit}
+                  integer={hasBundle}
+                  onChange={(v) => setPending((p) => ({ ...p, [item.ingredient]: v }))}
+                />
+                {hasBundle && (
+                  <div className="shrink-0 text-right">
+                    <p className="font-mono text-[11px] font-semibold text-ink">
+                      = {working * step} {item.base_unit}
+                    </p>
+                    <p className="font-mono text-[9px] text-ink-soft/60">
+                      1 bundle = {item.bundle_size} {item.base_unit}
+                    </p>
                   </div>
-                </div>
-              ) : isPending ? (
-                <div className="rounded bg-gold/10 px-2 py-2">
-                  <p className="font-mono text-[11px] text-gold-deep">
-                    Subtract one full bundle ({item.bundle_size ?? "?"} {item.base_unit})?
-                  </p>
-                  <div className="mt-1.5 flex gap-2">
-                    <button className="btn btn-ghost flex-1" onClick={() => setPendingBundle(null)}>
-                      Cancel
-                    </button>
-                    <button
-                      className="btn btn-primary flex-1"
-                      disabled={busy}
-                      onClick={() => confirmBundle(item.ingredient)}
-                    >
-                      Confirm
-                    </button>
-                  </div>
-                </div>
-              ) : isRecount ? (
-                <div className="flex gap-2">
-                  <input
-                    className="field-input flex-1"
-                    inputMode="decimal"
-                    placeholder={`Counted ${item.base_unit}`}
-                    value={recountValue}
-                    onChange={(e) => setRecountValue(e.target.value)}
-                    autoFocus
-                  />
-                  <button className="btn btn-ghost" onClick={() => setRecountFor(null)}>
-                    Cancel
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    disabled={busy}
-                    onClick={() => saveRecount(item.ingredient)}
-                  >
-                    Save
-                  </button>
-                </div>
-              ) : (
+                )}
+              </div>
+
+              {hasPendingChange && (
                 <div className="flex gap-2">
                   <button
                     className="btn btn-ghost flex-1"
-                    onClick={() => {
-                      setRecountFor(item.ingredient);
-                      setRecountValue(qty > 0 ? String(qty) : "");
-                    }}
+                    onClick={() => clearPending(item.ingredient)}
                   >
-                    Recount
+                    Reset
                   </button>
-                  {item.bundle_size && (
-                    <button
-                      className="btn btn-primary flex-1"
-                      onClick={() => setPendingBundle(item.ingredient)}
-                    >
-                      − 1 bundle
-                    </button>
-                  )}
+                  <button
+                    className="btn btn-primary flex-1"
+                    disabled={busy}
+                    onClick={() => saveAdjustment(item)}
+                  >
+                    Save −{diff} {diffUnit}
+                  </button>
                 </div>
               )}
             </div>

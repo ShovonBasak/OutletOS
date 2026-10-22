@@ -120,7 +120,7 @@ class Ingredient(models.Model):
     # report a case of 100 sauce sachets directly as "100 pcs" (unit_captured=
     # PIECE), so pieces_per_pack is irrelevant to that stock-in's math — but the
     # physical bundle staff open and finish during the day is still 100 pieces.
-    bundle_size = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    bundle_size = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ["name"]
