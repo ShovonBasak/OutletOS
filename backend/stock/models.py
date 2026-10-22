@@ -131,7 +131,6 @@ class StockInRecord(models.Model):
         related_name="reviewed_stock_ins",
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    slip_image = models.ImageField(upload_to="slips/", null=True, blank=True)
     notes = models.TextField(blank=True)
     # Financial summary extracted from the supplier slip (BDT)
     slip_subtotal       = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -182,6 +181,25 @@ class StockInRecord(models.Model):
             elif item.unit_captured == UnitCaptured.PACK and item.pack_definition_id is None:
                 blocking.append(item)
         return blocking
+
+
+class StockInSlipImage(models.Model):
+    """One photographed page of a supplier slip. A single delivery is often
+    split across 2+ photos when the item list doesn't fit on one page — these
+    are kept in `order` and read together as one invoice during extraction."""
+
+    stock_in_record = models.ForeignKey(
+        StockInRecord, on_delete=models.CASCADE, related_name="slip_images"
+    )
+    image = models.ImageField(upload_to="slips/")
+    order = models.PositiveIntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return f"Slip page #{self.order} for StockIn #{self.stock_in_record_id}"
 
 
 class StockInItem(models.Model):

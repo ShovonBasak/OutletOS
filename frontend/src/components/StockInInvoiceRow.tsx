@@ -153,18 +153,26 @@ export function StockInInvoiceRow({
             <StockInItemTable items={items} expectedTotal={grandTotal} />
           )}
 
-          {r.slip_image && (
+          {r.slip_images && r.slip_images.length > 0 && (
             <div className="mt-3">
-              <p className="mb-1.5 font-mono text-[9px] uppercase tracking-wide text-ink-soft">Delivery slip</p>
-              <a href={r.slip_image} target="_blank" rel="noopener noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={r.slip_image}
-                  alt="Delivery slip"
-                  className="max-h-64 w-full rounded border border-[#d8cdb0] object-contain bg-[#faf7ee] cursor-zoom-in"
-                />
-                <p className="mt-1 font-mono text-[10px] text-leaf-deep underline">Open full size ↗</p>
-              </a>
+              <p className="mb-1.5 font-mono text-[9px] uppercase tracking-wide text-ink-soft">
+                Delivery slip{r.slip_images.length > 1 ? ` — ${r.slip_images.length} pages` : ""}
+              </p>
+              <div className="flex flex-col gap-2">
+                {r.slip_images.map((img, idx) => (
+                  <a key={img.id} href={img.image} target="_blank" rel="noopener noreferrer">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.image}
+                      alt={`Delivery slip page ${idx + 1}`}
+                      className="max-h-64 w-full rounded border border-[#d8cdb0] object-contain bg-[#faf7ee] cursor-zoom-in"
+                    />
+                    <p className="mt-1 font-mono text-[10px] text-leaf-deep underline">
+                      Page {idx + 1} — open full size ↗
+                    </p>
+                  </a>
+                ))}
+              </div>
             </div>
           )}
 

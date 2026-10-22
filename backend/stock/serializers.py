@@ -12,8 +12,16 @@ from .models import (
     RawStock,
     StockInItem,
     StockInRecord,
+    StockInSlipImage,
     UnitCaptured,
 )
+
+
+class StockInSlipImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockInSlipImage
+        fields = ["id", "image", "order", "uploaded_at"]
+        read_only_fields = fields
 
 
 class StockInItemSerializer(serializers.ModelSerializer):
@@ -62,13 +70,14 @@ class StockInRecordListSerializer(serializers.ModelSerializer):
     paid_from_account_name = serializers.SerializerMethodField()
     item_count = serializers.IntegerField(read_only=True)
     source_summary = serializers.SerializerMethodField()
+    slip_images = StockInSlipImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = StockInRecord
         fields = [
             "id", "outlet", "stock_in_date", "invoice_number",
             "submitted_by", "submitted_by_name", "status",
-            "reviewed_at", "slip_image", "notes",
+            "reviewed_at", "slip_images", "notes",
             "slip_grand_total", "paid_from_account", "paid_from_account_name",
             "created_at", "item_count", "source_summary",
         ]
@@ -88,6 +97,7 @@ class StockInRecordListSerializer(serializers.ModelSerializer):
 
 class StockInRecordSerializer(serializers.ModelSerializer):
     items = StockInItemSerializer(many=True, required=False)
+    slip_images = StockInSlipImageSerializer(many=True, read_only=True)
     submitted_by_name = serializers.CharField(source="submitted_by.name", read_only=True)
     paid_from_account_name = serializers.SerializerMethodField()
     unresolved_count = serializers.SerializerMethodField()
@@ -107,15 +117,15 @@ class StockInRecordSerializer(serializers.ModelSerializer):
         model = StockInRecord
         fields = [
             "id", "outlet", "stock_in_date", "invoice_number", "submitted_by", "submitted_by_name",
-            "status", "reviewed_by", "reviewed_at", "slip_image", "notes",
+            "status", "reviewed_by", "reviewed_at", "slip_images", "notes",
             "slip_subtotal", "slip_discount_total", "slip_vat_total", "slip_grand_total",
             "paid_from_account", "paid_from_account_name",
             "created_at", "items", "unresolved_count",
         ]
-        # slip_image is set via the dedicated multipart upload-slip action.
+        # slip pages are attached via the dedicated multipart upload-slip action.
         read_only_fields = [
             "status", "reviewed_by", "reviewed_at", "created_at",
-            "submitted_by", "slip_image",
+            "submitted_by",
         ]
 
     def get_paid_from_account_name(self, obj):

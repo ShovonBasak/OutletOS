@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import viewsets
@@ -28,6 +28,7 @@ from .models import (
     RawStock,
     StockInItem,
     StockInRecord,
+    StockInSlipImage,
     StockInStatus,
     UnitCaptured,
 )
@@ -70,13 +71,13 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStaffOwnerOrAdmin]
 
     _FULL_QUERYSET = StockInRecord.objects.prefetch_related(
-        "items__ingredient", "items__pack_definition"
+        "items__ingredient", "items__pack_definition", "slip_images"
     ).select_related("outlet", "submitted_by", "paid_from_account")
 
     def _list_queryset(self):
         return StockInRecord.objects.select_related(
             "submitted_by", "paid_from_account"
-        ).annotate(
+        ).prefetch_related("slip_images").annotate(
             item_count=Count("items", distinct=True),
             slip_item_count=Count(
                 "items", filter=Q(items__source="SLIP_EXTRACTED"), distinct=True
@@ -148,16 +149,45 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def upload_slip(self, request, pk=None):
-        """Attach/replace the delivery-slip image (multipart field `slip_image`)."""
+        """Attach one or more delivery-slip page images (multipart field
+        `slip_image`, repeated for each page). A supplier invoice whose item
+        list doesn't fit on one page is commonly photographed as 2+ separate
+        pages — this appends them in upload order rather than replacing."""
         record = self.get_object()
         self._guard_editable(record)
-        image = request.FILES.get("slip_image")
-        if not image:
+        images = request.FILES.getlist("slip_image")
+        if not images:
             raise ValidationError("No slip_image file provided.")
-        record.slip_image = image
+        next_order = (
+            record.slip_images.aggregate(Max("order"))["order__max"]
+        )
+        next_order = 0 if next_order is None else next_order + 1
+        for offset, image in enumerate(images):
+            StockInSlipImage.objects.create(
+                stock_in_record=record, image=image, order=next_order + offset
+            )
         # auto_now doesn't fire unless it's in update_fields — Django only
         # writes/touches the columns explicitly listed.
-        record.save(update_fields=["slip_image", "updated_at"])
+        record.save(update_fields=["updated_at"])
+        # get_object()'s queryset prefetched slip_images before this action
+        # created new ones — that cache is now stale, so re-fetch for the response.
+        record = self.get_queryset().get(pk=record.pk)
+        return Response(self.get_serializer(record).data)
+
+    @action(detail=True, methods=["post"], url_path="remove-slip-image")
+    def remove_slip_image(self, request, pk=None):
+        """Remove one attached slip page. Body: {image: <StockInSlipImage id>}."""
+        record = self.get_object()
+        self._guard_editable(record)
+        image_id = request.data.get("image")
+        if not image_id:
+            raise ValidationError("image id required.")
+        deleted, _ = record.slip_images.filter(pk=image_id).delete()
+        if not deleted:
+            raise ValidationError("Slip image not found on this record.")
+        record.save(update_fields=["updated_at"])
+        # Stale prefetch cache from get_object() — re-fetch for the response.
+        record = self.get_queryset().get(pk=record.pk)
         return Response(self.get_serializer(record).data)
 
     @action(detail=True, methods=["post"])
@@ -172,17 +202,20 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
 
         record = self.get_object()
         self._guard_editable(record)
-        if not record.slip_image:
+        slip_images = list(record.slip_images.order_by("order"))
+        if not slip_images:
             raise ValidationError("Attach a slip image before extracting.")
 
         known_names = list(
             Ingredient.objects.filter(is_active=True).values_list("name", flat=True)
         )
-        with open(record.slip_image.path, "rb") as fh:
-            image_data = fh.read()
+        images_data = []
+        for slip_image in slip_images:
+            with open(slip_image.image.path, "rb") as fh:
+                images_data.append(fh.read())
 
         try:
-            result = ai_extraction.extract_historic_stock_in([image_data], known_names)
+            result = ai_extraction.extract_historic_stock_in(images_data, known_names)
         except LLMUnavailable as exc:
             return Response(
                 {
@@ -711,7 +744,7 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
         # Optional metadata fields that update the record before importing lines.
         invoice_number = request.data.get("invoice_number", "").strip()
         stock_in_date  = request.data.get("stock_in_date", "").strip()
-        slip_image     = request.FILES.get("slip_image")
+        slip_images    = request.FILES.getlist("slip_image")
         update_fields = []
         if invoice_number:
             record.invoice_number = invoice_number
@@ -723,10 +756,16 @@ class StockInRecordViewSet(viewsets.ModelViewSet):
                 update_fields.append("stock_in_date")
             except ValueError:
                 raise ValidationError("Invalid stock_in_date — use YYYY-MM-DD.")
-        if slip_image:
-            record.slip_image = slip_image
-            update_fields.append("slip_image")
-        if update_fields:
+        if slip_images:
+            next_order = (
+                record.slip_images.aggregate(Max("order"))["order__max"]
+            )
+            next_order = 0 if next_order is None else next_order + 1
+            for offset, image in enumerate(slip_images):
+                StockInSlipImage.objects.create(
+                    stock_in_record=record, image=image, order=next_order + offset
+                )
+        if update_fields or slip_images:
             # auto_now doesn't fire unless it's in update_fields.
             record.save(update_fields=update_fields + ["updated_at"])
 

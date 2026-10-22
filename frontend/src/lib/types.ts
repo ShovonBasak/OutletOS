@@ -269,6 +269,13 @@ export interface StockInItem {
   unit_price?: string | null;
 }
 
+export interface StockInSlipImage {
+  id: number;
+  image: string;
+  order: number;
+  uploaded_at: string;
+}
+
 export interface StockInRecord {
   id: number;
   outlet: number;
@@ -279,7 +286,9 @@ export interface StockInRecord {
   status: StockInStatus;
   reviewed_by: number | null;
   reviewed_at: string | null;
-  slip_image: string | null;
+  /** One or more photographed slip pages, in reading order — a long item
+   * list is often split across multiple photos. */
+  slip_images: StockInSlipImage[];
   notes: string;
   slip_vat_total?: string | null;
   slip_grand_total?: string | null;

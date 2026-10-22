@@ -74,6 +74,33 @@ class ExtractSlipTests(APITestCase):
             format="multipart",
         )
 
+    def test_upload_slip_appends_multiple_pages(self):
+        resp = self.client.post(
+            f"/api/stock-in/{self.record_id}/upload-slip/",
+            {
+                "slip_image": [
+                    SimpleUploadedFile("slip2.png", _TINY_PNG, content_type="image/png"),
+                    SimpleUploadedFile("slip3.png", _TINY_PNG, content_type="image/png"),
+                ]
+            },
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        # setUp already attached one page — two more appended, not replaced.
+        self.assertEqual(len(resp.data["slip_images"]), 3)
+        self.assertEqual([img["order"] for img in resp.data["slip_images"]], [0, 1, 2])
+
+    def test_remove_slip_image(self):
+        record = StockInRecord.objects.get(pk=self.record_id)
+        image_id = record.slip_images.get().id
+        resp = self.client.post(
+            f"/api/stock-in/{self.record_id}/remove-slip-image/",
+            {"image": image_id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["slip_images"], [])
+
     def _extract(self, invoice_number, supplier_name):
         with patch(
             "catalog.ai_extraction.extract_historic_stock_in",
