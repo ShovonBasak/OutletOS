@@ -311,19 +311,39 @@ export default function StockInPage() {
   }
 
   async function onSlipChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !draft) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !draft) return;
     setBusy("upload");
     setMsg("");
     try {
       const form = new FormData();
-      form.append("slip_image", file);
+      for (const file of Array.from(files)) form.append("slip_image", file);
       const rec = await api<StockInRecord>(`/stock-in/${draft.id}/upload-slip/`, {
         method: "POST",
         body: form,
       });
       setDraft(rec);
-      setMsg('Slip attached. Tap "Auto-read from slip".');
+      setMsg(
+        files.length > 1
+          ? `${files.length} slip pages attached. Tap "Auto-read from slip".`
+          : 'Slip attached. Tap "Auto-read from slip". If the invoice continues onto another photo, attach that page too before reading.'
+      );
+    } finally {
+      setBusy("");
+      e.target.value = "";
+    }
+  }
+
+  async function removeSlipImage(imageId: number) {
+    if (!draft) return;
+    setBusy("upload");
+    setMsg("");
+    try {
+      const rec = await api<StockInRecord>(`/stock-in/${draft.id}/remove-slip-image/`, {
+        method: "POST",
+        body: JSON.stringify({ image: imageId }),
+      });
+      setDraft(rec);
     } finally {
       setBusy("");
     }
@@ -611,16 +631,48 @@ export default function StockInPage() {
 
           <div className="flex flex-col gap-2">
             <span className="field-label">Delivery slip</span>
-            {draft.slip_image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={mediaUrl(draft.slip_image)} alt="delivery slip" className="max-h-40 w-full rounded border border-[#d8cdb0] object-contain" />
+            {draft.slip_images.length > 0 ? (
+              <div className="flex gap-2 overflow-x-auto">
+                {draft.slip_images.map((img, idx) => (
+                  <div key={img.id} className="relative flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={mediaUrl(img.image)}
+                      alt={`delivery slip page ${idx + 1}`}
+                      className="h-32 w-24 rounded border border-[#d8cdb0] object-cover"
+                    />
+                    <span className="absolute left-1 top-1 rounded bg-[#241512]/70 px-1 font-mono text-[9px] text-white">
+                      {idx + 1}
+                    </span>
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#241512]/70 text-[11px] text-white"
+                      disabled={busy === "upload"}
+                      onClick={() => removeSlipImage(img.id)}
+                      aria-label={`Remove page ${idx + 1}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
             ) : null}
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onSlipChosen} />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={onSlipChosen}
+            />
+            <p className="text-[10px] text-ink-soft">
+              Invoice spans more than one photo? Attach every page — they&apos;re read together as one slip.
+            </p>
             <div className="flex gap-2">
               <button className="btn btn-ghost flex-1" disabled={busy === "upload"} onClick={() => fileRef.current?.click()}>
-                {busy === "upload" ? "Uploading…" : draft.slip_image ? "Replace slip" : "+ Attach slip"}
+                {busy === "upload" ? "Uploading…" : draft.slip_images.length > 0 ? "+ Add page(s)" : "+ Attach slip"}
               </button>
-              <button className="btn btn-primary flex-1" disabled={!draft.slip_image || busy === "extract"} onClick={extract}>
+              <button className="btn btn-primary flex-1" disabled={draft.slip_images.length === 0 || busy === "extract"} onClick={extract}>
                 {busy === "extract" ? "Reading…" : "Auto-read from slip"}
               </button>
             </div>
