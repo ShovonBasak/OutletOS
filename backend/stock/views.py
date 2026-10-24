@@ -1506,10 +1506,11 @@ class PeriodicStockCheckViewSet(viewsets.ModelViewSet):
             .first()
         )
         bundle = ingredient.bundle_size or Decimal("0")
-        # Bootstrap case (no PeriodicStockCheck yet): the real starting point
-        # is everything approved via Stock In so far, same derivation
-        # levels() and _record() use — not a single bundle.
-        prev_qty = prev.counted_qty if prev else stock_in_since(outlet, ingredient, None)
+        # Current level is last count + any Stock In received since, same
+        # derivation _record() and levels() use — not just the last count,
+        # which omits stock received after it.
+        since = prev.checked_at if prev else None
+        prev_qty = (prev.counted_qty if prev else Decimal("0")) + stock_in_since(outlet, ingredient, since)
         counted = max(Decimal("0"), prev_qty - bundle * bundles)
         note = f"Bundle finished (−{bundles:.0f} bundle{'s' if bundles != 1 else ''})"
         obj = self._record(outlet, ingredient, counted, note, request.user)
