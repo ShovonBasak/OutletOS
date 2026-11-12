@@ -7,16 +7,17 @@ screens start completely empty and the owner has to build Pathao/Foodi/
 Foodpanda from scratch. Cloning from the designated template organization
 gives them a working starting point that's still fully theirs to edit.
 """
-from .models import ChannelMenuMap, SalesChannel
+from .models import ChannelMenuMap, ChannelMenuMapItem, SalesChannel
 
 
 def seed_channels_from_template(org):
-    """Copy the template organization's SalesChannel + ChannelMenuMap rows
-    into `org`. The clones are independent rows from the moment they're
+    """Copy the template organization's SalesChannel + ChannelMenuMap (+ items)
+    rows into `org`. The clones are independent rows from the moment they're
     created — editing/deleting them on either side has no effect on the
     other. Safe to call more than once: get_or_create-keyed on (org, name)
-    for channels and (channel, external_name) for menu maps, so re-running
-    never duplicates rows. No-op if no template organization is configured."""
+    for channels, (channel, external_name) for menu maps, and (menu_map,
+    product) for items, so re-running never duplicates rows. No-op if no
+    template organization is configured."""
     from catalog.models import Organization
 
     template_org = (
@@ -38,12 +39,14 @@ def seed_channels_from_template(org):
             },
         )
         for template_map in template_channel.menu_maps.all():
-            ChannelMenuMap.objects.get_or_create(
+            menu_map, _ = ChannelMenuMap.objects.get_or_create(
                 channel=channel,
                 external_name=template_map.external_name,
-                defaults={
-                    "product": template_map.product,
-                    "quantity_multiplier": template_map.quantity_multiplier,
-                    "is_active": template_map.is_active,
-                },
+                defaults={"is_active": template_map.is_active},
             )
+            for template_item in template_map.items.all():
+                ChannelMenuMapItem.objects.get_or_create(
+                    menu_map=menu_map,
+                    product=template_item.product,
+                    defaults={"quantity": template_item.quantity},
+                )

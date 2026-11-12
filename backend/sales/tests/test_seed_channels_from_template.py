@@ -7,7 +7,7 @@ Run with: python manage.py test sales.tests.test_seed_channels_from_template
 from django.test import TestCase
 
 from catalog.models import Organization, Product
-from sales.models import ChannelMenuMap, SalesChannel
+from sales.models import ChannelMenuMap, ChannelMenuMapItem, SalesChannel
 from sales.services import seed_channels_from_template
 
 
@@ -18,6 +18,7 @@ class SeedChannelsFromTemplateTests(TestCase):
         )
         self.new_org = Organization.objects.create(name="New Franchise", slug="new-franchise-seed-test")
         self.product = Product.objects.create(name="Hot & Crispy Chicken")
+        self.burger = Product.objects.create(name="Five Star Burger")
 
         self.foodpanda = SalesChannel.objects.create(
             organization=self.template_org, name="Foodpanda",
@@ -27,10 +28,19 @@ class SeedChannelsFromTemplateTests(TestCase):
         self.walkin = SalesChannel.objects.create(
             organization=self.template_org, name="Walk-in",
         )
-        ChannelMenuMap.objects.create(
+        self.menu_map = ChannelMenuMap.objects.create(
             channel=self.foodpanda, external_name="3X Hot & Crispy Chicken",
-            product=self.product, quantity_multiplier=3,
         )
+        ChannelMenuMapItem.objects.create(
+            menu_map=self.menu_map, product=self.product, quantity=3,
+        )
+        # Multi-item mapping (package deal) — exercises the part of the
+        # seed that's new since menu maps stopped being single-product.
+        self.combo_map = ChannelMenuMap.objects.create(
+            channel=self.foodpanda, external_name="Burger & 2 Chicken Ball",
+        )
+        ChannelMenuMapItem.objects.create(menu_map=self.combo_map, product=self.burger, quantity=1)
+        ChannelMenuMapItem.objects.create(menu_map=self.combo_map, product=self.product, quantity=2)
 
     def test_clones_channels_and_menu_maps(self):
         seed_channels_from_template(self.new_org)
@@ -43,8 +53,14 @@ class SeedChannelsFromTemplateTests(TestCase):
         self.assertTrue(SalesChannel.objects.filter(organization=self.new_org, name="Walk-in").exists())
 
         new_map = ChannelMenuMap.objects.get(channel=new_foodpanda, external_name="3X Hot & Crispy Chicken")
-        self.assertEqual(new_map.product_id, self.product.id)
-        self.assertEqual(new_map.quantity_multiplier, 3)
+        items = list(new_map.items.all())
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].product_id, self.product.id)
+        self.assertEqual(items[0].quantity, 3)
+
+        new_combo = ChannelMenuMap.objects.get(channel=new_foodpanda, external_name="Burger & 2 Chicken Ball")
+        combo_items = {i.product_id: i.quantity for i in new_combo.items.all()}
+        self.assertEqual(combo_items, {self.burger.id: 1, self.product.id: 2})
 
     def test_clones_are_independent_of_the_template(self):
         seed_channels_from_template(self.new_org)
@@ -62,7 +78,10 @@ class SeedChannelsFromTemplateTests(TestCase):
 
         self.assertEqual(SalesChannel.objects.filter(organization=self.new_org).count(), 2)
         self.assertEqual(
-            ChannelMenuMap.objects.filter(channel__organization=self.new_org).count(), 1
+            ChannelMenuMap.objects.filter(channel__organization=self.new_org).count(), 2
+        )
+        self.assertEqual(
+            ChannelMenuMapItem.objects.filter(menu_map__channel__organization=self.new_org).count(), 3
         )
 
     def test_noop_when_no_template_configured(self):
