@@ -1,5 +1,6 @@
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -8,12 +9,14 @@ from accounts.permissions import IsOwnerOrReadOnly
 from catalog.models import Product
 from .models import (
     ChannelMenuMap,
+    ChannelMenuMapItem,
     ChannelPromotion,
     OrderLevelOffer,
     SalesChannel,
 )
 from .pricing import resolve_price
 from .serializers import (
+    ChannelMenuMapItemSerializer,
     ChannelMenuMapSerializer,
     ChannelPromotionSerializer,
     OrderLevelOfferSerializer,
@@ -76,7 +79,7 @@ class OrderLevelOfferViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
 
 
 class ChannelMenuMapViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
-    queryset = ChannelMenuMap.objects.select_related("channel", "product")
+    queryset = ChannelMenuMap.objects.select_related("channel").prefetch_related("items__product")
     serializer_class = ChannelMenuMapSerializer
     permission_classes = [IsOwnerOrReadOnly]
     org_lookup = "channel__organization"
@@ -87,6 +90,31 @@ class ChannelMenuMapViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         if channel:
             qs = qs.filter(channel_id=channel)
         return qs
+
+
+class ChannelMenuMapItemViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+    queryset = ChannelMenuMapItem.objects.select_related("menu_map", "product")
+    serializer_class = ChannelMenuMapItemSerializer
+    permission_classes = [IsOwnerOrReadOnly]
+    org_lookup = "menu_map__channel__organization"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        menu_map = self.request.query_params.get("menu_map")
+        if menu_map:
+            qs = qs.filter(menu_map_id=menu_map)
+        return qs
+
+    def perform_destroy(self, instance):
+        # A mapping left with zero items would make its orders silently
+        # vanish from COGS instead of surfacing as unresolved — delete the
+        # whole mapping (via ChannelMenuMapViewSet) instead of its last item.
+        if instance.menu_map.items.count() <= 1:
+            raise ValidationError(
+                "Can't remove the last product in a mapping — delete the whole "
+                "mapping instead."
+            )
+        super().perform_destroy(instance)
 
 
 @api_view(["GET"])

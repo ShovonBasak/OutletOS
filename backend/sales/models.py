@@ -131,21 +131,19 @@ class OrderLevelOffer(models.Model):
 
 
 class ChannelMenuMap(models.Model):
-    """Maps an online platform's item name to an internal product with a quantity multiplier.
+    """Maps an online platform's item name to one or more internal products, each
+    with its own quantity. A plain 1-product mapping is just one item underneath —
+    a package/combo listed as a single platform line (e.g. "Burger & 2 Chicken Ball")
+    is the same mapping with more than one item.
 
-    e.g. "3X Hot & Crispy Chicken" → product=Hot & Crispy Chicken, multiplier=3
-         "Crispy Chicken"          → product=Hot & Crispy Chicken, multiplier=1
+    e.g. "3X Hot & Crispy Chicken" → 1 item: 3× Hot & Crispy Chicken
+         "Burger & 2 Chicken Ball" → 2 items: 1× Five Star Burger, 2× Chicken Ball
     """
 
     channel = models.ForeignKey(
         SalesChannel, on_delete=models.CASCADE, related_name="menu_maps"
     )
     external_name = models.CharField(max_length=255, db_index=True)
-    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="menu_maps")
-    quantity_multiplier = models.PositiveIntegerField(
-        default=1,
-        help_text="Multiply the order qty by this to get internal product pieces.",
-    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -153,4 +151,24 @@ class ChannelMenuMap(models.Model):
         ordering = ["external_name"]
 
     def __str__(self):
-        return f"{self.channel}: '{self.external_name}' → {self.quantity_multiplier}× {self.product}"
+        parts = " + ".join(f"{i.quantity}× {i.product}" for i in self.items.all())
+        return f"{self.channel}: '{self.external_name}' → {parts}"
+
+
+class ChannelMenuMapItem(models.Model):
+    """One (product, quantity) component of a ChannelMenuMap."""
+
+    menu_map = models.ForeignKey(ChannelMenuMap, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="channel_menu_map_items"
+    )
+    quantity = models.PositiveIntegerField(
+        default=1,
+        help_text="Multiply the order qty by this to get internal product pieces.",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.quantity}× {self.product}"

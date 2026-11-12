@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { api, resolveOutlet } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { bdt, timeOf, today } from "@/lib/format";
+import { bdt, timeOfAmPm, today } from "@/lib/format";
 import { useOperatingDay } from "@/lib/staffDay";
 import { PRODUCT_CATEGORIES } from "@/lib/types";
 import type { Paginated, PrepLog, PrepProduct, RawStockSlim, DisplayStockSlim } from "@/lib/types";
@@ -495,7 +495,7 @@ function PrepLogList({ logs, onDeleted }: { logs: PrepLog[]; onDeleted: () => vo
         <div key={l.id} className="border-b border-dotted border-[#d8cdb0]">
           {/* normal row */}
           <div className="flex items-center justify-between py-1.5 font-mono text-[11px] text-ink-soft">
-            <span>{timeOf(l.timestamp)} · {l.product_name}</span>
+            <span>{timeOfAmPm(l.timestamp)} · {l.product_name}</span>
             <span className="flex items-center gap-2">
               <span>
                 {l.prep_unit === "PACK" ? `${l.packs_used} pack` : "manual"} → {l.pieces_prepared} pcs

@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from .models import (
     ChannelMenuMap,
+    ChannelMenuMapItem,
     ChannelPromotion,
     OrderLevelOffer,
     SalesChannel,
@@ -50,13 +51,18 @@ class OrderLevelOfferSerializer(serializers.ModelSerializer):
         ]
 
 
-class ChannelMenuMapSerializer(serializers.ModelSerializer):
+class ChannelMenuMapItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+
+    class Meta:
+        model = ChannelMenuMapItem
+        fields = ["id", "menu_map", "product", "product_name", "quantity"]
+
+
+class ChannelMenuMapSerializer(serializers.ModelSerializer):
     channel_name = serializers.CharField(source="channel.name", read_only=True)
+    items = ChannelMenuMapItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = ChannelMenuMap
-        fields = [
-            "id", "channel", "channel_name", "external_name",
-            "product", "product_name", "quantity_multiplier", "is_active",
-        ]
+        fields = ["id", "channel", "channel_name", "external_name", "items", "is_active"]
