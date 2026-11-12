@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     ChannelIntegration,
     ChannelMenuMap,
+    ChannelMenuMapItem,
     ChannelPromotion,
     OrderLevelOffer,
     SalesChannel,
@@ -20,8 +21,14 @@ admin.site.register(OrderLevelOffer)
 admin.site.register(ChannelIntegration)
 
 
+class ChannelMenuMapItemInline(admin.TabularInline):
+    model = ChannelMenuMapItem
+    extra = 1
+
+
 @admin.register(ChannelMenuMap)
 class ChannelMenuMapAdmin(admin.ModelAdmin):
-    list_display = ["external_name", "channel", "product", "quantity_multiplier", "is_active"]
+    list_display = ["external_name", "channel", "is_active"]
     list_filter = ["channel", "is_active"]
-    search_fields = ["external_name", "product__name"]
+    search_fields = ["external_name", "items__product__name"]
+    inlines = [ChannelMenuMapItemInline]

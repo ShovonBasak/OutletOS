@@ -37,6 +37,7 @@ from sales.views import (
     ChannelPromotionViewSet,
     OrderLevelOfferViewSet,
     ChannelMenuMapViewSet,
+    ChannelMenuMapItemViewSet,
     price_resolve,
 )
 from analyst.views import whatsapp_webhook, order_suggestion_api
@@ -97,6 +98,7 @@ router.register("sales-channels", SalesChannelViewSet)
 router.register("channel-promotions", ChannelPromotionViewSet)
 router.register("order-level-offers", OrderLevelOfferViewSet)
 router.register("channel-menu-maps", ChannelMenuMapViewSet)
+router.register("channel-menu-map-items", ChannelMenuMapItemViewSet)
 router.register("daily-closings", DailyClosingViewSet)
 router.register("channel-settlements", ChannelSettlementViewSet)
 router.register("cost-categories", CostCategoryViewSet)

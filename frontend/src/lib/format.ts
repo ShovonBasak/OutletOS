@@ -53,6 +53,14 @@ export function timeOf(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
+export function timeOfAmPm(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /**
  * Returns a human-readable pack breakdown for a raw quantity, e.g. "1 pack + 4 sticks".
  * Returns null when less than one full pack — nothing useful to show.

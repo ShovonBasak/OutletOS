@@ -607,14 +607,20 @@ export interface DashboardData {
 }
 
 
+export interface ChannelMenuMapItem {
+  id: number;
+  menu_map: number;
+  product: number;
+  product_name: string;
+  quantity: number;
+}
+
 export interface ChannelMenuMap {
   id: number;
   channel: number;
   channel_name: string;
   external_name: string;
-  product: number;
-  product_name: string;
-  quantity_multiplier: number;
+  items: ChannelMenuMapItem[];
   is_active: boolean;
 }
 

@@ -101,7 +101,7 @@ def parse_foodpanda_excel(
     # Load all active mappings for this channel
     maps = {
         m.external_name.lower(): m
-        for m in ChannelMenuMap.objects.filter(channel=channel, is_active=True).select_related("product")
+        for m in ChannelMenuMap.objects.filter(channel=channel, is_active=True).prefetch_related("items__product")
     }
 
     product_qty: dict[int, int] = defaultdict(int)  # product_id → total qty
@@ -121,9 +121,14 @@ def parse_foodpanda_excel(
         items_text = row.get(items_col, "") or ""
         for order_qty, name in _parse_order_items(items_text):
             mapping = maps.get(name.lower())
-            if mapping:
-                product_qty[mapping.product_id] += order_qty * mapping.quantity_multiplier
+            items = list(mapping.items.all()) if mapping else []
+            if items:
+                for item in items:
+                    product_qty[item.product_id] += order_qty * item.quantity
             else:
+                # No mapping, or a mapping left with zero components (e.g. all
+                # items deleted) — surface it as unresolved rather than
+                # silently dropping the order quantity.
                 unresolved_qty[name] += order_qty
 
     # Resolve product objects
