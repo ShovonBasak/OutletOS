@@ -45,10 +45,18 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         # inactive accounts can be fetched and reactivated — only filter on list.
         if self.action != "list":
             return qs
-        # Apply role-based account access if configured for this user's role.
+        # Apply role-based account access if configured for this user's role —
+        # scoped to the caller's own organization. AccountRoleAccess has no
+        # organization field of its own (it points at an account, which does),
+        # so an unscoped lookup here would pull in every OTHER org's role
+        # restrictions too — those account ids never match this org's qs, so
+        # the intersection silently comes back empty regardless of what this
+        # org itself has configured.
         role = self.request.user.role
         role_ids = list(
-            AccountRoleAccess.objects.filter(role=role).values_list("account_id", flat=True)
+            AccountRoleAccess.objects.filter(
+                role=role, account__organization_id=self.request.user.organization_id
+            ).values_list("account_id", flat=True)
         )
         if role_ids:
             qs = qs.filter(id__in=role_ids)
@@ -96,7 +104,12 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         """Onboarding wizard step: seed the three default accounts every new
         organization needs — "Owner Cash", "Shop Cash" (primary), "Supplier
         Credit". Body: {outlet}. get_or_create-keyed so it's safe to call more
-        than once (e.g. the wizard resuming after a page refresh)."""
+        than once (e.g. the wizard resuming after a page refresh).
+
+        Also grants STAFF role-access to "Shop Cash" and "Supplier Credit" —
+        without an explicit grant, staff can't pick a "paid from account" at
+        all for Stock In and other basic operations. "Owner Cash" stays
+        owner-only by default."""
         outlet_id = request.data.get("outlet")
         if not outlet_id:
             raise ValidationError({"outlet": "This field is required."})
@@ -111,9 +124,9 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
 
         today = timezone.localdate()
         defaults = [
-            {"name": "Owner Cash", "account_type": AccountType.CASH, "is_primary_cash": False},
-            {"name": "Shop Cash", "account_type": AccountType.CASH, "is_primary_cash": True},
-            {"name": "Supplier Credit", "account_type": AccountType.SUPPLIER_CREDIT, "is_primary_cash": False},
+            {"name": "Owner Cash", "account_type": AccountType.CASH, "is_primary_cash": False, "staff_access": False},
+            {"name": "Shop Cash", "account_type": AccountType.CASH, "is_primary_cash": True, "staff_access": True},
+            {"name": "Supplier Credit", "account_type": AccountType.SUPPLIER_CREDIT, "is_primary_cash": False, "staff_access": True},
         ]
         created = []
         with transaction.atomic():
@@ -128,6 +141,8 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
                     },
                 )
                 created.append(account)
+                if d["staff_access"]:
+                    AccountRoleAccess.objects.get_or_create(role="STAFF", account=account)
 
         return Response(FinancialAccountSerializer(created, many=True).data, status=201)
 
