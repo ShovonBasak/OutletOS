@@ -38,6 +38,13 @@ class FinancialAccount(models.Model):
         help_text="Marks this as the shop's main cash account. Day-closing cash is "
                   "computed as total offline sales minus all other payment entries.",
     )
+    accepts_customer_payments = models.BooleanField(
+        default=False,
+        help_text="Offered on the day-closing Payments screen as something a customer "
+                  "could have paid into. Only meaningful for Bank/Mobile Wallet accounts — "
+                  "cash is computed, not typed in, and Supplier Credit/Sales Channel "
+                  "holding accounts aren't something a customer pays.",
+    )
 
     class Meta:
         ordering = ["account_type", "name"]
@@ -75,6 +82,37 @@ class AccountRoleAccess(models.Model):
 
     def __str__(self):
         return f"{self.role} → {self.account.name}"
+
+
+class RoleDefaultAccount(models.Model):
+    """The account auto-selected for `role` on expense/income/transfer-style
+    screens (e.g. Owner Cash for owners, Shop Cash for staff).
+
+    Deliberately a separate model from AccountRoleAccess, not a flag on it —
+    AccountRoleAccess's mere existence for a role means "restrict this role
+    to only these accounts" (no rows = all accounts visible). A default can
+    and often should exist independent of any restriction, so recording it
+    as a row in that table would silently flip a default-open role into a
+    restricted one — exactly the bug this model exists to avoid. organization
+    is a direct field here (AccountRoleAccess only reaches it transitively
+    via account.organization), so "one default per org per role" is a real
+    database constraint, not just enforced in application code.
+    """
+
+    organization = models.ForeignKey(
+        "catalog.Organization", on_delete=models.CASCADE, related_name="role_default_accounts"
+    )
+    role = models.CharField(max_length=10, choices=AccountRoleAccess.ROLE_CHOICES)
+    account = models.ForeignKey(
+        FinancialAccount, on_delete=models.CASCADE, related_name="default_for_roles"
+    )
+
+    class Meta:
+        unique_together = [("organization", "role")]
+        ordering = ["role"]
+
+    def __str__(self):
+        return f"{self.organization} / {self.role} → {self.account.name}"
 
 
 class TransactionType(models.TextChoices):

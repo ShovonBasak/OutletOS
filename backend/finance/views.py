@@ -15,12 +15,12 @@ from accounts.permissions import IsAdmin, IsOwner, IsOwnerFullAdminReadOnly
 from accounts.scoping import resolve_organization_id
 from . import services
 from .models import (
-    AccountType, FinancialAccount, AccountRoleAccess, AccountTransaction,
-    AccountTransfer, CapitalTransaction, AccountBalanceCheck,
+    AccountType, FinancialAccount, AccountRoleAccess, RoleDefaultAccount,
+    AccountTransaction, AccountTransfer, CapitalTransaction, AccountBalanceCheck,
 )
 from .serializers import (
     FinancialAccountSerializer, FinancialAccountNameSerializer,
-    AccountRoleAccessSerializer,
+    AccountRoleAccessSerializer, RoleDefaultAccountSerializer,
     AccountTransactionSerializer, AccountTransferSerializer,
     CapitalTransactionSerializer, AccountBalanceCheckSerializer,
 )
@@ -102,11 +102,12 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["post"], permission_classes=[IsOwner], url_path="create-defaults")
     def create_defaults(self, request):
         """Onboarding wizard step: seed the three default accounts every new
-        organization needs — "Owner Cash", "Shop Cash" (primary), "Supplier
-        Credit". Body: {outlet}. get_or_create-keyed so it's safe to call more
-        than once (e.g. the wizard resuming after a page refresh).
+        organization needs — "Owner Cash", "Shop Cash" (primary), "CP Supplier
+        Credit" (every CP Five Star franchisee buys raw chicken from the same
+        C.P. supplier). Body: {outlet}. get_or_create-keyed so it's safe to
+        call more than once (e.g. the wizard resuming after a page refresh).
 
-        Also grants STAFF role-access to "Shop Cash" and "Supplier Credit" —
+        Also grants STAFF role-access to "Shop Cash" and "CP Supplier Credit" —
         without an explicit grant, staff can't pick a "paid from account" at
         all for Stock In and other basic operations. "Owner Cash" stays
         owner-only by default."""
@@ -126,7 +127,7 @@ class FinancialAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
         defaults = [
             {"name": "Owner Cash", "account_type": AccountType.CASH, "is_primary_cash": False, "staff_access": False},
             {"name": "Shop Cash", "account_type": AccountType.CASH, "is_primary_cash": True, "staff_access": True},
-            {"name": "Supplier Credit", "account_type": AccountType.SUPPLIER_CREDIT, "is_primary_cash": False, "staff_access": True},
+            {"name": "CP Supplier Credit", "account_type": AccountType.SUPPLIER_CREDIT, "is_primary_cash": False, "staff_access": True},
         ]
         created = []
         with transaction.atomic():
@@ -474,23 +475,58 @@ class StaffCashHistoryView(APIView):
         })
 
 
-class AccountRoleAccessViewSet(viewsets.ModelViewSet):
-    """Admin-only: configure which accounts each role can see.
+class AccountRoleAccessViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
+    """Owner-configurable: which accounts each role can see.
 
-    GET  /account-role-access/        — list all mappings
-    POST /account-role-access/        — add a mapping {role, account}
-    DELETE /account-role-access/{id}/ — remove a mapping
+    GET    /account-role-access/        — list mappings for the caller's own org
+    POST   /account-role-access/        — add a mapping {role, account}
+    DELETE /account-role-access/{id}/   — remove a mapping
     """
     serializer_class = AccountRoleAccessSerializer
     permission_classes = [IsOwnerFullAdminReadOnly]
     queryset = AccountRoleAccess.objects.select_related("account").all()
+    org_lookup = "account__organization"
 
     def get_queryset(self):
         qs = super().get_queryset()
-        org_param = self.request.query_params.get("organization")
-        if org_param:
-            qs = qs.filter(account__organization_id=org_param)
         role = self.request.query_params.get("role")
         if role:
             qs = qs.filter(role=role)
         return qs
+
+
+class RoleDefaultAccountViewSet(OrganizationOwnedMixin, viewsets.ModelViewSet):
+    """Owner-configurable: which single account is the default for a role on
+    expense/income/transfer-style screens (e.g. Owner Cash for owners, Shop
+    Cash for staff). Independent of AccountRoleAccess — see RoleDefaultAccount's
+    docstring for why this is a separate model rather than a flag on that one.
+
+    GET    /role-default-accounts/        — list defaults for the caller's own org
+    POST   /role-default-accounts/        — set a default {role, account}
+                                             (upserts — one row per role per org)
+    DELETE /role-default-accounts/{id}/   — clear a default
+    """
+    serializer_class = RoleDefaultAccountSerializer
+    permission_classes = [IsOwnerFullAdminReadOnly]
+    queryset = RoleDefaultAccount.objects.select_related("account").all()
+    org_lookup = "organization"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        role = self.request.query_params.get("role")
+        if role:
+            qs = qs.filter(role=role)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        org = self.resolve_organization()
+        if org is None:
+            raise ValidationError("Could not resolve your organization.")
+        role = request.data.get("role")
+        account_id = request.data.get("account")
+        if not role or not account_id:
+            raise ValidationError({"role": "This field is required.", "account": "This field is required."})
+        obj, _ = RoleDefaultAccount.objects.update_or_create(
+            organization=org, role=role, defaults={"account_id": account_id},
+        )
+        return Response(self.get_serializer(obj).data, status=201)

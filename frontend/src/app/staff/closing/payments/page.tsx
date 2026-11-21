@@ -32,15 +32,14 @@ export default function PaymentsScreen() {
 
   const prevCtx = useRef({ outlet: 0, opDate: "" });
 
-  // Accounts the staff can manually enter — excludes primary cash (computed),
-  // supplier credit (not a payment method), and SALES_CHANNEL holding
-  // accounts (those are posted automatically from online sales at day-close,
-  // never typed in here — see closing.services.record_account_transactions).
+  // Accounts the staff can manually enter — exactly the Bank/Mobile Wallet
+  // accounts the owner flagged as something a customer could pay into
+  // (Settings → Manage accounts). Cash is computed, not typed in here; any
+  // other CASH account (e.g. Owner Cash — not the primary either) was
+  // previously slipping through a type-exclusion filter since it's merely
+  // "not primary," not actually a payment method.
   const payableAccounts = useMemo(
-    () => accounts.filter(
-      (a) => a.is_active && !a.is_primary_cash
-        && a.account_type !== "SUPPLIER_CREDIT" && a.account_type !== "SALES_CHANNEL"
-    ),
+    () => accounts.filter((a) => a.is_active && a.accepts_customer_payments),
     [accounts]
   );
 

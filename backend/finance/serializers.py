@@ -1,8 +1,8 @@
 from rest_framework import serializers
 
 from .models import (
-    FinancialAccount, AccountRoleAccess, AccountTransaction, AccountTransfer,
-    CapitalTransaction, AccountBalanceCheck,
+    AccountType, FinancialAccount, AccountRoleAccess, RoleDefaultAccount,
+    AccountTransaction, AccountTransfer, CapitalTransaction, AccountBalanceCheck,
 )
 
 
@@ -15,15 +15,29 @@ class FinancialAccountSerializer(serializers.ModelSerializer):
         fields = [
             "id", "outlet", "account_type", "account_type_display", "name", "provider",
             "opening_balance", "opening_balance_date", "is_active", "is_primary_cash",
-            "current_balance",
+            "accepts_customer_payments", "current_balance",
         ]
+
+    def validate(self, attrs):
+        accepts = attrs.get(
+            "accepts_customer_payments",
+            self.instance.accepts_customer_payments if self.instance else False,
+        )
+        account_type = attrs.get(
+            "account_type", self.instance.account_type if self.instance else None
+        )
+        if accepts and account_type not in (AccountType.BANK, AccountType.MOBILE_WALLET):
+            raise serializers.ValidationError({
+                "accepts_customer_payments": "Only Bank and Mobile Wallet accounts can accept customer payments.",
+            })
+        return attrs
 
 
 class FinancialAccountNameSerializer(serializers.ModelSerializer):
     """Staff-safe: names and type only, no balances."""
     class Meta:
         model = FinancialAccount
-        fields = ["id", "account_type", "name", "is_active", "is_primary_cash"]
+        fields = ["id", "account_type", "name", "is_active", "is_primary_cash", "accepts_customer_payments"]
 
 
 class AccountTransactionSerializer(serializers.ModelSerializer):
@@ -124,3 +138,13 @@ class AccountRoleAccessSerializer(serializers.ModelSerializer):
     class Meta:
         model = AccountRoleAccess
         fields = ["id", "role", "account", "account_name", "account_type"]
+
+
+class RoleDefaultAccountSerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source="account.name", read_only=True)
+    account_type = serializers.CharField(source="account.account_type", read_only=True)
+
+    class Meta:
+        model = RoleDefaultAccount
+        fields = ["id", "role", "account", "account_name", "account_type"]
+        read_only_fields = ["id"]

@@ -38,13 +38,13 @@ class CreateDefaultsTests(APITestCase):
         accounts = FinancialAccount.objects.filter(organization=self.org)
         self.assertEqual(accounts.count(), 3)
         names = set(accounts.values_list("name", flat=True))
-        self.assertEqual(names, {"Owner Cash", "Shop Cash", "Supplier Credit"})
+        self.assertEqual(names, {"Owner Cash", "Shop Cash", "CP Supplier Credit"})
 
         shop_cash = accounts.get(name="Shop Cash")
         self.assertTrue(shop_cash.is_primary_cash)
         owner_cash = accounts.get(name="Owner Cash")
         self.assertFalse(owner_cash.is_primary_cash)
-        supplier_credit = accounts.get(name="Supplier Credit")
+        supplier_credit = accounts.get(name="CP Supplier Credit")
         self.assertEqual(supplier_credit.account_type, "SUPPLIER_CREDIT")
 
     def test_idempotent_on_repeated_calls(self):

@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
 import { type Period, monthLabel, rangeFor } from "@/lib/periodFilter";
+import { resolveDefaultAccountId } from "@/lib/defaultAccount";
 import AccountPicker from "@/components/AccountPicker";
 import SearchablePicker from "@/components/SearchablePicker";
 import { BottomSheet } from "@/components/BottomSheet";
@@ -91,8 +92,9 @@ export default function OtherIncomePage() {
     const receivable = d.results.filter((a) => a.account_type !== "SALES_CHANNEL");
     setAccounts(receivable);
     if (!accountId) {
-      const def = receivable.find((a) => a.is_primary_cash) ?? receivable[0];
-      if (def) setAccountId(String(def.id));
+      const fallback = receivable.find((a) => a.is_primary_cash) ?? receivable[0];
+      const defId = await resolveDefaultAccountId("OWNER", fallback?.id ?? null);
+      if (defId != null) setAccountId(String(defId));
     }
   }
 

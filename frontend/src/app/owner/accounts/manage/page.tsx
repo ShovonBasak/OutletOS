@@ -27,6 +27,8 @@ export default function ManageAccountsPage() {
   const [newAccProvider, setNewAccProvider] = useState("");
   const [newAccOpening, setNewAccOpening] = useState("0");
   const [newAccOpeningDate, setNewAccOpeningDate] = useState(today());
+  const [newAccAcceptsPayments, setNewAccAcceptsPayments] = useState(false);
+  const acceptsPaymentsEligible = newAccType === "BANK" || newAccType === "MOBILE_WALLET";
   const [accSaving, setAccSaving] = useState(false);
   const [accError, setAccError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
@@ -42,6 +44,7 @@ export default function ManageAccountsPage() {
     setNewAccProvider(a.provider);
     setNewAccOpening(a.opening_balance);
     setNewAccOpeningDate(a.opening_balance_date);
+    setNewAccAcceptsPayments(a.accepts_customer_payments);
     setAccError(null);
     setSheetOpen(true);
   }
@@ -58,6 +61,7 @@ export default function ManageAccountsPage() {
     setNewAccOpening("0");
     setNewAccOpeningDate(today());
     setNewAccType("CASH");
+    setNewAccAcceptsPayments(false);
     setAccError(null);
   }
 
@@ -83,6 +87,7 @@ export default function ManageAccountsPage() {
         opening_balance: newAccOpening || "0",
         opening_balance_date: newAccOpeningDate,
         outlet: outletId,
+        accepts_customer_payments: acceptsPaymentsEligible && newAccAcceptsPayments,
       };
       if (editingAccount) {
         await api(`/financial-accounts/${editingAccount.id}/`, { method: "PATCH", body: JSON.stringify(body) });
@@ -131,6 +136,18 @@ export default function ManageAccountsPage() {
       await loadAccounts();
     } catch {
       setAccError("Could not set primary cash account.");
+    }
+  }
+
+  async function toggleAcceptsPayments(a: FinancialAccount) {
+    try {
+      await api(`/financial-accounts/${a.id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ accepts_customer_payments: !a.accepts_customer_payments }),
+      });
+      await loadAccounts();
+    } catch {
+      setAccError("Could not update account.");
     }
   }
 
@@ -211,6 +228,19 @@ export default function ManageAccountsPage() {
                       </button>
                     )
                   )}
+                  {(a.account_type === "BANK" || a.account_type === "MOBILE_WALLET") && (
+                    <button
+                      onClick={() => toggleAcceptsPayments(a)}
+                      className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                        a.accepts_customer_payments
+                          ? "border-leaf/40 bg-leaf/10 text-leaf-deep"
+                          : "border-[#d8cdb0] text-ink-soft"
+                      }`}
+                      title="Offered on the day-closing Payments screen"
+                    >
+                      {a.accepts_customer_payments ? "✓ Accepts payments" : "Accepts payments?"}
+                    </button>
+                  )}
                   <span className="ml-auto font-mono text-[10px] text-ink-soft">
                     Opening {bdt(a.opening_balance)}
                   </span>
@@ -267,6 +297,7 @@ export default function ManageAccountsPage() {
                 <th className="text-right">Balance</th>
                 <th>Status</th>
                 <th>Day-closing cash</th>
+                <th>Accepts payments</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -309,6 +340,21 @@ export default function ManageAccountsPage() {
                     )}
                   </td>
                   <td>
+                    {(a.account_type === "BANK" || a.account_type === "MOBILE_WALLET") && (
+                      <button
+                        onClick={() => toggleAcceptsPayments(a)}
+                        className={`font-mono text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                          a.accepts_customer_payments
+                            ? "border-leaf/40 bg-leaf/10 text-leaf-deep"
+                            : "border-[#d8cdb0] text-ink-soft hover:border-leaf/40 hover:text-leaf-deep"
+                        }`}
+                        title="Offered on the day-closing Payments screen"
+                      >
+                        {a.accepts_customer_payments ? "✓ Yes" : "No"}
+                      </button>
+                    )}
+                  </td>
+                  <td>
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() => startEdit(a)}
@@ -345,7 +391,7 @@ export default function ManageAccountsPage() {
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-ink-soft">No accounts yet.</td>
+                  <td colSpan={9} className="text-ink-soft">No accounts yet.</td>
                 </tr>
               )}
             </tbody>
@@ -372,13 +418,32 @@ export default function ManageAccountsPage() {
             <select
               className="field-input"
               value={newAccType}
-              onChange={(e) => setNewAccType(e.target.value as AccountType)}
+              onChange={(e) => {
+                const next = e.target.value as AccountType;
+                setNewAccType(next);
+                if (next !== "BANK" && next !== "MOBILE_WALLET") setNewAccAcceptsPayments(false);
+              }}
             >
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
           </label>
+          {acceptsPaymentsEligible && (
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={newAccAcceptsPayments}
+                onChange={(e) => setNewAccAcceptsPayments(e.target.checked)}
+              />
+              <span className="text-xs text-ink">
+                Accepts customer payments
+                <span className="block font-mono text-[10px] text-ink-soft">
+                  Offered on the day-closing Payments screen
+                </span>
+              </span>
+            </label>
+          )}
           <label className="flex flex-col gap-1.5">
             <span className="field-label">Account name</span>
             <input

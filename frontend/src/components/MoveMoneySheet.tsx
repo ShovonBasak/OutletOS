@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { bdt, today } from "@/lib/format";
+import { resolveDefaultAccountId } from "@/lib/defaultAccount";
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_ORDER } from "@/lib/accountTypes";
 import { BottomSheet } from "./BottomSheet";
 import type { FinancialAccount } from "@/lib/types";
@@ -55,7 +56,11 @@ export function MoveMoneySheet({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset to a sane default every time the sheet is opened.
+  // Reset to a sane default every time the sheet is opened. This sheet is
+  // owner-only, so "primary" here means the owner's own default (Settings →
+  // Account access), falling back to is_primary_cash (the shop's till) —
+  // resolved async, so the form resets immediately with the fallback and
+  // upgrades to the configured default a moment later if one exists.
   useEffect(() => {
     if (!open) return;
     const second = active.find((a) => a.id !== primaryCash?.id) ?? null;
@@ -69,6 +74,18 @@ export function MoveMoneySheet({
     setSearch("");
     setError(null);
     setView("form");
+
+    let cancelled = false;
+    resolveDefaultAccountId("OWNER", primaryCash?.id ?? null).then((defId) => {
+      if (cancelled || defId == null) return;
+      const defAccount = active.find((a) => a.id === defId);
+      if (!defAccount) return;
+      setFrom(defAccount);
+      setTo(active.find((a) => a.id !== defAccount.id) ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

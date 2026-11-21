@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useOwnerOutlet } from "@/lib/ownerOutlet";
 import { bdt, shortDate, today } from "@/lib/format";
+import { resolveDefaultAccountId } from "@/lib/defaultAccount";
 import { type Period, monthLabel, rangeFor } from "@/lib/periodFilter";
 import AccountPicker from "@/components/AccountPicker";
 import SearchablePicker from "@/components/SearchablePicker";
@@ -99,11 +100,12 @@ export default function ExpensesPage() {
     const payable = d.results.filter((a) => a.account_type !== "SALES_CHANNEL");
     setAccounts(payable);
     if (!accountId) {
-      // This page is the Owner's own expense log — default to the Owner's
-      // personal cash account, not the shop's (that's the staff default).
-      const ownerCash = payable.find((a) => a.name.trim().toLowerCase() === "owner cash");
-      const def = ownerCash ?? payable.find((a) => a.is_primary_cash) ?? payable[0];
-      if (def) setAccountId(String(def.id));
+      // This page is the Owner's own expense log — default to whatever
+      // Settings → Account access pins as the Owner's default (falling
+      // back to the shop's till, then just the first account).
+      const fallback = payable.find((a) => a.is_primary_cash) ?? payable[0];
+      const defId = await resolveDefaultAccountId("OWNER", fallback?.id ?? null);
+      if (defId != null) setAccountId(String(defId));
     }
   }
 

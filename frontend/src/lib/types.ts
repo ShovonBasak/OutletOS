@@ -757,6 +757,7 @@ export interface FinancialAccount {
   opening_balance_date: string;
   is_active: boolean;
   is_primary_cash: boolean;
+  accepts_customer_payments: boolean;
   current_balance: string;
 }
 
@@ -766,6 +767,7 @@ export interface FinancialAccountName {
   name: string;
   is_active: boolean;
   is_primary_cash: boolean;
+  accepts_customer_payments: boolean;
 }
 
 export type TransactionType =
