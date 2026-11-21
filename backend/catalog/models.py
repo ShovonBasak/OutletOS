@@ -50,7 +50,7 @@ class Outlet(models.Model):
 
     # ── Staff feature flags ──────────────────────────────────────────────────
     allow_staff_date_selection = models.BooleanField(
-        default=True,
+        default=False,
         help_text="Let staff choose which date to log operations for (e.g. back-entering yesterday's data).",
     )
 

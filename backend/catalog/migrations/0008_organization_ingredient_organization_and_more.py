@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('catalog', '0007_ingredient_group'),
+        ('catalog', '0008_ingredient_bundle_size_early'),
     ]
 
     operations = [
