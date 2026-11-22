@@ -7,6 +7,7 @@ Run with: python manage.py test sales.tests.test_seed_channels_from_template
 from django.test import TestCase
 
 from catalog.models import Organization, Product
+from finance.models import AccountType, FinancialAccount
 from sales.models import ChannelMenuMap, ChannelMenuMapItem, SalesChannel
 from sales.services import seed_channels_from_template
 
@@ -62,6 +63,25 @@ class SeedChannelsFromTemplateTests(TestCase):
         combo_items = {i.product_id: i.quantity for i in new_combo.items.all()}
         self.assertEqual(combo_items, {self.burger.id: 1, self.product.id: 2})
 
+    def test_creates_holding_and_deposit_accounts_for_direct_to_account_channels(self):
+        seed_channels_from_template(self.new_org)
+
+        new_foodpanda = SalesChannel.objects.get(organization=self.new_org, name="Foodpanda")
+        self.assertIsNotNone(new_foodpanda.holding_account)
+        self.assertEqual(new_foodpanda.holding_account.account_type, AccountType.SALES_CHANNEL)
+        self.assertEqual(new_foodpanda.holding_account.name, "Foodpanda Holding")
+        self.assertEqual(new_foodpanda.holding_account.organization_id, self.new_org.id)
+
+        deposit_accounts = FinancialAccount.objects.filter(
+            organization=self.new_org, account_type=AccountType.BANK,
+        )
+        self.assertEqual(deposit_accounts.count(), 1)
+        self.assertEqual(deposit_accounts.first().name, "Bank Account")
+
+        # Walk-in is COLLECTED_AT_OUTLET — no holding account needed or created.
+        new_walkin = SalesChannel.objects.get(organization=self.new_org, name="Walk-in")
+        self.assertIsNone(new_walkin.holding_account)
+
     def test_clones_are_independent_of_the_template(self):
         seed_channels_from_template(self.new_org)
 
@@ -82,6 +102,12 @@ class SeedChannelsFromTemplateTests(TestCase):
         )
         self.assertEqual(
             ChannelMenuMapItem.objects.filter(menu_map__channel__organization=self.new_org).count(), 3
+        )
+        self.assertEqual(
+            FinancialAccount.objects.filter(organization=self.new_org, account_type=AccountType.SALES_CHANNEL).count(), 1
+        )
+        self.assertEqual(
+            FinancialAccount.objects.filter(organization=self.new_org, account_type=AccountType.BANK).count(), 1
         )
 
     def test_noop_when_no_template_configured(self):

@@ -72,17 +72,39 @@ def _extract_date(value: str | None) -> date | None:
     return None
 
 
+def _parse_decimal(value) -> "Decimal":
+    from decimal import Decimal, InvalidOperation
+    if value in (None, ""):
+        return Decimal("0")
+    try:
+        return Decimal(str(value).strip())
+    except InvalidOperation:
+        return Decimal("0")
+
+
 def parse_foodpanda_excel(
     file_obj,
     closing_date: date,
     channel,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], dict | None]:
     """Parse a Foodpanda order report XLSX.
 
     Returns:
-        mapped   — [{"product": Product, "quantity": int}, ...]
+        mapped     — [{"product": Product, "quantity": int}, ...]
         unresolved — [{"external_name": str, "order_qty": int}, ...] (deduplicated, aggregated)
+        receivable — {"amount": Decimal, "order_count": int}, or None if the
+                     report has no "Estimated earnings" column (an older
+                     report format). When present, `amount` is the day's
+                     total "Estimated earnings" across delivered orders —
+                     Foodpanda's own per-order fee math (commission +
+                     online-payment charge + VAT, which varies by the
+                     customer's payment method), more accurate than our flat
+                     commission_rate estimate. None (not a zero amount) on
+                     absence, so the caller can tell "not reported" apart
+                     from "reported as zero" and fall back to the computed
+                     estimate only for the former.
     """
+    from decimal import Decimal
     from sales.models import ChannelMenuMap
 
     rows = _parse_sheet(file_obj)
@@ -94,6 +116,7 @@ def parse_foodpanda_excel(
     status_col = col_by_header.get("order status")
     delivered_col = col_by_header.get("delivered at")
     items_col = col_by_header.get("order items")
+    earnings_col = col_by_header.get("estimated earnings")
 
     if not status_col or not items_col:
         raise ValueError("Required columns 'Order status' or 'Order Items' not found in file.")
@@ -106,6 +129,8 @@ def parse_foodpanda_excel(
 
     product_qty: dict[int, int] = defaultdict(int)  # product_id → total qty
     unresolved_qty: dict[str, int] = defaultdict(int)  # external_name → total qty
+    receivable_amount = Decimal("0")
+    receivable_order_count = 0
 
     data_rows = rows[header_idx + 1:]
     for row in data_rows:
@@ -117,6 +142,10 @@ def parse_foodpanda_excel(
             delivery_date = _extract_date(row.get(delivered_col))
             if delivery_date != closing_date:
                 continue
+
+        if earnings_col:
+            receivable_amount += _parse_decimal(row.get(earnings_col))
+            receivable_order_count += 1
 
         items_text = row.get(items_col, "") or ""
         for order_qty, name in _parse_order_items(items_text):
@@ -146,5 +175,12 @@ def parse_foodpanda_excel(
         {"external_name": name, "order_qty": qty}
         for name, qty in sorted(unresolved_qty.items())
     ]
+    # None (not a zero amount) when the column itself is absent — an older
+    # report format without it must NOT look like "reported zero earnings"
+    # to the caller, which would wrongly suppress the computed fallback.
+    receivable = (
+        {"amount": receivable_amount, "order_count": receivable_order_count}
+        if earnings_col else None
+    )
 
-    return mapped, unresolved
+    return mapped, unresolved, receivable

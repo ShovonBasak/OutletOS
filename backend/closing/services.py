@@ -165,6 +165,18 @@ def record_account_transactions(closing, user):
         channel__settlement_type=SettlementType.DIRECT_TO_ACCOUNT
     ):
         channel_totals[line.channel] += line.net_amount
+
+    # Reported receivables (e.g. Foodpanda's imported "Estimated earnings")
+    # override the computed net_amount estimate for their channel — real
+    # per-order fee math beats our flat commission_rate approximation. A
+    # channel with a reported receivable but no sales lines yet (e.g. every
+    # order was unresolved/unmapped) still needs including here, not just
+    # overriding an existing total.
+    for receivable in closing.channel_receivables.select_related("channel").filter(
+        channel__settlement_type=SettlementType.DIRECT_TO_ACCOUNT
+    ):
+        channel_totals[receivable.channel] = receivable.reported_amount
+
     for channel, amount in channel_totals.items():
         if amount <= 0 or not channel.holding_account:
             continue
@@ -174,6 +186,67 @@ def record_account_transactions(closing, user):
             source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
             note=f"{channel.name} online sales — {closing.closing_date}",
         )
+
+
+def record_commission_expenses(closing, user):
+    """Idempotently (re-)register an Expense for each Collected-at-outlet
+    channel's commission on this closing (e.g. Foodi) — voids/removes
+    whatever this closing registered before and re-creates fresh, same
+    pattern as record_account_transactions.
+
+    Staff physically collect the FULL gross amount for these channels (see
+    DailyClosingSalesLine.recompute) — the commission owed to the platform
+    never left the drawer on its own, so it's billed to the business as an
+    expense instead of silently reducing the day's cash. Paid from the
+    organization's primary cash account when one is configured; the Expense
+    is still created (for the P&L/liability record) even without one, just
+    with nothing posted to the ledger — same tolerance Expense already has
+    for a missing paid_from_account elsewhere.
+
+    Safe to call any number of times while the day is still being finalized,
+    same caveats as record_account_transactions (not for post-lock
+    corrections)."""
+    from costs.models import CostCategory, Expense
+    from finance import services as finance_services
+    from finance.models import AccountTransaction, FinancialAccount, SourceType, TransactionType
+
+    for expense in Expense.objects.filter(
+        source_type=SourceType.DAILY_CLOSING, source_id=closing.id, is_deleted=False,
+    ):
+        for t in AccountTransaction.objects.filter(source_type=SourceType.EXPENSE, source_id=expense.id):
+            finance_services.void_transaction(t.id)
+        expense.delete()
+
+    commission_totals = defaultdict(Decimal)
+    for line in closing.sales_lines.select_related("channel").filter(
+        channel__settlement_type=SettlementType.COLLECTED_AT_OUTLET
+    ):
+        commission_totals[line.channel] += line.commission_amount
+
+    channels_with_commission = {c for c, amount in commission_totals.items() if amount > 0}
+    if not channels_with_commission:
+        return
+
+    category = CostCategory.objects.filter(name="Sales Commission").first()
+    cash_account = FinancialAccount.objects.filter(
+        organization_id=closing.outlet.organization_id, is_primary_cash=True,
+    ).first()
+
+    for channel in channels_with_commission:
+        amount = commission_totals[channel]
+        expense = Expense.objects.create(
+            outlet=closing.outlet, date=closing.closing_date, category=category,
+            amount=amount, paid_from_account=cash_account, entered_by=user,
+            description=f"{channel.name} commission — {closing.closing_date}",
+            source_type=SourceType.DAILY_CLOSING, source_id=closing.id,
+        )
+        if cash_account:
+            finance_services.post_transaction(
+                account=cash_account, transaction_type=TransactionType.EXPENSE_PAYMENT,
+                amount=-amount, date=closing.closing_date, entered_by=user,
+                source_type=SourceType.EXPENSE, source_id=expense.id,
+                note=expense.description,
+            )
 
 
 def post_cash_correction(closing, user, note=""):

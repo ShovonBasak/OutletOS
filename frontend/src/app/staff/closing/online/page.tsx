@@ -33,6 +33,7 @@ export default function OnlineSellScreen() {
 
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [unresolved, setUnresolved] = useState<UnresolvedItem[]>([]);
+  const [receivable, setReceivable] = useState<{ amount: string; order_count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const closingRef = useRef<DailyClosing | null>(null);
@@ -197,6 +198,7 @@ export default function OnlineSellScreen() {
 
     setUploadStatus("uploading");
     setUnresolved([]);
+    setReceivable(null);
 
     try {
       const form = new FormData();
@@ -206,12 +208,14 @@ export default function OnlineSellScreen() {
       const result = await api<{
         mapped: { product_id: number; product_name: string; quantity: number }[];
         unresolved: UnresolvedItem[];
+        receivable: { amount: string; order_count: number } | null;
         closing: DailyClosing;
       }>(`/daily-closings/${c.id}/import-online-sells/`, { method: "POST", body: form });
 
       // Refresh the page data so quantities reflect the upload
       await loadData(chId);
       setUnresolved(result.unresolved);
+      setReceivable(result.receivable);
       setUploadStatus("done");
     } catch {
       setUploadStatus("error");
@@ -234,7 +238,7 @@ export default function OnlineSellScreen() {
     0
   );
   const isReadOnly = closing ? closing.status !== "DRAFT" : false;
-  const supportsUpload = !!selectedChannel?.name.toLowerCase().includes("foodpanda");
+  const supportsUpload = !!selectedChannel?.supports_excel_import;
 
   if (channels.length === 0) {
     return (
@@ -321,6 +325,12 @@ export default function OnlineSellScreen() {
           {uploadStatus === "done" && unresolved.length === 0 && (
             <p className="mt-1.5 font-mono text-[10px] text-leaf-deep">
               All items imported successfully.
+            </p>
+          )}
+          {uploadStatus === "done" && receivable && (
+            <p className="mt-1.5 font-mono text-[10px] text-ink-soft">
+              {receivable.order_count} order(s) — {bdt(receivable.amount)} estimated earnings
+              will be posted to {selectedChannel?.name}&apos;s account on submit.
             </p>
           )}
         </div>

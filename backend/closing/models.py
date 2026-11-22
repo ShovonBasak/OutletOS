@@ -129,7 +129,17 @@ class DailyClosingSalesLine(models.Model):
         self.commission_amount = (
             self.gross_amount * self.channel.commission_rate
         ).quantize(Decimal("0.01"))
-        self.net_amount = self.gross_amount - self.commission_amount
+        if self.channel.settlement_type == SettlementType.DIRECT_TO_ACCOUNT:
+            self.net_amount = self.gross_amount - self.commission_amount
+        else:
+            # Collected-at-outlet (e.g. Foodi): staff physically collect the
+            # FULL gross amount in cash — the platform doesn't withhold
+            # commission upfront the way a Direct-to-account payout does. So
+            # net_amount (what counts toward cash reconciliation) is the full
+            # gross; the commission is billed separately and auto-registered
+            # as an Expense instead — see
+            # closing.services.record_commission_expenses.
+            self.net_amount = self.gross_amount
 
     def __str__(self):
         return f"{self.product} × {self.quantity_sold} @ {self.channel}"
@@ -147,6 +157,34 @@ class DailyChannelDiscount(models.Model):
 
     class Meta:
         unique_together = ("daily_closing", "channel")
+
+
+class DailyChannelReceivable(models.Model):
+    """The channel's own reported receivable for this day, extracted from its
+    order-report import (e.g. Foodpanda's "Estimated earnings" column, summed
+    across that day's delivered orders) — reflects the platform's real fee
+    math (commission + online-payment charge + VAT, which varies by the
+    customer's payment method), unlike DailyClosingSalesLine.net_amount,
+    which is only a flat commission_rate approximation.
+
+    When present for a (closing, channel), this is what actually gets posted
+    to the channel's holding account instead of the computed net_amount sum
+    — see closing.services.record_account_transactions. Absent for channels/
+    days with no import (e.g. no file uploaded yet, or a channel without
+    report-import support), which fall back to the computed estimate."""
+
+    daily_closing = models.ForeignKey(
+        DailyClosing, on_delete=models.CASCADE, related_name="channel_receivables"
+    )
+    channel = models.ForeignKey(SalesChannel, on_delete=models.PROTECT)
+    reported_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    order_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("daily_closing", "channel")
+
+    def __str__(self):
+        return f"{self.channel} {self.daily_closing.closing_date}: {self.reported_amount}"
 
 
 class PaymentEntry(models.Model):

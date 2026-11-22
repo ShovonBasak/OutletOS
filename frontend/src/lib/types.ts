@@ -208,6 +208,10 @@ export interface SalesChannel {
   holding_account: number | null;
   holding_account_name: string | null;
   is_active: boolean;
+  /** Whether the Online sell page should offer an order-report Excel upload
+   * for this channel — server-decided (closing.excel_parser has a parser
+   * for that platform's export), not a frontend name guess. */
+  supports_excel_import: boolean;
 }
 
 export type ChannelSettlementStatus = "PENDING" | "RECEIVED" | "PARTIAL" | "DISPUTED";

@@ -46,6 +46,15 @@ class Expense(models.Model):
     entered_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     recurring = models.BooleanField(default=False)
 
+    # Set only for system-generated expenses (e.g. a Collected-at-outlet
+    # channel's commission, auto-registered on closing submit/lock — see
+    # closing.services.record_commission_expenses) so that flow can find and
+    # void/replace what it previously created on a re-submit, the same way
+    # AccountTransaction.source_type/source_id let record_account_transactions
+    # do that for ledger postings. Blank for a staff/owner-entered expense.
+    source_type = models.CharField(max_length=30, blank=True)
+    source_id = models.PositiveIntegerField(null=True, blank=True)
+
     # Soft-delete — "deleting" an expense keeps the row (and its audit trail)
     # instead of erasing it; the linked AccountTransaction is still voided so
     # it stops affecting balances/P&L. See ExpenseViewSet.perform_destroy.

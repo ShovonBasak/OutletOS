@@ -338,10 +338,12 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         Response:
           mapped      — [{product_id, product_name, quantity}]  (registered automatically)
           unresolved  — [{external_name, order_qty}]             (needs mapping setup)
+          receivable  — {amount, order_count} if the report carried the
+                         channel's own "Estimated earnings" figure, else null
           closing     — full closing object
         """
-        from rest_framework.parsers import MultiPartParser
         from .excel_parser import parse_foodpanda_excel
+        from .models import DailyChannelReceivable
 
         closing = self.get_object()
         self._guard_editable(closing)
@@ -359,7 +361,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         channel = SalesChannel.objects.get(pk=channel_id)
 
         try:
-            mapped, unresolved = parse_foodpanda_excel(file, closing.closing_date, channel)
+            mapped, unresolved, receivable = parse_foodpanda_excel(file, closing.closing_date, channel)
         except (ValueError, KeyError) as exc:
             from rest_framework.exceptions import ValidationError as DRFValidationError
             raise DRFValidationError(str(exc))
@@ -379,6 +381,15 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
             line.recompute()
             line.save()
 
+        if receivable is not None:
+            DailyChannelReceivable.objects.update_or_create(
+                daily_closing=closing, channel=channel,
+                defaults={
+                    "reported_amount": receivable["amount"],
+                    "order_count": receivable["order_count"],
+                },
+            )
+
         recompute_closing(closing)
 
         mapped_out = [
@@ -389,6 +400,10 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         return Response({
             "mapped": mapped_out,
             "unresolved": unresolved,
+            "receivable": (
+                {"amount": str(receivable["amount"]), "order_count": receivable["order_count"]}
+                if receivable is not None else None
+            ),
             "closing": self.get_serializer(fresh).data,
         })
 
@@ -504,6 +519,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         closing.save()
         self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
+        self._record_commission_expenses(closing, request.user)
         return self._fresh_response(closing)
 
     @action(detail=True, methods=["post"], permission_classes=[IsOwner])
@@ -522,6 +538,7 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
         self._close_operating_day(closing)
         self._sync_cash_payment_entry(closing)
         self._record_account_transactions(closing, request.user)
+        self._record_commission_expenses(closing, request.user)
         return self._fresh_response(closing)
 
     @staticmethod
@@ -577,6 +594,10 @@ class DailyClosingViewSet(OrgScopedQuerySetMixin, viewsets.ModelViewSet):
     @staticmethod
     def _record_account_transactions(closing, user):
         closing_services.record_account_transactions(closing, user)
+
+    @staticmethod
+    def _record_commission_expenses(closing, user):
+        closing_services.record_commission_expenses(closing, user)
 
     @staticmethod
     def _close_operating_day(closing):
