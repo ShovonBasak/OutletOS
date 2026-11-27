@@ -163,7 +163,6 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
 
         application = TenantApplication.objects.create(
             org_name=data["org_name"],
-            org_address=data["org_address"],
             owner_name=data["owner_name"],
             owner_phone=data["owner_phone"],
             password_hash=make_password(data["owner_password"]),
@@ -188,7 +187,6 @@ class TenantApplicationViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 org = Organization.objects.create(
                     name=application.org_name, slug=slugify(application.org_name),
-                    address=application.org_address,
                 )
                 seed_channels_from_template(org)
                 owner = User(

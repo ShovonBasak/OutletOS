@@ -63,7 +63,6 @@ export default function TenantApplicationsPage() {
           </div>
           <div className="qmeta">
             {app.owner_name} · {app.owner_phone} · applied {shortDate(app.submitted_at)}
-            {app.org_address && <> · {app.org_address}</>}
           </div>
           <div className="qbtns">
             <button

@@ -345,7 +345,6 @@ class TenantApplication(models.Model):
     that's the first step of the new owner's onboarding wizard."""
 
     org_name = models.CharField(max_length=120)
-    org_address = models.CharField(max_length=255, blank=True)
     owner_name = models.CharField(max_length=120)
     owner_phone = models.CharField(max_length=20)
     # Hashed once at submit time via django.contrib.auth.hashers.make_password —

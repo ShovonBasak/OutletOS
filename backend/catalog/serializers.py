@@ -42,7 +42,6 @@ class TenantApplicationSubmitSerializer(serializers.Serializer):
     never stored or returned."""
 
     org_name = serializers.CharField(max_length=120)
-    org_address = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
     owner_name = serializers.CharField(max_length=120)
     owner_phone = serializers.CharField(max_length=20)
     owner_password = serializers.CharField(write_only=True, min_length=8)
@@ -54,7 +53,7 @@ class TenantApplicationSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantApplication
         fields = [
-            "id", "org_name", "org_address", "owner_name", "owner_phone", "status",
+            "id", "org_name", "owner_name", "owner_phone", "status",
             "submitted_at", "reviewed_by", "reviewed_by_name", "reviewed_at",
             "rejection_reason", "created_organization",
         ]
